@@ -1,0 +1,17 @@
+# Localhost cluster for testing EPIC 64
+[cluster]
+name = "localhost-test"
+
+# Node 0: First worker on localhost
+[[node]]
+id = 0
+host = "127.0.0.1"
+port = 5001
+tiles = 4
+
+# Node 1: Second worker on localhost
+[[node]]
+id = 1
+host = "127.0.0.1"
+port = 5002
+tiles = 4

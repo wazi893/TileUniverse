@@ -1,0 +1,10 @@
+{
+  "name": "logic-gates-test",
+  "worlds": 3,
+  "width": 256,
+  "height": 256,
+  "ruleset": "logic",
+  "seed": 42,
+  "steps": 500,
+  "depth": 25
+}

@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  push:
+    branches: [ master, main ]
+  pull_request:
+    branches: [ master, main ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@v1
+      with:
+        toolchain: stable
+        components: rustfmt, clippy
+
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: ${{ runner.os }}-cargo-v2-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-v2-
+
+    - name: Clean build artifacts
+      run: cargo clean
+
+    - name: Check formatting
+      run: cargo fmt --all -- --check
+
+    - name: Build (release, no features)
+      run: cargo build --release --verbose
+
+    - name: Build (release, with perf-bench)
+      run: cargo build --release --verbose --features perf-bench
+
+    - name: Run tests
+      # Use release mode to avoid debug-mode memory issues
+      # Use single thread to avoid resource exhaustion causing SIGABRT
+      run: cargo test --release --verbose -- --test-threads=1
+
+    - name: Clippy
+      run: cargo clippy -- -D warnings
+      continue-on-error: true  # Don't fail CI on clippy warnings initially
+
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@v1
+      with:
+        toolchain: stable
+
+    - name: Clean build artifacts
+      run: cargo clean
+
+    - name: Build
+      run: cargo build --release --verbose
+
+    - name: Run tests
+      # Use release mode on Windows to avoid debug-mode heap corruption issues
+      run: cargo test --release --verbose

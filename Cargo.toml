@@ -1,0 +1,455 @@
+[package]
+name = "engine"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+once_cell = "1"
+rayon = "1.10"
+rustc-hash = "2.0"
+num-bigint = "0.4"
+num-traits = "0.2"
+macroquad = { version = "0.4", default-features = false, optional = true }
+egui-macroquad = { version = "0.17", optional = true }
+egui = { version = "0.28", optional = true }
+serde = { version = "1.0", features = ["derive"], optional = true }
+serde_json = { version = "1.0", optional = true }
+serde_yaml = { version = "0.9", optional = true }
+bincode = { version = "1.3", optional = true }
+toml = { version = "0.8", optional = true }
+image = { version = "0.25", optional = true }
+
+[[bin]]
+name = "logic-cli"
+path = "src/bin/cli.rs"
+
+[[bin]]
+name = "quantum-engine"
+path = "src/bin/quantum_engine.rs"
+required-features = ["cluster", "quantum_jit", "cranelift_jit"]
+
+[features]
+default = []
+debug-signals = []
+perf-bench = []
+quantum_jit = []
+# Enable serde support for distributed transport (EPIC 63 Phase 2b)
+serde = ["dep:serde", "dep:bincode"]
+# Enable cluster mode (EPIC 64)
+cluster = ["serde", "dep:toml"]
+# EPIC 76.4: Config file support (JSON/YAML scenarios)
+config = ["serde", "dep:serde_json", "dep:serde_yaml"]
+# Enable Cranelift JIT scaffolding and its deps
+cranelift_jit = [
+    "cranelift-codegen",
+    "cranelift-module",
+    "cranelift-frontend",
+    "cranelift-object",
+    "target-lexicon",
+    "cranelift-jit",
+]
+# EPIC 66: Enable CUDA GPU backend
+# EPIC 67: Also enables Tensor Core support with FP16
+cuda = ["dep:cudarc", "logic-fabric-core/cuda"]
+# EPIC 94: Enable raw CUDA FFI neural network (requires separate cuda_nn.cu compilation)
+cuda_nn_ffi = ["cuda"]
+# SPRINT 75: VQE FP8 Tensor Core acceleration (requires CUDA)
+# Enables 10-26x speedup for VQE on 20-30 qubit circuits
+vqe_fp8 = ["cuda"]
+# EPIC 82: Integration of Burn and CubeCL
+burn-compute = ["dep:burn", "dep:burn-cubecl", "dep:cubecl", "dep:cubecl-wgpu"]
+# EPIC 78: True MWPM decoder using fusion-blossom
+mwpm = ["dep:fusion-blossom"]
+# EPIC 116: Visualization with macroquad
+visualizer = ["dep:macroquad", "dep:egui-macroquad", "dep:egui"]
+# TileAnneal Phase 3: CLI tools with image support
+tileanneal-cli = ["dep:image"]
+# EPIC 120: GPU Voxel Engine (Phase 1)
+gpu-prototype = ["dep:wgpu", "dep:pollster", "dep:bytemuck", "dep:futures-intrusive"]
+# EPIC 83 Verification: Deterministic proof-mode
+proof-mode = ["perf-bench"]
+# FPGA synthesis via RustHDL (Verilog generation)
+fpga = ["dep:rust-hdl"]
+# Enable slow-running tests (large qubit counts, heavy quantum simulations)
+# Use: cargo test --features slow-tests
+slow-tests = []
+# Internal: Feature that's never enabled, used to exclude broken examples from build
+__never_enabled = []
+
+# FPGA synthesis: RustHDL compiles Rust subset → Verilog
+[dependencies.rust-hdl]
+version = "0.46"
+optional = true
+
+[dependencies.wgpu]
+version = "0.20"
+optional = true
+
+[dependencies.pollster]
+version = "0.3"
+optional = true
+
+[dependencies.bytemuck]
+version = "1.16"
+features = ["derive"]
+optional = true
+
+[dependencies.futures-intrusive]
+version = "0.5"
+optional = true
+
+[dependencies.cranelift-object]
+version = "0.104"
+optional = true
+
+[dependencies.cranelift-codegen]
+version = "0.104"
+optional = true
+
+[dependencies.cranelift-module]
+version = "0.104"
+optional = true
+
+[dependencies.cranelift-frontend]
+version = "0.104"
+optional = true
+
+[dependencies.target-lexicon]
+version = "0.12"
+optional = true
+
+[dependencies.cranelift-jit]
+version = "0.104"
+optional = true
+
+# EPIC 66: CUDA GPU backend via cudarc (Rust-native bindings)
+# Uses dynamic loading to avoid needing nvcc at build time.
+# CUDA Toolkit must be installed and libraries available at runtime.
+[dependencies.cudarc]
+version = "0.18"
+optional = true
+# Use cuda-13000 for CUDA 13.x, dynamic-loading is default (no nvcc needed at build)
+features = ["cuda-13000"]
+
+[dependencies.logic-fabric-core]
+path = "crates/logic-fabric-core"
+
+# EPIC 67: FP16 (half-precision) support for Tensor Core operations
+[dependencies.half]
+version = "2.4"
+features = ["std"]
+
+[dependencies.burn]
+version = "0.19.1"
+optional = true
+features = ["wgpu"]
+
+[dependencies.burn-cubecl]
+version = "0.19.1"
+optional = true
+
+[dependencies.cubecl]
+version = "0.8.1"
+optional = true
+
+[dependencies.cubecl-wgpu]
+version = "0.8.1"
+optional = true
+
+# EPIC 78: True MWPM decoder for QEC
+[dependencies.fusion-blossom]
+version = "0.2"
+optional = true
+
+[[bin]]
+name = "bench_engine"
+path = "src/bin/bench_engine.rs"
+
+# EPIC 116: Tile visualizers (require macroquad)
+[[example]]
+name = "tile8_visualizer"
+required-features = ["visualizer"]
+
+[[example]]
+name = "chungus2_visualizer"
+required-features = ["visualizer"]
+
+[[example]]
+name = "chungus3_visualizer"
+required-features = ["visualizer"]
+
+[[example]]
+name = "segmentation_visualizer"
+required-features = ["cuda", "visualizer"]
+
+[[example]]
+name = "segmentation_cli"
+required-features = ["cuda", "tileanneal-cli"]
+
+# Broken examples (use private APIs or missing deps) - excluded from default build
+[[example]]
+name = "kak_debug"
+required-features = ["__never_enabled"]
+
+[[example]]
+name = "gpu_benchmark"
+required-features = ["__never_enabled"]
+
+# Distributed quantum example requires quantum_jit feature
+[[example]]
+name = "phase4_distributed_quantum"
+required-features = ["quantum_jit"]
+
+# GPU examples require cuda feature
+[[example]]
+name = "w_state_gpu_max"
+required-features = ["cuda"]
+
+[[example]]
+name = "w_state_gpu_test"
+required-features = ["cuda"]
+
+[[example]]
+name = "gpu_30qubit_test"
+required-features = ["cuda"]
+
+[[example]]
+name = "sparse_vs_dense_benchmark"
+required-features = ["cuda"]
+
+[[example]]
+name = "quantum_scheduler"
+required-features = ["visualizer"]
+
+# CUDA-dependent examples (auto-gated to prevent build failures without cuda feature)
+[[example]]
+name = "gpu_sparse_benchmark"
+required-features = ["cuda"]
+
+[[example]]
+name = "packed_register_benchmark"
+required-features = ["cuda"]
+
+[[example]]
+name = "sparse_infinite_throughput"
+required-features = ["cuda"]
+
+[[example]]
+name = "snn_gpu_bench"
+required-features = ["cuda"]
+
+[[example]]
+name = "weighted_coupling_test"
+required-features = ["cuda"]
+
+[[example]]
+name = "phase3_infrastructure_test"
+required-features = ["cuda"]
+
+[[example]]
+name = "bias_terms_test"
+required-features = ["cuda"]
+
+[[example]]
+name = "gpu_stabilizer_bench"
+required-features = ["cuda"]
+
+[[example]]
+name = "fused_snn_bench"
+required-features = ["cuda"]
+
+[[example]]
+name = "determinism_test"
+required-features = ["cuda"]
+
+[[example]]
+name = "adaptive_annealing_test"
+required-features = ["cuda"]
+
+[[example]]
+name = "acceptance_tracking_test"
+required-features = ["cuda"]
+
+[[example]]
+name = "quantum_snn_100k_bench"
+required-features = ["cuda"]
+
+[[example]]
+name = "sprint22_final_benchmark"
+required-features = ["cuda"]
+
+[[example]]
+name = "proof_engine"
+required-features = ["cuda"]
+
+[[example]]
+name = "cpu_vs_gpu_comparison"
+required-features = ["cuda"]
+
+[[example]]
+name = "epic114_fp8_bench"
+required-features = ["cuda"]
+
+[[example]]
+name = "rtx5090_silicon_analysis"
+required-features = ["cuda"]
+
+[[example]]
+name = "sparse_gpu_threshold"
+required-features = ["cuda"]
+
+[[example]]
+name = "sparse_qubit_scaling"
+required-features = ["cuda"]
+
+[[example]]
+name = "rtx5090_benchmark"
+required-features = ["cuda"]
+
+[[example]]
+name = "epic81_fusion_bench"
+required-features = ["cuda"]
+
+[[example]]
+name = "blackwell_tuning"
+required-features = ["cuda"]
+
+[[example]]
+name = "epic85_throughput_summary"
+required-features = ["cuda"]
+
+[[example]]
+name = "wmma_identity_test"
+required-features = ["cuda"]
+
+[[example]]
+name = "qubit_scaling_test"
+required-features = ["cuda"]
+
+[[example]]
+name = "phase2d_test"
+required-features = ["cuda"]
+
+[[example]]
+name = "phase2c_test"
+required-features = ["cuda"]
+
+[[example]]
+name = "ncu_profile_target"
+required-features = ["cuda"]
+
+[[example]]
+name = "honest_quantum_bench"
+required-features = ["cuda"]
+
+[[example]]
+name = "fused_gates_bench"
+required-features = ["cuda"]
+
+[[example]]
+name = "final_real_bench"
+required-features = ["cuda"]
+
+[[example]]
+name = "epic96_v2_scaling_bench"
+required-features = ["cuda"]
+
+[[example]]
+name = "epic96_v2_32x32_optimized"
+required-features = ["cuda"]
+
+[[example]]
+name = "epic89_cnot_wmma_test"
+required-features = ["cuda"]
+
+[[example]]
+name = "epic89_cnot_benchmark"
+required-features = ["cuda"]
+
+[[example]]
+name = "epic88_benchmark"
+required-features = ["cuda"]
+
+[[example]]
+name = "epic87_qubit_profile"
+required-features = ["cuda"]
+
+[[example]]
+name = "epic87_high_qubit_test"
+required-features = ["cuda"]
+
+[[example]]
+name = "epic86_e2e_validation"
+required-features = ["cuda"]
+
+[[example]]
+name = "epic85_l2_cache_bench"
+required-features = ["cuda"]
+
+[[example]]
+name = "epic85_bottleneck_analysis"
+required-features = ["cuda"]
+
+[[example]]
+name = "epic83_combined_benchmark"
+required-features = ["cuda"]
+
+[[example]]
+name = "epic81_sanity"
+required-features = ["cuda"]
+
+[[example]]
+name = "epic81_general_gates"
+required-features = ["cuda"]
+
+[[example]]
+name = "epic81_fusion_verify"
+required-features = ["cuda"]
+
+[[example]]
+name = "epic81_fusion_limit"
+required-features = ["cuda"]
+
+[[example]]
+name = "epic80_verified_bench"
+required-features = ["cuda"]
+
+[[example]]
+name = "epic78_real_test"
+required-features = ["cuda"]
+
+[[example]]
+name = "epic72_parity_test"
+required-features = ["cuda"]
+
+[[example]]
+name = "epic105c_gpu_slim"
+required-features = ["cuda"]
+
+[[example]]
+name = "comprehensive_bench"
+required-features = ["cuda"]
+
+[[example]]
+name = "vqe_fp8_benchmark"
+required-features = ["vqe_fp8"]
+
+[build-dependencies]
+cc = "1.0"
+
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "sparse_scaling"
+harness = false
+
+[workspace]
+members = ["crates/logic-fabric-core", "crates/v2-viz", "crates/tileuniverse-quantum", "python"]
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+
+

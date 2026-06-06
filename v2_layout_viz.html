@@ -1,0 +1,863 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>V2 TileCpuV2 — Physical Layout Visualization</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0a0a0f;
+    color: #c8c8d0;
+    font-family: 'Consolas', 'SF Mono', 'Fira Code', monospace;
+    overflow: hidden;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  #toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 16px;
+    background: #12121a;
+    border-bottom: 1px solid #2a2a3a;
+    flex-shrink: 0;
+    z-index: 10;
+  }
+  #toolbar h1 {
+    font-size: 14px;
+    font-weight: 600;
+    color: #e0e0e8;
+    margin-right: 12px;
+  }
+  .toolbar-sep {
+    width: 1px;
+    height: 24px;
+    background: #2a2a3a;
+  }
+  .layer-btn {
+    padding: 4px 10px;
+    border: 1px solid #3a3a4a;
+    border-radius: 4px;
+    background: #1a1a24;
+    color: #888;
+    font-family: inherit;
+    font-size: 12px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .layer-btn:hover { border-color: #5a5a7a; color: #bbb; }
+  .layer-btn.active { border-color: #6a6aff; color: #aaf; background: #1a1a30; }
+  #zoom-info {
+    margin-left: auto;
+    font-size: 11px;
+    color: #666;
+  }
+  #help-text {
+    font-size: 11px;
+    color: #555;
+  }
+
+  #main-container {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+    position: relative;
+  }
+
+  canvas {
+    flex: 1;
+    cursor: grab;
+  }
+  canvas:active { cursor: grabbing; }
+
+  #tooltip {
+    position: absolute;
+    pointer-events: none;
+    background: #1a1a28;
+    border: 1px solid #4a4a6a;
+    border-radius: 6px;
+    padding: 8px 12px;
+    font-size: 12px;
+    line-height: 1.5;
+    max-width: 320px;
+    display: none;
+    z-index: 100;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+  }
+  #tooltip .tt-title {
+    color: #aaf;
+    font-weight: 600;
+    font-size: 13px;
+    margin-bottom: 4px;
+  }
+  #tooltip .tt-coord {
+    color: #666;
+    font-size: 11px;
+  }
+  #tooltip .tt-desc {
+    color: #aaa;
+    margin-top: 4px;
+  }
+
+  #sidebar {
+    width: 260px;
+    background: #12121a;
+    border-left: 1px solid #2a2a3a;
+    padding: 12px;
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+  #sidebar h2 {
+    font-size: 12px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    margin-bottom: 10px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+    font-size: 12px;
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity 0.15s;
+  }
+  .legend-item:hover { opacity: 1; }
+  .legend-swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+    flex-shrink: 0;
+  }
+  .legend-label { color: #aaa; }
+  #sidebar hr {
+    border: none;
+    border-top: 1px solid #2a2a3a;
+    margin: 10px 0;
+  }
+  .stats-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 11px;
+    padding: 2px 0;
+  }
+  .stats-label { color: #666; }
+  .stats-value { color: #aaf; }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <h1>V2 TileCpuV2 Layout</h1>
+  <div class="toolbar-sep"></div>
+  <button class="layer-btn active" data-layer="0">L0 Exec</button>
+  <button class="layer-btn" data-layer="1">L1 Route</button>
+  <button class="layer-btn" data-layer="2">L2 Synth</button>
+  <button class="layer-btn" data-layer="3">L3 Imm</button>
+  <button class="layer-btn" data-layer="annex">Annex</button>
+  <button class="layer-btn" data-layer="overview">Overview</button>
+  <div class="toolbar-sep"></div>
+  <span id="help-text">Scroll to zoom · Drag to pan · Hover for details</span>
+  <span id="zoom-info">100%</span>
+</div>
+
+<div id="main-container">
+  <canvas id="canvas"></canvas>
+  <div id="tooltip">
+    <div class="tt-title"></div>
+    <div class="tt-coord"></div>
+    <div class="tt-desc"></div>
+  </div>
+  <div id="sidebar">
+    <h2>Components</h2>
+    <div id="legend"></div>
+    <hr>
+    <h2>Grid Stats</h2>
+    <div class="stats-row"><span class="stats-label">Grid</span><span class="stats-value">128 × 640 × 16</span></div>
+    <div class="stats-row"><span class="stats-label">ROM</span><span class="stats-value">128 entries</span></div>
+    <div class="stats-row"><span class="stats-label">RAM</span><span class="stats-value">128 cells</span></div>
+    <div class="stats-row"><span class="stats-label">Registers</span><span class="stats-value">16 × 64-bit</span></div>
+    <div class="stats-row"><span class="stats-label">ALU Ops</span><span class="stats-value">8 parallel</span></div>
+    <div class="stats-row"><span class="stats-label">MMIO</span><span class="stats-value">23 addresses</span></div>
+    <div class="stats-row"><span class="stats-label">Authority</span><span class="stats-value">~99.8%</span></div>
+    <hr>
+    <h2>Pipeline Stages</h2>
+    <div class="stats-row"><span class="stats-label">Stage F</span><span class="stats-value">Fetch (ROM)</span></div>
+    <div class="stats-row"><span class="stats-label">Stage D</span><span class="stats-value">Decode (ctrl)</span></div>
+    <div class="stats-row"><span class="stats-label">Stage R</span><span class="stats-value">Reg Read</span></div>
+    <div class="stats-row"><span class="stats-label">Stage X</span><span class="stats-value">Execute (ALU)</span></div>
+    <div class="stats-row"><span class="stats-label">Stage W</span><span class="stats-value">Writeback</span></div>
+    <div class="stats-row"><span class="stats-label">Stage M</span><span class="stats-value">Memory</span></div>
+    <hr>
+    <h2>Layers</h2>
+    <div class="stats-row"><span class="stats-label">z=0</span><span class="stats-value">Execution</span></div>
+    <div class="stats-row"><span class="stats-label">z=1</span><span class="stats-value">Primary routing</span></div>
+    <div class="stats-row"><span class="stats-label">z=2-3</span><span class="stats-value">Synth/secondary</span></div>
+    <div class="stats-row"><span class="stats-label">z=4-13</span><span class="stats-value">Annex (bitops)</span></div>
+    <div class="stats-row"><span class="stats-label">z=14-15</span><span class="stats-value">IR spine</span></div>
+  </div>
+</div>
+
+<script>
+// ─── Data Model ───────────────────────────────────────────────────────
+
+const GRID_W = 128, GRID_H = 100; // show the interesting first 100 rows
+
+const COLORS = {
+  pc:         '#4488ff',
+  rom:        '#44bb88',
+  decoder:    '#cc66aa',
+  registers:  '#ff8844',
+  operand:    '#aa88dd',
+  alu:        '#ff4466',
+  flags:      '#ffcc44',
+  ram:        '#44cccc',
+  writeback:  '#88aa44',
+  guard:      '#333340',
+  synth:      '#6644cc',
+  routing:    '#2a3a4a',
+  mux:        '#888844',
+  branch:     '#dd8844',
+  ir_spine:   '#3a5a4a',
+};
+
+// Components: { name, x, y, w, h, color, layer, desc }
+const components = [
+  // ─── PC Region ───
+  { name: 'PC Register', x: 3, y: 1, w: 1, h: 1, color: COLORS.pc, layer: 0,
+    desc: 'Register8 — 7-bit program counter. Drives ROM bank selection.' },
+  { name: 'PC Ingress', x: 2, y: 1, w: 1, h: 1, color: COLORS.pc, layer: 0,
+    desc: 'ViaUp — PC value ingress from L1 routing.' },
+  { name: 'PC+1 Adder', x: 4, y: 1, w: 2, h: 1, color: COLORS.pc, layer: 0,
+    desc: 'Add + Const(1) — Increments PC for sequential fetch.' },
+  { name: 'PC Next Mux', x: 2, y: 1, w: 1, h: 1, color: COLORS.pc, layer: 1,
+    desc: 'L1 Mux — Selects between PC+1 (sequential) and branch target.' },
+  { name: 'PC Mask Via', x: 3, y: 1, w: 1, h: 1, color: COLORS.pc, layer: 1,
+    desc: 'WeightedViaUp — 7-bit PC mask (Sprint 187, ROM 128).' },
+  { name: 'PC Bus', x: 3, y: 3, w: 90, h: 1, color: COLORS.routing, layer: 0,
+    desc: 'Horizontal PC distribution — delivers PC[0:6] to all ROM bank selectors.' },
+
+  // ─── ROM Fetch (Stage F) ───
+  { name: 'ROM Bank 0', x: 1, y: 2, w: 18, h: 1, color: COLORS.rom, layer: 0,
+    desc: 'Mux16to1 ×4 — Low/High/Byte2/Byte3 lanes. 16 ROM entries per bank.' },
+  { name: 'ROM Bank 1', x: 22, y: 2, w: 12, h: 1, color: COLORS.rom, layer: 0,
+    desc: 'Bank 1 — ROM entries 16-31. 4-lane Mux16to1.' },
+  { name: 'ROM Bank 2', x: 34, y: 2, w: 12, h: 1, color: COLORS.rom, layer: 0,
+    desc: 'Bank 2 — ROM entries 32-47. 4-lane Mux16to1.' },
+  { name: 'ROM Bank 3', x: 46, y: 2, w: 12, h: 1, color: COLORS.rom, layer: 0,
+    desc: 'Bank 3 — ROM entries 48-63. 4-lane Mux16to1.' },
+  { name: 'ROM Bank 4', x: 58, y: 2, w: 12, h: 1, color: COLORS.rom, layer: 0,
+    desc: 'Bank 4 — ROM entries 64-79. 4-lane Mux16to1.' },
+  { name: 'ROM Bank 5', x: 70, y: 2, w: 12, h: 1, color: COLORS.rom, layer: 0,
+    desc: 'Bank 5 — ROM entries 80-95. 4-lane Mux16to1.' },
+  { name: 'ROM Bank 6', x: 82, y: 2, w: 12, h: 1, color: COLORS.rom, layer: 0,
+    desc: 'Bank 6 — ROM entries 96-111. 4-lane Mux16to1.' },
+  { name: 'ROM Bank 7', x: 94, y: 2, w: 12, h: 1, color: COLORS.rom, layer: 0,
+    desc: 'Bank 7 — ROM entries 112-127. 4-lane Mux16to1.' },
+  { name: 'Super Mux', x: 83, y: 4, w: 10, h: 2, color: COLORS.mux, layer: 0,
+    desc: 'Sprint 211 — 4th selector level. PC[6] selects between lower/upper 64-entry banks. Eliminated rom_upper_bank_group_select assist.' },
+  { name: 'ROM Mux Tree', x: 60, y: 5, w: 20, h: 2, color: COLORS.mux, layer: 0,
+    desc: 'L1/L2/Final mux hierarchy — 3-level tree selects 1 of 8 banks via PC[4:6].' },
+
+  // ─── Decode (Stage D) ───
+  { name: 'ctrl_a LUT', x: 20, y: 7, w: 6, h: 1, color: COLORS.decoder, layer: 0,
+    desc: '2× Mux16to1 + merge — Write-enable/flag-WE decode. Authoritative (Sprint 205).' },
+  { name: 'ctrl_b LUT', x: 30, y: 7, w: 6, h: 1, color: COLORS.decoder, layer: 0,
+    desc: '2× Mux16to1 + merge — Register select/branch control decode.' },
+  { name: 'rd Decoder', x: 24, y: 9, w: 4, h: 1, color: COLORS.decoder, layer: 0,
+    desc: 'Decoder3to8 — rd field → one-hot register select for writeback.' },
+  { name: 'RAM Decoder', x: 30, y: 9, w: 4, h: 1, color: COLORS.decoder, layer: 0,
+    desc: 'Decoder3to8 — Reuses decoder3to8 AIG for RAM cell select.' },
+
+  // ─── Writeback / WE Path ───
+  { name: 'WE Mask', x: 25, y: 10, w: 2, h: 1, color: COLORS.writeback, layer: 0,
+    desc: 'Const injection — Guards register write-enable. Gated by ctrl_a.' },
+  { name: 'Flag WE Via', x: 36, y: 10, w: 2, h: 1, color: COLORS.writeback, layer: 0,
+    desc: 'WeightedViaUp(shift=4, mask=0x03) — Computational via for flag WE. First live computational via (Sprint 206).' },
+  { name: 'WB ALU Root', x: 38, y: 10, w: 4, h: 1, color: COLORS.writeback, layer: 0,
+    desc: '8:1 result mux — Selects ALU output from Add/Sub/And/Or/Xor/Not/Shl/Shr.' },
+  { name: 'WB Data Mux', x: 42, y: 10, w: 4, h: 1, color: COLORS.writeback, layer: 0,
+    desc: 'Final writeback source — Selects between ALU result, immediate, memory load.' },
+
+  // ─── Registers ───
+  { name: 'R0-R3', x: 24, y: 12, w: 4, h: 4, color: COLORS.registers, layer: 0,
+    desc: 'Register64 ×4 — Column A. Low bank, first group. Physical tiles with clock capture.' },
+  { name: 'R4-R7', x: 28, y: 12, w: 4, h: 4, color: COLORS.registers, layer: 0,
+    desc: 'Register64 ×4 — Column B. Low bank, second group.' },
+  { name: 'R8-R11', x: 45, y: 12, w: 4, h: 4, color: COLORS.registers, layer: 0,
+    desc: 'Register64 ×4 — Column C. High bank, first group.' },
+  { name: 'R12-R15', x: 49, y: 12, w: 4, h: 4, color: COLORS.registers, layer: 0,
+    desc: 'Register64 ×4 — Column D. High bank, second group.' },
+
+  // ─── Branch ───
+  { name: 'Branch Logic', x: 16, y: 15, w: 6, h: 2, color: COLORS.branch, layer: 0,
+    desc: 'Branch control — reads ctrl_b[6:7], evaluates branch condition against flags. Synth AIG block available.' },
+  { name: 'Link Register', x: 21, y: 15, w: 3, h: 1, color: COLORS.branch, layer: 0,
+    desc: 'LR — Stores return address for CALL/RET instructions.' },
+
+  // ─── Operand Trees (Stage R) ───
+  { name: 'Operand Tree A\n(rd → R0-R7)', x: 20, y: 24, w: 15, h: 9, color: COLORS.operand, layer: 0,
+    desc: '8:1 binary mux tree — Selects rd operand from R0-R7. Root at (27,32). 15×9 tile grid.' },
+  { name: 'Operand Tree B\n(rs → R0-R7)', x: 40, y: 24, w: 15, h: 9, color: COLORS.operand, layer: 0,
+    desc: '8:1 binary mux tree — Selects rs operand. Bank-swapped mapping from R0-R7.' },
+
+  // Top muxes for high bank
+  { name: 'Top Mux A', x: 27, y: 35, w: 3, h: 1, color: COLORS.operand, layer: 0,
+    desc: 'rd_hi selector — Selects between low tree A (R0-R7) and high tree A (R8-R15).' },
+  { name: 'Top Mux B', x: 47, y: 35, w: 3, h: 1, color: COLORS.operand, layer: 0,
+    desc: 'rs_hi selector — Selects between low tree B and high tree B (R8-R15).' },
+
+  // ─── ALU (Stage X) ───
+  { name: 'ADD', x: 18, y: 39, w: 3, h: 2, color: COLORS.alu, layer: 0,
+    desc: 'Addition — Carry out feeds Flag C. Physical authority (Sprint 219).' },
+  { name: 'SUB', x: 22, y: 39, w: 3, h: 2, color: COLORS.alu, layer: 0,
+    desc: 'Subtraction — Borrow flag. Physical authority.' },
+  { name: 'AND', x: 26, y: 39, w: 3, h: 2, color: COLORS.alu, layer: 0,
+    desc: 'Bitwise AND — Physical authority.' },
+  { name: 'OR',  x: 30, y: 39, w: 3, h: 2, color: COLORS.alu, layer: 0,
+    desc: 'Bitwise OR — Physical authority.' },
+  { name: 'XOR', x: 34, y: 39, w: 3, h: 2, color: COLORS.alu, layer: 0,
+    desc: 'Bitwise XOR — Physical authority.' },
+  { name: 'NOT', x: 38, y: 39, w: 3, h: 2, color: COLORS.alu, layer: 0,
+    desc: 'Bitwise NOT — Sub-fn: CLZ/CTZ/POPCNT (imm5). Physical authority.' },
+  { name: 'SHL', x: 42, y: 39, w: 3, h: 2, color: COLORS.alu, layer: 0,
+    desc: 'Shift Left — Physical authority.' },
+  { name: 'SHR', x: 46, y: 39, w: 3, h: 2, color: COLORS.alu, layer: 0,
+    desc: 'Shift Right — Sub-fn: SRA (bit 3). Physical authority.' },
+
+  // ALU input muxes
+  { name: 'L Muxes', x: 16, y: 38, w: 34, h: 1, color: COLORS.mux, layer: 0,
+    desc: 'Left operand muxes — 2 columns west of each ALU op. Select operand A source.' },
+  { name: 'R Muxes', x: 16, y: 42, w: 34, h: 1, color: COLORS.mux, layer: 0,
+    desc: 'Right operand muxes — 1 column east of each ALU op. Select operand B source.' },
+
+  // ─── Flags ───
+  { name: 'Flag Z', x: 20, y: 48, w: 3, h: 2, color: COLORS.flags, layer: 0,
+    desc: 'Zero flag — Register8. Physical authority (Sprint 221). Un-elided from clock cache.' },
+  { name: 'Flag C', x: 24, y: 48, w: 3, h: 2, color: COLORS.flags, layer: 0,
+    desc: 'Carry flag — Register8. Physical authority (Sprint 221). Un-elided from clock cache.' },
+  { name: 'Flag Fanout', x: 16, y: 50, w: 22, h: 1, color: COLORS.routing, layer: 0,
+    desc: 'Flag row fanout — Distributes Z/C to branch logic and conditional move.' },
+
+  // ─── RAM (Stage M) ───
+  { name: 'RAM Bank 0\n(cells 0-7)', x: 70, y: 54, w: 16, h: 1, color: COLORS.ram, layer: 0,
+    desc: 'RAM cells 0-7 — Physical tiles. Bank-0 mirror injection guards against stale WE.' },
+  { name: 'RAM Banks 1-7\n(cells 8-63)', x: 70, y: 56, w: 28, h: 7, color: COLORS.ram, layer: 0,
+    desc: 'RAM cells 8-63 — 7 banks × 8 cells. Hybrid bank swap (save/overwrite/propagate/restore).' },
+  { name: 'RAM Banks 8-15\n(cells 64-127)', x: 100, y: 56, w: 26, h: 8, color: COLORS.ram, layer: 0,
+    desc: 'RAM cells 64-127 — Upper banks. Extended in Sprint 189 (7-bit addr).' },
+  { name: 'RAM Addr Mux', x: 86, y: 53, w: 6, h: 1, color: COLORS.mux, layer: 0,
+    desc: 'RAM read address mux — Selects cell for load operations.' },
+
+  // ─── Guard Region ───
+  { name: 'Guard Region', x: 0, y: 64, w: 128, h: 6, color: COLORS.guard, layer: 0,
+    desc: 'Const(0) guard rows — Prevents signal leakage between CPU core and synth zone. All tiles set to Const(0).' },
+
+  // ─── Synth Blocks ───
+  { name: 'Branch Synth\n(AIG)', x: 4, y: 72, w: 24, h: 6, color: COLORS.synth, layer: 0,
+    desc: 'AIG-backed branch-taken logic — 4-input AND. Replaces 5 physical tiles with 1 AIG block. Sprint 199.' },
+  { name: 'RD Decode Synth\n(3→8 AIG)', x: 32, y: 72, w: 24, h: 6, color: COLORS.synth, layer: 0,
+    desc: 'Decoder3to8 AIG — 3-input → 8-output one-hot decoder. AIG-direct cached. Sprint 199.' },
+  { name: 'RAM Decode Synth\n(3→8 AIG)', x: 60, y: 72, w: 24, h: 6, color: COLORS.synth, layer: 0,
+    desc: 'RAM Decoder3to8 — Reuses decoder3to8 AIG. Sprint 201.' },
+  { name: 'ctrl_b Synth\n(5→8 AIG)', x: 88, y: 72, w: 24, h: 6, color: COLORS.synth, layer: 0,
+    desc: 'Compact 5→8 AIG — ~36 AND nodes via shared sub-expressions. Sprint 201.' },
+  { name: 'ctrl_a Synth\n(5→8 AIG)', x: 4, y: 80, w: 24, h: 6, color: COLORS.synth, layer: 0,
+    desc: '5→8 AIG — ~89 AND nodes, halo=8. ctrl_a authoritative (Sprint 205).' },
+  { name: 'SRA Synth\n(AIG)', x: 32, y: 80, w: 24, h: 6, color: COLORS.synth, layer: 0,
+    desc: 'SRA sign-extension AIG — 4-input. Sprint 248.' },
+
+  // ─── L1 Routing corridors ───
+  { name: 'WB-Data Corridor', x: 15, y: 9, w: 32, h: 2, color: COLORS.routing, layer: 1,
+    desc: 'L1 — Writeback data horizontal routing. Guard region prevents Wire leakage.' },
+  { name: 'Bank A Vertical', x: 24, y: 10, w: 2, h: 14, color: COLORS.routing, layer: 1,
+    desc: 'L1 — Vertical routing corridor for low bank registers (R0-R3).' },
+  { name: 'Bank B Vertical', x: 44, y: 10, w: 2, h: 14, color: COLORS.routing, layer: 1,
+    desc: 'L1 — Vertical routing corridor for low bank registers (R4-R7).' },
+  { name: 'Flag WB Vertical', x: 36, y: 10, w: 2, h: 41, color: COLORS.routing, layer: 1,
+    desc: 'L1 — Flag writeback vertical corridor. Crosses from ALU to flag registers.' },
+  { name: 'PC Distribution', x: 3, y: 3, w: 90, h: 1, color: COLORS.pc, layer: 1,
+    desc: 'L1 — PC value distribution bus to all ROM bank selectors.' },
+  { name: 'IR Delivery', x: 10, y: 5, w: 50, h: 2, color: COLORS.routing, layer: 1,
+    desc: 'L1 — Instruction register delivery corridors to decoder LUTs.' },
+  { name: 'Operand Routes', x: 20, y: 16, w: 35, h: 7, color: COLORS.routing, layer: 1,
+    desc: 'L1 — Register read data paths to operand tree inputs.' },
+
+  // ─── L2 ───
+  { name: 'IR Corridor L2', x: 10, y: 5, w: 70, h: 3, color: COLORS.routing, layer: 2,
+    desc: 'L2 — IR delivery corridors. Secondary routing for congested L1 areas.' },
+  { name: 'Synth Zone Base', x: 0, y: 70, w: 128, h: 20, color: COLORS.synth, layer: 2,
+    desc: 'L2 — Synth block placement base layer. AIG blocks occupy L2/L3.' },
+
+  // ─── L3 ───
+  { name: 'Imm Low Delivery', x: 10, y: 8, w: 40, h: 2, color: COLORS.routing, layer: 3,
+    desc: 'L3 — ir_low immediate value delivery. Cross-layer from IR spine.' },
+  { name: 'Imm High Delivery', x: 10, y: 10, w: 40, h: 2, color: COLORS.routing, layer: 3,
+    desc: 'L3 — ir_high immediate value delivery.' },
+
+  // ─── Annex ───
+  { name: 'CLZ Byte 0-3\n(z=2-3)', x: 10, y: 20, w: 50, h: 10, color: '#3a5566', layer: 'annex',
+    desc: 'Annex z=2-3 — CLZ byte blocks 0-3. Hierarchical count-leading-zeros computation.' },
+  { name: 'CLZ Byte 4-7\n(z=4-5)', x: 10, y: 32, w: 50, h: 10, color: '#3a5566', layer: 'annex',
+    desc: 'Annex z=4-5 — CLZ byte blocks 4-7.' },
+  { name: 'CLZ Combine\n(z=6-7)', x: 65, y: 20, w: 40, h: 10, color: '#4a6676', layer: 'annex',
+    desc: 'Annex z=6-7 — CLZ half-combine + final combine. Merges byte results.' },
+  { name: 'POPCNT Byte 0-3\n(z=8-9)', x: 10, y: 50, w: 50, h: 10, color: '#3a5555', layer: 'annex',
+    desc: 'Annex z=8-9 — POPCNT byte blocks 0-3. Population count computation.' },
+  { name: 'POPCNT Byte 4-7\n(z=10-11)', x: 10, y: 62, w: 50, h: 10, color: '#3a5555', layer: 'annex',
+    desc: 'Annex z=10-11 — POPCNT byte blocks 4-7.' },
+  { name: 'POPCNT Combine\n(z=12-13)', x: 65, y: 50, w: 40, h: 10, color: '#4a6666', layer: 'annex',
+    desc: 'Annex z=12-13 — POPCNT half-combine + final combine.' },
+];
+
+// Data flow connections (from → to)
+const connections = [
+  // Fetch pipeline
+  { from: 'PC Register', to: 'PC Bus', color: COLORS.pc, layer: 0 },
+  { from: 'PC Bus', to: 'ROM Bank 0', color: COLORS.pc, layer: 0 },
+  { from: 'ROM Bank 0', to: 'ROM Mux Tree', color: COLORS.rom, layer: 0 },
+  { from: 'ROM Mux Tree', to: 'Super Mux', color: COLORS.rom, layer: 0 },
+
+  // Decode
+  { from: 'Super Mux', to: 'ctrl_a LUT', color: COLORS.decoder, layer: 0 },
+  { from: 'Super Mux', to: 'ctrl_b LUT', color: COLORS.decoder, layer: 0 },
+  { from: 'ctrl_a LUT', to: 'rd Decoder', color: COLORS.decoder, layer: 0 },
+  { from: 'ctrl_a LUT', to: 'WE Mask', color: COLORS.writeback, layer: 0 },
+
+  // Operand fetch
+  { from: 'R0-R3', to: 'Operand Tree A\n(rd → R0-R7)', color: COLORS.registers, layer: 0 },
+  { from: 'R4-R7', to: 'Operand Tree B\n(rs → R0-R7)', color: COLORS.registers, layer: 0 },
+
+  // ALU
+  { from: 'Operand Tree A\n(rd → R0-R7)', to: 'ADD', color: COLORS.operand, layer: 0 },
+  { from: 'Operand Tree B\n(rs → R0-R7)', to: 'ADD', color: COLORS.operand, layer: 0 },
+  { from: 'ADD', to: 'WB ALU Root', color: COLORS.alu, layer: 0 },
+  { from: 'WB ALU Root', to: 'WB Data Mux', color: COLORS.writeback, layer: 0 },
+
+  // Writeback
+  { from: 'WB Data Mux', to: 'R0-R3', color: COLORS.writeback, layer: 0 },
+  { from: 'ADD', to: 'Flag C', color: COLORS.flags, layer: 0 },
+
+  // Memory
+  { from: 'R0-R3', to: 'RAM Bank 0\n(cells 0-7)', color: COLORS.ram, layer: 0 },
+];
+
+// ─── Rendering ────────────────────────────────────────────────────────
+
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+const tooltip = document.getElementById('tooltip');
+
+let viewX = 0, viewY = 0, zoom = 1;
+let isDragging = false, dragStartX = 0, dragStartY = 0;
+let activeLayer = 0; // 0-3, 'annex', 'overview'
+let hoveredComponent = null;
+let dpr = window.devicePixelRatio || 1;
+
+function resizeCanvas() {
+  const rect = canvas.parentElement.getBoundingClientRect();
+  const w = rect.width - 260; // sidebar
+  canvas.width = w * dpr;
+  canvas.height = rect.height * dpr;
+  canvas.style.width = w + 'px';
+  canvas.style.height = rect.height + 'px';
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function tileToScreen(tx, ty) {
+  const TILE_SIZE = 8;
+  return {
+    x: (tx * TILE_SIZE - viewX) * zoom + canvas.clientWidth / 2,
+    y: (ty * TILE_SIZE - viewY) * zoom + canvas.clientHeight / 2,
+  };
+}
+
+function screenToTile(sx, sy) {
+  const TILE_SIZE = 8;
+  return {
+    x: ((sx - canvas.clientWidth / 2) / zoom + viewX) / TILE_SIZE,
+    y: ((sy - canvas.clientHeight / 2) / zoom + viewY) / TILE_SIZE,
+  };
+}
+
+function drawGrid() {
+  const TILE_SIZE = 8;
+  const tl = screenToTile(0, 0);
+  const br = screenToTile(canvas.clientWidth, canvas.clientHeight);
+
+  // Background
+  ctx.fillStyle = '#0a0a0f';
+  ctx.fillRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+
+  // Grid boundary
+  const origin = tileToScreen(0, 0);
+  const extent = tileToScreen(GRID_W, GRID_H);
+  ctx.strokeStyle = '#1a1a2a';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(origin.x, origin.y, extent.x - origin.x, extent.y - origin.y);
+
+  // Grid lines (only when zoomed in enough)
+  if (zoom > 1.5) {
+    ctx.strokeStyle = '#111118';
+    ctx.lineWidth = 0.5;
+    const startX = Math.max(0, Math.floor(tl.x));
+    const endX = Math.min(GRID_W, Math.ceil(br.x));
+    const startY = Math.max(0, Math.floor(tl.y));
+    const endY = Math.min(GRID_H, Math.ceil(br.y));
+
+    for (let x = startX; x <= endX; x++) {
+      const sx = tileToScreen(x, 0).x;
+      ctx.beginPath();
+      ctx.moveTo(sx, origin.y);
+      ctx.lineTo(sx, extent.y);
+      ctx.stroke();
+    }
+    for (let y = startY; y <= endY; y++) {
+      const sy = tileToScreen(0, y).y;
+      ctx.beginPath();
+      ctx.moveTo(origin.x, sy);
+      ctx.lineTo(extent.x, sy);
+      ctx.stroke();
+    }
+  }
+}
+
+function hexToRgba(hex, alpha) {
+  const r = parseInt(hex.slice(1,3), 16);
+  const g = parseInt(hex.slice(3,5), 16);
+  const b = parseInt(hex.slice(5,7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function drawComponents() {
+  const TILE_SIZE = 8;
+  const visibleComponents = components.filter(c => {
+    if (activeLayer === 'overview') return c.layer === 0 || c.layer === 'annex';
+    return c.layer === activeLayer;
+  });
+
+  // Sort: draw larger components first (background), smaller on top
+  visibleComponents.sort((a, b) => (b.w * b.h) - (a.w * a.h));
+
+  for (const comp of visibleComponents) {
+    const p = tileToScreen(comp.x, comp.y);
+    const sz = { x: comp.w * TILE_SIZE * zoom, y: comp.h * TILE_SIZE * zoom };
+
+    const isHovered = hoveredComponent === comp;
+    const alpha = isHovered ? 0.55 : 0.3;
+    const borderAlpha = isHovered ? 0.9 : 0.5;
+
+    // Fill
+    ctx.fillStyle = hexToRgba(comp.color, alpha);
+    ctx.fillRect(p.x, p.y, sz.x, sz.y);
+
+    // Border
+    ctx.strokeStyle = hexToRgba(comp.color, borderAlpha);
+    ctx.lineWidth = isHovered ? 2 : 1;
+    ctx.strokeRect(p.x, p.y, sz.x, sz.y);
+
+    // Glow on hover
+    if (isHovered) {
+      ctx.shadowColor = comp.color;
+      ctx.shadowBlur = 12;
+      ctx.strokeRect(p.x, p.y, sz.x, sz.y);
+      ctx.shadowBlur = 0;
+    }
+
+    // Label
+    const minPx = Math.min(sz.x, sz.y);
+    if (minPx > 20) {
+      const fontSize = Math.max(7, Math.min(12, minPx / 4));
+      ctx.font = `${fontSize}px Consolas, monospace`;
+      ctx.fillStyle = hexToRgba('#ffffff', isHovered ? 0.95 : 0.75);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      const lines = comp.name.split('\n');
+      const lineHeight = fontSize + 2;
+      const startY = p.y + sz.y / 2 - (lines.length - 1) * lineHeight / 2;
+      for (let i = 0; i < lines.length; i++) {
+        ctx.fillText(lines[i], p.x + sz.x / 2, startY + i * lineHeight);
+      }
+    }
+  }
+}
+
+function drawConnections() {
+  if (activeLayer !== 0 && activeLayer !== 'overview') return;
+
+  const compMap = {};
+  for (const c of components) compMap[c.name] = c;
+  const TILE_SIZE = 8;
+
+  for (const conn of connections) {
+    const from = compMap[conn.from];
+    const to = compMap[conn.to];
+    if (!from || !to) continue;
+
+    const fx = tileToScreen(from.x + from.w / 2, from.y + from.h / 2);
+    const tx = tileToScreen(to.x + to.w / 2, to.y + to.h / 2);
+
+    ctx.strokeStyle = hexToRgba(conn.color || '#444', 0.25);
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(fx.x, fx.y);
+
+    // Route: horizontal then vertical
+    ctx.lineTo(tx.x, fx.y);
+    ctx.lineTo(tx.x, tx.y);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Arrowhead
+    const angle = Math.atan2(tx.y - fx.y, 0);
+    const arrowSize = 4;
+    ctx.fillStyle = hexToRgba(conn.color || '#444', 0.4);
+    ctx.beginPath();
+    ctx.moveTo(tx.x, tx.y);
+    ctx.lineTo(tx.x - arrowSize, tx.y - arrowSize * Math.sign(tx.y - fx.y));
+    ctx.lineTo(tx.x + arrowSize, tx.y - arrowSize * Math.sign(tx.y - fx.y));
+    ctx.fill();
+  }
+}
+
+function drawPipelineLabels() {
+  if (activeLayer !== 0 && activeLayer !== 'overview') return;
+
+  const stages = [
+    { label: 'FETCH', y: 2, color: COLORS.rom },
+    { label: 'DECODE', y: 7, color: COLORS.decoder },
+    { label: 'WRITEBACK', y: 10, color: COLORS.writeback },
+    { label: 'REG READ', y: 18, color: COLORS.registers },
+    { label: 'OPERANDS', y: 28, color: COLORS.operand },
+    { label: 'EXECUTE', y: 39, color: COLORS.alu },
+    { label: 'FLAGS', y: 48, color: COLORS.flags },
+    { label: 'MEMORY', y: 55, color: COLORS.ram },
+    { label: 'GUARD', y: 66, color: COLORS.guard },
+    { label: 'SYNTH', y: 75, color: COLORS.synth },
+  ];
+
+  const TILE_SIZE = 8;
+  for (const s of stages) {
+    const p = tileToScreen(-1, s.y);
+    const fontSize = Math.max(7, Math.min(10, 10 * zoom));
+    if (fontSize < 5) continue;
+
+    ctx.save();
+    ctx.translate(p.x - 4, p.y);
+    ctx.rotate(-Math.PI / 2);
+    ctx.font = `bold ${fontSize}px Consolas, monospace`;
+    ctx.fillStyle = hexToRgba(s.color, 0.5);
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(s.label, 0, 0);
+    ctx.restore();
+  }
+}
+
+function drawYAxis() {
+  const TILE_SIZE = 8;
+  const fontSize = Math.max(6, Math.min(9, 9 * zoom));
+  if (fontSize < 4) return;
+
+  ctx.font = `${fontSize}px Consolas, monospace`;
+  ctx.fillStyle = '#333';
+  ctx.textAlign = 'right';
+  ctx.textBaseline = 'middle';
+
+  const step = zoom > 2 ? 1 : zoom > 0.8 ? 5 : 10;
+  for (let y = 0; y <= GRID_H; y += step) {
+    const p = tileToScreen(-2, y);
+    if (p.y > 0 && p.y < canvas.clientHeight) {
+      ctx.fillText(y.toString(), p.x, p.y);
+    }
+  }
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  const stepX = zoom > 2 ? 5 : zoom > 0.8 ? 10 : 20;
+  for (let x = 0; x <= GRID_W; x += stepX) {
+    const p = tileToScreen(x, -1);
+    if (p.x > 0 && p.x < canvas.clientWidth) {
+      ctx.fillText(x.toString(), p.x, p.y);
+    }
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.clientWidth, canvas.clientHeight);
+  drawGrid();
+  drawConnections();
+  drawComponents();
+  drawPipelineLabels();
+  drawYAxis();
+
+  // Layer indicator
+  const layerNames = { 0: 'L0: Execution', 1: 'L1: Routing', 2: 'L2: Synth', 3: 'L3: Immediates', annex: 'Annex (z=4-13)', overview: 'Overview' };
+  ctx.font = 'bold 12px Consolas, monospace';
+  ctx.fillStyle = '#444';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText(layerNames[activeLayer] || '', 12, 12);
+
+  document.getElementById('zoom-info').textContent = Math.round(zoom * 100) + '%';
+}
+
+// ─── Interaction ──────────────────────────────────────────────────────
+
+function hitTest(sx, sy) {
+  const tile = screenToTile(sx, sy);
+  const visibleComponents = components.filter(c => {
+    if (activeLayer === 'overview') return c.layer === 0 || c.layer === 'annex';
+    return c.layer === activeLayer;
+  });
+
+  // Smallest component first (most specific)
+  visibleComponents.sort((a, b) => (a.w * a.h) - (b.w * b.h));
+
+  for (const comp of visibleComponents) {
+    if (tile.x >= comp.x && tile.x < comp.x + comp.w &&
+        tile.y >= comp.y && tile.y < comp.y + comp.h) {
+      return comp;
+    }
+  }
+  return null;
+}
+
+canvas.addEventListener('mousedown', (e) => {
+  isDragging = true;
+  dragStartX = e.clientX;
+  dragStartY = e.clientY;
+});
+
+canvas.addEventListener('mousemove', (e) => {
+  if (isDragging) {
+    const dx = e.clientX - dragStartX;
+    const dy = e.clientY - dragStartY;
+    viewX -= dx / zoom;
+    viewY -= dy / zoom;
+    dragStartX = e.clientX;
+    dragStartY = e.clientY;
+    draw();
+    return;
+  }
+
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+  const comp = hitTest(mx, my);
+
+  if (comp !== hoveredComponent) {
+    hoveredComponent = comp;
+    draw();
+  }
+
+  if (comp) {
+    tooltip.style.display = 'block';
+    tooltip.querySelector('.tt-title').textContent = comp.name.replace('\n', ' ');
+    tooltip.querySelector('.tt-coord').textContent = `Tile (${comp.x}, ${comp.y}) — ${comp.w}×${comp.h} — Layer ${comp.layer}`;
+    tooltip.querySelector('.tt-desc').textContent = comp.desc;
+
+    let tx = e.clientX + 16;
+    let ty = e.clientY + 16;
+    if (tx + 320 > window.innerWidth) tx = e.clientX - 330;
+    if (ty + 120 > window.innerHeight) ty = e.clientY - 120;
+    tooltip.style.left = tx + 'px';
+    tooltip.style.top = ty + 'px';
+  } else {
+    tooltip.style.display = 'none';
+  }
+});
+
+canvas.addEventListener('mouseup', () => { isDragging = false; });
+canvas.addEventListener('mouseleave', () => {
+  isDragging = false;
+  hoveredComponent = null;
+  tooltip.style.display = 'none';
+  draw();
+});
+
+canvas.addEventListener('wheel', (e) => {
+  e.preventDefault();
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  const oldZoom = zoom;
+  const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
+  zoom = Math.max(0.2, Math.min(15, zoom * factor));
+
+  // Zoom toward cursor
+  const TILE_SIZE = 8;
+  const worldX = (mx - canvas.clientWidth / 2) / oldZoom + viewX;
+  const worldY = (my - canvas.clientHeight / 2) / oldZoom + viewY;
+  viewX = worldX - (mx - canvas.clientWidth / 2) / zoom;
+  viewY = worldY - (my - canvas.clientHeight / 2) / zoom;
+
+  draw();
+}, { passive: false });
+
+// Layer buttons
+document.querySelectorAll('.layer-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.layer-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const layer = btn.dataset.layer;
+    activeLayer = isNaN(layer) ? layer : parseInt(layer);
+    hoveredComponent = null;
+    draw();
+  });
+});
+
+// Build legend
+const legendEl = document.getElementById('legend');
+const categories = [
+  { label: 'Program Counter', color: COLORS.pc },
+  { label: 'ROM (Fetch)', color: COLORS.rom },
+  { label: 'Decoders', color: COLORS.decoder },
+  { label: 'Registers', color: COLORS.registers },
+  { label: 'Operand Trees', color: COLORS.operand },
+  { label: 'ALU', color: COLORS.alu },
+  { label: 'Flags', color: COLORS.flags },
+  { label: 'RAM', color: COLORS.ram },
+  { label: 'Writeback', color: COLORS.writeback },
+  { label: 'Mux/Select', color: COLORS.mux },
+  { label: 'Branch', color: COLORS.branch },
+  { label: 'Synth (AIG)', color: COLORS.synth },
+  { label: 'Routing', color: COLORS.routing },
+  { label: 'Guard', color: COLORS.guard },
+];
+for (const cat of categories) {
+  const div = document.createElement('div');
+  div.className = 'legend-item';
+  div.innerHTML = `<div class="legend-swatch" style="background:${cat.color}"></div><span class="legend-label">${cat.label}</span>`;
+  legendEl.appendChild(div);
+}
+
+// ─── Init ─────────────────────────────────────────────────────────────
+
+function init() {
+  resizeCanvas();
+
+  // Center view on the CPU core
+  const TILE_SIZE = 8;
+  viewX = GRID_W * TILE_SIZE / 2;
+  viewY = GRID_H * TILE_SIZE / 2 - 100;
+  zoom = Math.min(
+    canvas.clientWidth / (GRID_W * TILE_SIZE + 80),
+    canvas.clientHeight / (GRID_H * TILE_SIZE + 80)
+  ) * 0.9;
+
+  draw();
+}
+
+window.addEventListener('resize', () => { resizeCanvas(); draw(); });
+init();
+</script>
+</body>
+</html>

@@ -1,0 +1,122 @@
+# Build artifacts
+/target
+*.pdb
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+dist/
+build/
+*.whl
+.venv/
+venv/
+python/.venv/
+
+# Rust
+Cargo.lock
+*.rlib
+
+# Test outputs and temporary files
+*.log
+*.csv
+*.bp
+*.qasm
+!**/src/**/*.qasm
+!**/examples/**/*.qasm
+test*.json
+*_output*.txt
+build_log*.txt
+check_log*.txt
+error*.txt
+detail_error*.txt
+text_error*.txt
+
+# Benchmark outputs
+*_results.txt
+*_bench*.txt
+*_comparison*.txt
+*ANALYSIS*.txt
+python/benchmark_results/
+python/benchmark_results_quick/
+
+# Windows artifacts
+System.IO.__ConsoleStream
+Thumbs.db
+*.dll
+nul
+
+# macOS
+.DS_Store
+
+# External repositories (use git submodules instead)
+QASMBench/
+
+# Backup files
+*.bak
+*.backup
+*.before_*
+*.orig
+*_temp
+
+# Large binary files
+*.bin
+*.dat
+
+# Model checkpoints (training artifacts)
+checkpoints/
+
+# Dataset files (MNIST IDX format, downloaded locally)
+*-ubyte
+
+# Temporary directories
+rec_out_*/
+gui_rec_*/
+gui_api_rec*/
+api_rec_*/
+r/
+r.replay/
+
+# Local Claude config
+.claude/ralph-loop.local.md
+.claude/settings.json
+.claude/analysis/
+.claude/subagent/
+.claude/worktrees/
+
+# npm (not used — Rust project)
+package-lock.json
+node_modules/
+
+# Debug/experimental examples
+examples/epic97_5090_scaling.rs
+examples/tensor_network_bench.rs
+examples/tn_debug.rs
+
+# Image files
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.svg
+*.ico
+
+# One-off research/scripts
+docs/HASH_MINING_FEASIBILITY_REPORT.md
+scripts/aer_gpu_quick.py
+
+# Superseded sprint plans (replaced by unified/final variants)
+User notes/SPRINTS/SPRINT 95.0/SPRINT_95_PHYSICAL_FIELD_EXTRACTION_AND_CHAIN_COLLAPSE.md
+User notes/SPRINTS/SPRINT 95.0/SPRINT_95_REVISED_COLLISION_SAFE.md
+User notes/SPRINTS/SPRINT 96.0/SPRINT_96_TWO_STAGE_PIPELINE_DRAFT.md

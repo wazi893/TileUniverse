@@ -1,0 +1,11 @@
+# Game of Life Benchmark Configuration
+# Run with: python -c "import tileuniverse as tu; e = tu.load_config('examples/gol_benchmark.yaml'); print(e)"
+
+name: "gol-random-soup"
+worlds: 5
+width: 512
+height: 512
+ruleset: gol
+seed: 12345
+steps: 1000
+depth: 50

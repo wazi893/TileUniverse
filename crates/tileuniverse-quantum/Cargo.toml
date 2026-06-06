@@ -1,0 +1,21 @@
+[package]
+name = "tileuniverse-quantum"
+version = "0.1.1"
+edition = "2024"
+authors = ["Waheed Aziz <waziz893@gmail.com>"]
+description = "Structured sparse GHZ/W-state representations with symbolic qubit-count labels"
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/wazi893/TileUniverse"
+homepage = "https://github.com/wazi893/TileUniverse"
+documentation = "https://docs.rs/tileuniverse-quantum"
+keywords = ["quantum", "sparse", "ghz", "symbolic", "simulation"]
+categories = ["science", "simulation"]
+
+[dependencies]
+num-bigint = "0.4"
+num-traits = "0.2"
+rayon = "1.10"
+
+[dev-dependencies]
+approx = "0.5"

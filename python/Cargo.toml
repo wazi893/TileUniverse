@@ -1,0 +1,27 @@
+[package]
+name = "tileuniverse"
+version = "0.1.0"
+edition = "2024"
+description = "GPU-accelerated parallel universe simulator - 40B logic evals/sec"
+license = "MIT"
+repository = "https://github.com/yourname/tileuniverse"
+keywords = ["simulation", "gpu", "cuda", "reinforcement-learning", "cellular-automata"]
+categories = ["simulation", "science", "game-development"]
+
+[lib]
+name = "tileuniverse"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.23", features = ["extension-module", "abi3-py38"] }
+numpy = "0.23"
+ndarray = "0.16"
+
+# Link to the main engine crate
+engine = { path = "..", default-features = false }
+# Link to the core quantum library
+logic-fabric-core = { path = "../crates/logic-fabric-core", default-features = false }
+
+[features]
+default = []
+cuda = ["engine/cuda", "logic-fabric-core/cuda"]

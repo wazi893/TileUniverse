@@ -1,0 +1,7 @@
+# Cargo configuration for TileUniverse engine
+
+[env]
+# Set minimum stack size to 8MB to prevent stack overflow in parallel tests
+# Some tests allocate large quantum states (e.g., 100K+ qubit W states, 300K CPU simulations)
+# and require more stack space than the default when running concurrently
+RUST_MIN_STACK = "8388608"

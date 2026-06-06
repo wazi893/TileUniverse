@@ -1,0 +1,200 @@
+
+// ============================================================================
+// SPRINT 37.0: TEMPLATE-BASED 2-CNOT SYNTHESIS
+// ============================================================================
+
+/// Build a 2-CNOT circuit from angle parameters and compute its unitary
+/// Template: Rz(a0)Ry(a1)Rz(a2) on qa, Rz(b0)Ry(b1)Rz(b2) on qb - CNOT - middle gates - CNOT - after gates
+fn build_two_cnot_template_unitary(
+    before_a: [f32; 3],
+    before_b: [f32; 3],
+    mid_a: [f32; 2],
+    mid_b: [f32; 2],
+    after_a: [f32; 3],
+    after_b: [f32; 3],
+    qa: u8,
+    qb: u8,
+) -> Matrix4x4 {
+    let mut gates = Vec::new();
+
+    // Before gates
+    if before_a[0].abs() > 1e-9 { gates.push(QGate::Rz(qa, before_a[0])); }
+    if before_a[1].abs() > 1e-9 { gates.push(QGate::Ry(qa, before_a[1])); }
+    if before_a[2].abs() > 1e-9 { gates.push(QGate::Rz(qa, before_a[2])); }
+    if before_b[0].abs() > 1e-9 { gates.push(QGate::Rz(qb, before_b[0])); }
+    if before_b[1].abs() > 1e-9 { gates.push(QGate::Ry(qb, before_b[1])); }
+    if before_b[2].abs() > 1e-9 { gates.push(QGate::Rz(qb, before_b[2])); }
+
+    gates.push(QGate::CNot(qa, qb));
+
+    if mid_a[0].abs() > 1e-9 { gates.push(QGate::Rz(qa, mid_a[0])); }
+    if mid_a[1].abs() > 1e-9 { gates.push(QGate::Ry(qa, mid_a[1])); }
+    if mid_b[0].abs() > 1e-9 { gates.push(QGate::Rz(qb, mid_b[0])); }
+    if mid_b[1].abs() > 1e-9 { gates.push(QGate::Ry(qb, mid_b[1])); }
+
+    gates.push(QGate::CNot(qa, qb));
+
+    if after_a[0].abs() > 1e-9 { gates.push(QGate::Rz(qa, after_a[0])); }
+    if after_a[1].abs() > 1e-9 { gates.push(QGate::Ry(qa, after_a[1])); }
+    if after_a[2].abs() > 1e-9 { gates.push(QGate::Rz(qa, after_a[2])); }
+    if after_b[0].abs() > 1e-9 { gates.push(QGate::Rz(qb, after_b[0])); }
+    if after_b[1].abs() > 1e-9 { gates.push(QGate::Ry(qb, after_b[1])); }
+    if after_b[2].abs() > 1e-9 { gates.push(QGate::Rz(qb, after_b[2])); }
+
+    let block = TwoQubitBlock { gates, qubit_a: qa, qubit_b: qb, start_idx: 0, end_idx: 0 };
+    compute_block_unitary(&block)
+}
+
+/// Compute fidelity between two 4x4 unitaries
+fn unitary_fidelity(a: &Matrix4x4, b: &Matrix4x4) -> f32 {
+    let mut trace = Complex32::ZERO;
+    for i in 0..4 {
+        for j in 0..4 {
+            trace = trace.add(a.data[i][j].conj().mul(b.data[i][j]));
+        }
+    }
+    trace.norm2() / 16.0
+}
+
+/// Template-based 2-CNOT synthesis using numerical grid search
+/// This bypasses the broken Weyl decomposition by directly searching for angles
+fn synthesize_two_cnot_template(target: &Matrix4x4, qa: u8, qb: u8) -> Option<Vec<QGate>> {
+    use std::f32::consts::PI;
+
+    let mut best_fidelity = 0.0f32;
+    let mut best_params: Option<([f32; 3], [f32; 3], [f32; 2], [f32; 2], [f32; 3], [f32; 3])> = None;
+
+    // Grid of angles to try
+    let coarse = [0.0, PI/4.0, PI/2.0, 3.0*PI/4.0, PI, -PI/4.0, -PI/2.0, -3.0*PI/4.0];
+    let fine = [0.0, PI/2.0, PI, -PI/2.0];
+
+    // Phase 1: Search middle rotations (most important for the interaction)
+    for &m0 in &coarse {
+        for &m1 in &coarse {
+            for &n0 in &fine {
+                for &n1 in &fine {
+                    let mid_a = [m0, m1];
+                    let mid_b = [n0, n1];
+
+                    let u = build_two_cnot_template_unitary(
+                        [0.0, 0.0, 0.0], [0.0, 0.0, 0.0],
+                        mid_a, mid_b,
+                        [0.0, 0.0, 0.0], [0.0, 0.0, 0.0],
+                        qa, qb
+                    );
+
+                    let fid = unitary_fidelity(target, &u);
+                    if fid > best_fidelity {
+                        best_fidelity = fid;
+                        best_params = Some((
+                            [0.0, 0.0, 0.0], [0.0, 0.0, 0.0],
+                            mid_a, mid_b,
+                            [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
+    // Phase 2: If good middle found, search before/after gates
+    if best_fidelity > 0.3 {
+        if let Some((_, _, mid_a, mid_b, _, _)) = best_params {
+            for &a0 in &fine {
+                for &a1 in &fine {
+                    for &b0 in &fine {
+                        for &b1 in &fine {
+                            let before_a = [a0, a1, 0.0];
+                            let before_b = [b0, b1, 0.0];
+
+                            let u = build_two_cnot_template_unitary(
+                                before_a, before_b,
+                                mid_a, mid_b,
+                                [0.0, 0.0, 0.0], [0.0, 0.0, 0.0],
+                                qa, qb
+                            );
+
+                            let fid = unitary_fidelity(target, &u);
+                            if fid > best_fidelity {
+                                best_fidelity = fid;
+                                best_params = Some((
+                                    before_a, before_b,
+                                    mid_a, mid_b,
+                                    [0.0, 0.0, 0.0], [0.0, 0.0, 0.0]
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Phase 3: Search after gates
+    if best_fidelity > 0.5 {
+        if let Some((before_a, before_b, mid_a, mid_b, _, _)) = best_params {
+            for &c0 in &fine {
+                for &c1 in &fine {
+                    for &d0 in &fine {
+                        for &d1 in &fine {
+                            let after_a = [c0, c1, 0.0];
+                            let after_b = [d0, d1, 0.0];
+
+                            let u = build_two_cnot_template_unitary(
+                                before_a, before_b,
+                                mid_a, mid_b,
+                                after_a, after_b,
+                                qa, qb
+                            );
+
+                            let fid = unitary_fidelity(target, &u);
+                            if fid > best_fidelity {
+                                best_fidelity = fid;
+                                best_params = Some((
+                                    before_a, before_b,
+                                    mid_a, mid_b,
+                                    after_a, after_b
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Return circuit if good enough
+    if best_fidelity > 0.99 {
+        if let Some((before_a, before_b, mid_a, mid_b, after_a, after_b)) = best_params {
+            let mut gates = Vec::new();
+
+            if before_a[0].abs() > 1e-6 { gates.push(QGate::Rz(qa, before_a[0])); }
+            if before_a[1].abs() > 1e-6 { gates.push(QGate::Ry(qa, before_a[1])); }
+            if before_a[2].abs() > 1e-6 { gates.push(QGate::Rz(qa, before_a[2])); }
+            if before_b[0].abs() > 1e-6 { gates.push(QGate::Rz(qb, before_b[0])); }
+            if before_b[1].abs() > 1e-6 { gates.push(QGate::Ry(qb, before_b[1])); }
+            if before_b[2].abs() > 1e-6 { gates.push(QGate::Rz(qb, before_b[2])); }
+
+            gates.push(QGate::CNot(qa, qb));
+
+            if mid_a[0].abs() > 1e-6 { gates.push(QGate::Rz(qa, mid_a[0])); }
+            if mid_a[1].abs() > 1e-6 { gates.push(QGate::Ry(qa, mid_a[1])); }
+            if mid_b[0].abs() > 1e-6 { gates.push(QGate::Rz(qb, mid_b[0])); }
+            if mid_b[1].abs() > 1e-6 { gates.push(QGate::Ry(qb, mid_b[1])); }
+
+            gates.push(QGate::CNot(qa, qb));
+
+            if after_a[0].abs() > 1e-6 { gates.push(QGate::Rz(qa, after_a[0])); }
+            if after_a[1].abs() > 1e-6 { gates.push(QGate::Ry(qa, after_a[1])); }
+            if after_a[2].abs() > 1e-6 { gates.push(QGate::Rz(qa, after_a[2])); }
+            if after_b[0].abs() > 1e-6 { gates.push(QGate::Rz(qb, after_b[0])); }
+            if after_b[1].abs() > 1e-6 { gates.push(QGate::Ry(qb, after_b[1])); }
+            if after_b[2].abs() > 1e-6 { gates.push(QGate::Rz(qb, after_b[2])); }
+
+            return Some(gates);
+        }
+    }
+
+    None
+}
+

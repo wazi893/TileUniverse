@@ -1,0 +1,35 @@
+# Example cluster configuration for EPIC 64
+#
+# This file defines a cluster of worker nodes that can run distributed
+# quantum simulations across multiple machines.
+
+[cluster]
+name = "dev-local"
+
+# Node 0: First worker (192.168.1.10:5001)
+[[node]]
+id = 0
+host = "192.168.1.10"
+port = 5001
+tiles = 4  # Must be divisible by 4 (EPIC 62Q constraint)
+
+# Node 1: Second worker (192.168.1.11:5001)
+[[node]]
+id = 1
+host = "192.168.1.11"
+port = 5001
+tiles = 4
+
+# For localhost testing, use 127.0.0.1 with different ports:
+#
+# [[node]]
+# id = 0
+# host = "127.0.0.1"
+# port = 5001
+# tiles = 4
+#
+# [[node]]
+# id = 1
+# host = "127.0.0.1"
+# port = 5002
+# tiles = 4

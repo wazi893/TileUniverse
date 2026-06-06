@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TileUniverse - Trillion-Scale GPU Simulation Engine</title>
+    <meta name="description" content="High-performance simulation substrate for massively parallel world execution. 2.5 trillion operations per second on consumer GPUs.">
+
+    <!-- Open Graph / Social -->
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="TileUniverse">
+    <meta property="og:description" content="Trillion-Scale GPU Simulation Engine. 2.5T ops/sec on consumer hardware.">
+    <meta property="og:image" content="assets/banner.png">
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <style>
+        :root {
+            --midnight-black: #0d0f11;
+            --slate-gray: #1b1e22;
+            --soft-white: #eaeaea;
+            --muted-gray: #666666;
+            --quantum-cyan: #00e4ff;
+            --deep-cyan: #0099aa;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background-color: var(--midnight-black);
+            color: var(--soft-white);
+            line-height: 1.6;
+        }
+
+        /* Navigation */
+        nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            z-index: 1000;
+            background: rgba(13, 15, 17, 0.95);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(0, 228, 255, 0.1);
+            padding: 1rem 2rem;
+        }
+
+        nav .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            text-decoration: none;
+            color: var(--soft-white);
+            font-weight: 600;
+            font-size: 1.25rem;
+        }
+
+        .logo-icon {
+            width: 32px;
+            height: 32px;
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 2px;
+        }
+
+        .logo-icon span {
+            background: linear-gradient(135deg, var(--quantum-cyan), var(--deep-cyan));
+            border-radius: 2px;
+        }
+
+        .logo-icon span:nth-child(4),
+        .logo-icon span:nth-child(6),
+        .logo-icon span:nth-child(9),
+        .logo-icon span:nth-child(12) {
+            background: transparent;
+            border: 1px solid var(--quantum-cyan);
+        }
+
+        nav ul {
+            display: flex;
+            list-style: none;
+            gap: 2rem;
+        }
+
+        nav a {
+            color: var(--muted-gray);
+            text-decoration: none;
+            font-size: 0.9rem;
+            transition: color 0.2s;
+        }
+
+        nav a:hover {
+            color: var(--quantum-cyan);
+        }
+
+        /* Hero Section */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 6rem 2rem 4rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background:
+                radial-gradient(ellipse at 50% 0%, rgba(0, 228, 255, 0.1) 0%, transparent 50%),
+                radial-gradient(ellipse at 80% 80%, rgba(0, 153, 170, 0.05) 0%, transparent 40%);
+            pointer-events: none;
+        }
+
+        .hero-content {
+            max-width: 900px;
+            text-align: center;
+            position: relative;
+            z-index: 1;
+        }
+
+        .hero h1 {
+            font-size: clamp(2.5rem, 6vw, 4rem);
+            font-weight: 700;
+            margin-bottom: 1.5rem;
+            line-height: 1.1;
+        }
+
+        .hero h1 span {
+            background: linear-gradient(135deg, var(--quantum-cyan), var(--deep-cyan));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .hero .tagline {
+            font-size: 1.25rem;
+            color: var(--muted-gray);
+            margin-bottom: 2rem;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+
+        .hero-stats {
+            display: flex;
+            justify-content: center;
+            gap: 3rem;
+            margin-bottom: 3rem;
+            flex-wrap: wrap;
+        }
+
+        .stat {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: var(--quantum-cyan);
+            display: block;
+        }
+
+        .stat-label {
+            font-size: 0.85rem;
+            color: var(--muted-gray);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .cta-buttons {
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 0.875rem 2rem;
+            border-radius: 8px;
+            font-weight: 500;
+            font-size: 1rem;
+            text-decoration: none;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--quantum-cyan), var(--deep-cyan));
+            color: var(--midnight-black);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 30px rgba(0, 228, 255, 0.3);
+        }
+
+        .btn-secondary {
+            background: var(--slate-gray);
+            color: var(--soft-white);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(27, 30, 34, 0.8);
+            border-color: var(--quantum-cyan);
+        }
+
+        /* Sections */
+        section {
+            padding: 6rem 2rem;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        section h2 {
+            font-size: 2rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            text-align: center;
+        }
+
+        section .section-desc {
+            color: var(--muted-gray);
+            text-align: center;
+            max-width: 600px;
+            margin: 0 auto 3rem;
+        }
+
+        /* Features Grid */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 2rem;
+        }
+
+        .feature-card {
+            background: var(--slate-gray);
+            border-radius: 12px;
+            padding: 2rem;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            transition: transform 0.2s, border-color 0.2s;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-4px);
+            border-color: rgba(0, 228, 255, 0.3);
+        }
+
+        .feature-icon {
+            width: 48px;
+            height: 48px;
+            background: linear-gradient(135deg, var(--quantum-cyan), var(--deep-cyan));
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 1.25rem;
+            font-size: 1.5rem;
+        }
+
+        .feature-card h3 {
+            font-size: 1.125rem;
+            font-weight: 600;
+            margin-bottom: 0.75rem;
+        }
+
+        .feature-card p {
+            color: var(--muted-gray);
+            font-size: 0.95rem;
+        }
+
+        /* Code Block */
+        .code-section {
+            background: var(--slate-gray);
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .code-header {
+            background: rgba(0, 0, 0, 0.3);
+            padding: 0.75rem 1.25rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .code-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--muted-gray);
+        }
+
+        .code-dot:first-child { background: #ff5f57; }
+        .code-dot:nth-child(2) { background: #febc2e; }
+        .code-dot:nth-child(3) { background: #28c840; }
+
+        .code-header span {
+            margin-left: auto;
+            color: var(--muted-gray);
+            font-size: 0.85rem;
+        }
+
+        pre {
+            padding: 1.5rem;
+            overflow-x: auto;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.9rem;
+            line-height: 1.7;
+        }
+
+        .code-keyword { color: #c792ea; }
+        .code-string { color: #c3e88d; }
+        .code-comment { color: #546e7a; }
+        .code-function { color: #82aaff; }
+        .code-number { color: #f78c6c; }
+
+        /* Performance Section */
+        .perf-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+
+        .perf-card {
+            background: var(--slate-gray);
+            border-radius: 8px;
+            padding: 1.5rem;
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .perf-card .value {
+            font-size: 2rem;
+            font-weight: 700;
+            color: var(--quantum-cyan);
+        }
+
+        .perf-card .label {
+            color: var(--muted-gray);
+            font-size: 0.85rem;
+            margin-top: 0.25rem;
+        }
+
+        /* Architecture */
+        .architecture {
+            background: var(--slate-gray);
+            border-radius: 12px;
+            padding: 2rem;
+            text-align: center;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .architecture img {
+            max-width: 100%;
+            height: auto;
+        }
+
+        /* Footer */
+        footer {
+            background: var(--slate-gray);
+            border-top: 1px solid rgba(255, 255, 255, 0.05);
+            padding: 3rem 2rem;
+            text-align: center;
+        }
+
+        footer p {
+            color: var(--muted-gray);
+            font-size: 0.9rem;
+        }
+
+        footer a {
+            color: var(--quantum-cyan);
+            text-decoration: none;
+        }
+
+        footer a:hover {
+            text-decoration: underline;
+        }
+
+        /* Responsive */
+        @media (max-width: 768px) {
+            nav ul {
+                display: none;
+            }
+
+            .hero-stats {
+                gap: 1.5rem;
+            }
+
+            .stat-value {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <div class="container">
+            <a href="#" class="logo">
+                <div class="logo-icon">
+                    <span></span><span></span><span></span><span></span>
+                    <span></span><span></span><span></span><span></span>
+                    <span></span><span></span><span></span><span></span>
+                    <span></span><span></span><span></span><span></span>
+                </div>
+                TileUniverse
+            </a>
+            <ul>
+                <li><a href="#features">Features</a></li>
+                <li><a href="#performance">Performance</a></li>
+                <li><a href="#quickstart">Quick Start</a></li>
+                <li><a href="https://github.com/tileuniverse/tileuniverse">GitHub</a></li>
+                <li><a href="docs/whitepaper.html">Whitepaper</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <section class="hero">
+        <div class="hero-content">
+            <h1>Trillion-Scale<br>Simulation at <span>GPU Speed</span></h1>
+            <p class="tagline">
+                High-performance simulation substrate for massively parallel world execution.
+                2.5 trillion operations per second on consumer hardware.
+            </p>
+
+            <div class="hero-stats">
+                <div class="stat">
+                    <span class="stat-value">2.5T</span>
+                    <span class="stat-label">Ops/sec (Quantum)</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-value">40.5B</span>
+                    <span class="stat-label">Evals/sec (Cellular)</span>
+                </div>
+                <div class="stat">
+                    <span class="stat-value">50,000×</span>
+                    <span class="stat-label">vs CPU</span>
+                </div>
+            </div>
+
+            <div class="cta-buttons">
+                <a href="#quickstart" class="btn btn-primary">
+                    Get Started
+                </a>
+                <a href="https://github.com/tileuniverse/tileuniverse" class="btn btn-secondary">
+                    View on GitHub
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <section id="features">
+        <h2>Features</h2>
+        <p class="section-desc">
+            Everything you need to run massively parallel simulations at scale.
+        </p>
+
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon">⚡</div>
+                <h3>GPU-Accelerated Execution</h3>
+                <p>Depth-batched CUDA kernels with L2 cache-resident world layouts. Optimized for throughput, not latency.</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">🌐</div>
+                <h3>Parallel Universes</h3>
+                <p>Run 100+ independent worlds simultaneously. Each universe maintains isolated state while sharing GPU resources.</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">⏪</div>
+                <h3>Reversible Physics</h3>
+                <p>Full state history with O(1) temporal navigation. Rewind, fast-forward, or jump to any point in time.</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">🤖</div>
+                <h3>RL Integration</h3>
+                <p>Native Gymnasium and Stable Baselines 3 support. Train agents across parallel environments at GPU speed.</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">🧬</div>
+                <h3>Multiple Rulesets</h3>
+                <p>Game of Life, Rule 110, wire propagation, logic gates. Extensible architecture for custom rules.</p>
+            </div>
+
+            <div class="feature-card">
+                <div class="feature-icon">🐍</div>
+                <h3>Python-Native API</h3>
+                <p>Clean, minimal API with NumPy integration. Zero-copy memory transfer where hardware supports it.</p>
+            </div>
+        </div>
+    </section>
+
+    <section id="quickstart">
+        <h2>Quick Start</h2>
+        <p class="section-desc">
+            Get running in under a minute.
+        </p>
+
+        <div class="code-section">
+            <div class="code-header">
+                <span class="code-dot"></span>
+                <span class="code-dot"></span>
+                <span class="code-dot"></span>
+                <span>example.py</span>
+            </div>
+            <pre><code><span class="code-keyword">import</span> tileuniverse <span class="code-keyword">as</span> tu
+
+<span class="code-comment"># Initialize 100 parallel universes</span>
+engine = tu.<span class="code-function">Engine</span>(worlds=<span class="code-number">100</span>, size=(<span class="code-number">256</span>, <span class="code-number">256</span>), ruleset=<span class="code-string">"gol"</span>)
+
+<span class="code-comment"># Randomize first world</span>
+engine.<span class="code-function">randomize</span>(<span class="code-number">0</span>, density=<span class="code-number">0.3</span>)
+
+<span class="code-comment"># Evolve all worlds 1000 steps</span>
+engine.<span class="code-function">evolve</span>(<span class="code-number">1000</span>)
+
+<span class="code-comment"># Extract state as numpy array</span>
+world = engine.<span class="code-function">get_world</span>(<span class="code-number">0</span>)
+<span class="code-keyword">print</span>(<span class="code-string">f"Shape: </span>{world.shape}<span class="code-string">"</span>)  <span class="code-comment"># (256, 256)</span></code></pre>
+        </div>
+
+        <div style="text-align: center; margin-top: 2rem;">
+            <code style="background: var(--slate-gray); padding: 0.75rem 1.5rem; border-radius: 6px; font-family: 'JetBrains Mono', monospace;">
+                pip install tileuniverse
+            </code>
+        </div>
+    </section>
+
+    <section id="performance">
+        <h2>Performance</h2>
+        <p class="section-desc">
+            Benchmarked on NVIDIA GeForce RTX 4070. Tensor Cores + CUDA 13.0.
+        </p>
+
+        <h3 style="text-align: center; color: var(--quantum-cyan); margin-bottom: 1.5rem;">Quantum Substrate</h3>
+        <div class="perf-grid">
+            <div class="perf-card">
+                <div class="value">2.5T</div>
+                <div class="label">Amplitude Ops/sec</div>
+            </div>
+            <div class="perf-card">
+                <div class="value">821M</div>
+                <div class="label">Gate Ops/sec</div>
+            </div>
+            <div class="perf-card">
+                <div class="value">46.8×</div>
+                <div class="label">vs CPU</div>
+            </div>
+            <div class="perf-card">
+                <div class="value">WMMA</div>
+                <div class="label">Tensor Cores</div>
+            </div>
+        </div>
+
+        <h3 style="text-align: center; color: var(--soft-white); margin: 3rem 0 1.5rem;">Cellular Substrate</h3>
+        <div class="perf-grid">
+            <div class="perf-card">
+                <div class="value">40.5B</div>
+                <div class="label">Logic Evals/sec</div>
+            </div>
+            <div class="perf-card">
+                <div class="value">100+</div>
+                <div class="label">Parallel Worlds</div>
+            </div>
+            <div class="perf-card">
+                <div class="value">~1M</div>
+                <div class="label">RL Steps/sec</div>
+            </div>
+            <div class="perf-card">
+                <div class="value">L2</div>
+                <div class="label">Cache Resident</div>
+            </div>
+        </div>
+    </section>
+
+    <section>
+        <h2>Architecture</h2>
+        <p class="section-desc">
+            Vertically integrated for maximum throughput.
+        </p>
+
+        <div class="architecture">
+            <img src="../assets/architecture.svg" alt="TileUniverse Architecture Diagram">
+        </div>
+    </section>
+
+    <footer>
+        <p>
+            TileUniverse is open source under the MIT License.<br>
+            <a href="https://github.com/tileuniverse/tileuniverse">GitHub</a> ·
+            <a href="docs/whitepaper.html">Whitepaper</a> ·
+            <a href="docs/api.html">API Reference</a>
+        </p>
+    </footer>
+</body>
+</html>
