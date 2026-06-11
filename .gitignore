@@ -116,6 +116,9 @@ examples/tn_debug.rs
 docs/HASH_MINING_FEASIBILITY_REPORT.md
 scripts/aer_gpu_quick.py
 
+# Personal/local-only notes (resumes, scratch plans) — never commit
+User notes/Local/
+
 # Superseded sprint plans (replaced by unified/final variants)
 User notes/SPRINTS/SPRINT 95.0/SPRINT_95_PHYSICAL_FIELD_EXTRACTION_AND_CHAIN_COLLAPSE.md
 User notes/SPRINTS/SPRINT 95.0/SPRINT_95_REVISED_COLLISION_SAFE.md

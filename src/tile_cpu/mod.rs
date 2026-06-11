@@ -88,6 +88,7 @@ pub mod v2_parser;
 pub mod v2_replay;
 pub mod v2_routing;
 pub mod v2_showcase;
+pub mod v2_simt_baseline;
 pub mod v2_stdlib;
 pub mod v2_trace;
 pub mod v2_visualization;
@@ -160,6 +161,10 @@ pub use v2_replay::{
 pub use v2_routing::{
     V2EndpointClass, V2MultiRouteResult, V2RouteBounds, V2RouteCoord, V2RouteNet, V2RouteNetClass,
     V2RoutingConfig, V2RoutingDb,
+};
+pub use v2_simt_baseline::{
+    SimtBaselineReport, SimtBaselineResult, run_scalar_baseline, run_scalar_baseline_case,
+    run_scalar_baseline_corpus,
 };
 pub use v2_stdlib::{
     V2_ARG0, V2_ARG1, V2_ARG2, V2_ARG3, V2_RET, V2_SP, V2_STDLIB_ABS, V2_STDLIB_CLAMP,

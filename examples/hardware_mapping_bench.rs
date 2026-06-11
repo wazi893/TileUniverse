@@ -248,7 +248,7 @@ fn hardware_aware_comparison() {
         budget.total_factory_cycles
     );
 
-    let all_profiles = vec![
+    let all_profiles = [
         profiles::ibm_falcon(),
         profiles::ibm_heron(),
         profiles::ionq_aria(),

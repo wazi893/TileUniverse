@@ -304,7 +304,7 @@ impl UniverseConfig {
                 "width and height must be > 0".into(),
             ));
         }
-        if self.width % 64 != 0 {
+        if !self.width.is_multiple_of(64) {
             return Err(ConfigError::ValidationError(format!(
                 "width must be multiple of 64, got {}",
                 self.width

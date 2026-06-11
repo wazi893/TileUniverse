@@ -1288,7 +1288,7 @@ impl ResourceLog {
             return Vec::new();
         }
 
-        let n_bins = (makespan + bin_size - 1) / bin_size;
+        let n_bins = makespan.div_ceil(bin_size);
         let mut bins = vec![DemandBin::zero(); n_bins];
 
         for event in &self.events {

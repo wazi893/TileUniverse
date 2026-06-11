@@ -309,7 +309,7 @@ fn named_test(name: &str, n_qubits: BigUint) {
     let verify_time = start.elapsed();
 
     let mem = ghz.memory_bytes();
-    let log10 = bits as f64 * 0.30103;
+    let log10 = bits as f64 * std::f64::consts::LOG10_2;
 
     let mem_str = if mem >= 1024 * 1024 {
         format!("{:.1} MB", mem as f64 / (1024.0 * 1024.0))

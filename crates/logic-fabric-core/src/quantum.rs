@@ -185,6 +185,11 @@ impl AlignedVecF32 {
     }
 
     #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    #[inline]
     pub fn as_slice(&self) -> &[f32] {
         unsafe {
             let data_ptr = if self.strict_mode {
@@ -341,7 +346,7 @@ impl QState {
         // EPIC 114: Raised limit from 30 to 32 qubits for RTX 5090 (32GB VRAM)
         assert!(n_qubits > 0 && n_qubits <= 32, "n_qubits must be 1-32");
         assert!(
-            tile_count >= 1 && tile_count <= 256,
+            (1..=256).contains(&tile_count),
             "tile_count must be 1-256"
         );
 
@@ -647,7 +652,7 @@ pub enum GateOutcome {
 #[allow(dead_code)]
 fn hadamard_pair(a0: Complex32, a1: Complex32) -> (Complex32, Complex32) {
     // (|0> -> (|0>+|1>)/sqrt2, |1> -> (|0>-|1>)/sqrt2)
-    const INV_SQRT2: f32 = 0.70710678118_f32;
+    const INV_SQRT2: f32 = std::f32::consts::FRAC_1_SQRT_2;
     let s0 = a0.add(a1).scale(INV_SQRT2);
     let s1 = a0.add(a1.scale(-1.0)).scale(INV_SQRT2);
     (s0, s1)
@@ -657,7 +662,7 @@ pub fn apply_gate_scalar(state: &mut QState, gate: &QGate, rng: &mut QRng) -> Ga
     match *gate {
         QGate::H(q) => {
             let pairs = state.iter_pairs_for_qubit(q);
-            const INV_SQRT2: f32 = 0.70710678118_f32;
+            const INV_SQRT2: f32 = std::f32::consts::FRAC_1_SQRT_2;
             let r = state.real.as_mut_slice();
             let im = state.imag.as_mut_slice();
             for (i0, i1) in pairs.into_iter() {
@@ -988,8 +993,8 @@ pub fn apply_gate_scalar(state: &mut QState, gate: &QGate, rng: &mut QRng) -> Ga
         // SPRINT 48.0: T gate = diag(1, e^(iπ/4)) = diag(1, (1+i)/√2)
         QGate::T(q) => {
             // T gate multiplies |1⟩ amplitudes by e^(iπ/4) = cos(π/4) + i·sin(π/4)
-            const T_REAL: f32 = 0.7071067811865476; // cos(π/4) = 1/√2
-            const T_IMAG: f32 = 0.7071067811865476; // sin(π/4) = 1/√2
+            const T_REAL: f32 = std::f32::consts::FRAC_1_SQRT_2; // cos(π/4) = 1/√2
+            const T_IMAG: f32 = std::f32::consts::FRAC_1_SQRT_2; // sin(π/4) = 1/√2
             let bit = 1usize << (q as usize);
             let r = state.real.as_mut_slice();
             let im = state.imag.as_mut_slice();
@@ -1007,8 +1012,8 @@ pub fn apply_gate_scalar(state: &mut QState, gate: &QGate, rng: &mut QRng) -> Ga
         // SPRINT 48.0: T† gate = diag(1, e^(-iπ/4)) = diag(1, (1-i)/√2)
         QGate::Tdg(q) => {
             // T† gate multiplies |1⟩ amplitudes by e^(-iπ/4) = cos(π/4) - i·sin(π/4)
-            const T_REAL: f32 = 0.7071067811865476; // cos(π/4) = 1/√2
-            const T_IMAG: f32 = -0.7071067811865476; // -sin(π/4) = -1/√2
+            const T_REAL: f32 = std::f32::consts::FRAC_1_SQRT_2; // cos(π/4) = 1/√2
+            const T_IMAG: f32 = -std::f32::consts::FRAC_1_SQRT_2; // -sin(π/4) = -1/√2
             let bit = 1usize << (q as usize);
             let r = state.real.as_mut_slice();
             let im = state.imag.as_mut_slice();
@@ -1247,7 +1252,7 @@ pub fn is_avx512f_available() -> bool {
 #[allow(unsafe_op_in_unsafe_fn)]
 pub unsafe fn apply_h_avx2(state: &mut QState, target: u8) -> GateOutcome {
     use core::arch::x86_64::*;
-    const INV_SQRT2: f32 = 0.70710678118_f32;
+    const INV_SQRT2: f32 = std::f32::consts::FRAC_1_SQRT_2;
     let bit = 1usize << (target as usize);
     let step = bit << 1;
     let n = state.len;
@@ -1412,7 +1417,7 @@ pub unsafe fn apply_cnot_avx2(state: &mut QState, control: u8, target: u8) -> Ga
                 // Build mask: swap when control bit is set in the lower index
                 // Index lanes = (low + [0..7])
                 let idx = _mm256_setr_epi32(
-                    (low + 0) as i32,
+                    low as i32,
                     (low + 1) as i32,
                     (low + 2) as i32,
                     (low + 3) as i32,
@@ -1629,7 +1634,7 @@ pub(crate) unsafe fn apply_toffoli_avx2(
 #[allow(unsafe_op_in_unsafe_fn)]
 pub(crate) unsafe fn apply_h_avx512(state: &mut QState, target: u8) -> GateOutcome {
     use core::arch::x86_64::*;
-    const INV_SQRT2: f32 = 0.70710678118_f32;
+    const INV_SQRT2: f32 = std::f32::consts::FRAC_1_SQRT_2;
     let bit = 1usize << (target as usize);
     let step = bit << 1;
     let n = state.len;
@@ -1945,7 +1950,7 @@ mod tests {
         let mut s = QState::new_zero(1);
         let mut rng = QRng::new(123);
         let _ = apply_gate_scalar(&mut s, &QGate::H(0), &mut rng);
-        let inv_sqrt2 = 0.70710678_f32;
+        let inv_sqrt2 = std::f32::consts::FRAC_1_SQRT_2;
         assert!(approx(s.real.as_slice()[0], inv_sqrt2));
         assert!(approx(s.real.as_slice()[1], inv_sqrt2));
     }
@@ -1965,7 +1970,7 @@ mod tests {
         let mut rng = QRng::new(42);
         let _ = apply_gate_scalar(&mut s, &QGate::H(0), &mut rng);
         let _ = apply_gate_scalar(&mut s, &QGate::CNot(0, 1), &mut rng);
-        let inv_sqrt2 = 0.70710678_f32;
+        let inv_sqrt2 = std::f32::consts::FRAC_1_SQRT_2;
         // |00> and |11>
         assert!(approx(s.real.as_slice()[0], inv_sqrt2));
         assert!(approx(s.real.as_slice()[3], inv_sqrt2));

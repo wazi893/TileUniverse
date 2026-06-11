@@ -447,7 +447,7 @@ fn main() {
                 let mut ticks: u32 = 200;
                 let mut record_dir: Option<String> = None;
                 let mut args: Vec<&str> = parts.collect();
-                while let Some(flag) = args.get(0).cloned() {
+                while let Some(flag) = args.first().cloned() {
                     match flag {
                         "ticks" => {
                             if args.len() >= 2 {
@@ -570,10 +570,10 @@ fn main() {
                 // Build a fresh sim and register a 2-qubit Bell program on a QDemo tile
                 let mut ticks: u32 = 6;
                 let mut args: Vec<&str> = parts.collect();
-                while let Some(flag) = args.get(0).cloned() {
+                while let Some(flag) = args.first().cloned() {
                     if flag.eq_ignore_ascii_case("ticks") {
                         let _ = args.remove(0);
-                        if let Some(n) = args.get(0).cloned() {
+                        if let Some(n) = args.first().cloned() {
                             let _ = args.remove(0);
                             ticks = n.parse::<u32>().unwrap_or(6);
                         }
@@ -881,7 +881,7 @@ fn main() {
                 }
                 let mut params = engine::fieldstep::FieldStepParams::default();
                 let mut args: Vec<&str> = parts.collect();
-                while let Some(flag) = args.get(0).cloned() {
+                while let Some(flag) = args.first().cloned() {
                     match flag {
                         "power_decay" => {
                             if args.len() >= 2 {
@@ -926,7 +926,7 @@ fn main() {
                 let coords: Vec<_> = parts.take(4).collect();
                 if let (Some(k), Some(x0), Some(y0), Some(w), Some(h)) = (
                     kind,
-                    coords.get(0),
+                    coords.first(),
                     coords.get(1),
                     coords.get(2),
                     coords.get(3),
@@ -1003,7 +1003,7 @@ fn main() {
                             continue;
                         }
                         let mut params = engine::fieldstep::FieldStepParams::default();
-                        while let Some(flag) = args.get(0).cloned() {
+                        while let Some(flag) = args.first().cloned() {
                             match flag {
                                 "power_decay" => {
                                     if args.len() >= 2 {
@@ -1057,7 +1057,7 @@ fn main() {
                 }
                 let mut params = engine::coupling::CoupledParams::default();
                 let mut args: Vec<&str> = parts.collect();
-                while let Some(flag) = args.get(0).cloned() {
+                while let Some(flag) = args.first().cloned() {
                     match flag {
                         "inject" => {
                             if args.len() >= 2 {
@@ -1130,7 +1130,7 @@ fn main() {
                 let mut params = engine::patterns::PatternParams::default();
 
                 let mut args: Vec<&str> = parts.collect();
-                while let Some(flag) = args.get(0).cloned() {
+                while let Some(flag) = args.first().cloned() {
                     match flag {
                         "fields" => {
                             if args.len() >= 2 {
@@ -1334,7 +1334,7 @@ fn main() {
                 let y = parts.next().and_then(parse_usize);
                 let mut allow_overwrite = false;
                 let mut args: Vec<&str> = parts.collect();
-                while let Some(flag) = args.get(0).cloned() {
+                while let Some(flag) = args.first().cloned() {
                     match flag {
                         "allow_overwrite" => {
                             if args.len() >= 2 {
@@ -1403,7 +1403,7 @@ fn main() {
                 let name = parts.next();
                 let mut dry_run = false;
                 let mut args: Vec<&str> = parts.collect();
-                while let Some(flag) = args.get(0).cloned() {
+                while let Some(flag) = args.first().cloned() {
                     match flag {
                         "dry_run" => {
                             if args.len() >= 2 {
@@ -1463,7 +1463,7 @@ fn main() {
                 let y = parts.next().and_then(parse_usize);
                 let mut allow_overwrite = false;
                 let mut args: Vec<&str> = parts.collect();
-                while let Some(flag) = args.get(0).cloned() {
+                while let Some(flag) = args.first().cloned() {
                     match flag {
                         "allow_overwrite" => {
                             if args.len() >= 2 {
@@ -1526,7 +1526,7 @@ fn main() {
                 let mut origin: Option<(usize, usize)> = None;
                 let mut render = false;
                 let mut args: Vec<&str> = parts.collect();
-                while let Some(flag) = args.get(0).cloned() {
+                while let Some(flag) = args.first().cloned() {
                     match flag {
                         "steps" => {
                             if args.len() >= 2 {
@@ -1600,7 +1600,7 @@ fn main() {
                 let mut origin: Option<(usize, usize)> = None;
                 let mut out_dir: Option<String> = None;
                 let mut args: Vec<&str> = parts.collect();
-                while let Some(flag) = args.get(0).cloned() {
+                while let Some(flag) = args.first().cloned() {
                     match flag {
                         "steps" => {
                             if args.len() >= 2 {
@@ -1747,7 +1747,7 @@ fn main() {
                 let mut steps_opt: Option<u32> = None;
                 let mut origin: Option<(usize, usize)> = None;
                 let mut args: Vec<&str> = parts.collect();
-                while let Some(flag) = args.get(0).cloned() {
+                while let Some(flag) = args.first().cloned() {
                     match flag {
                         "steps" => {
                             if args.len() >= 2 {
@@ -1900,7 +1900,7 @@ fn main() {
                 let mut region: Option<(usize, usize, usize, usize)> = Some((0, 0, 32, 16));
                 let mut render = true;
                 let mut args: Vec<&str> = parts.collect();
-                while let Some(flag) = args.get(0).cloned() {
+                while let Some(flag) = args.first().cloned() {
                     match flag {
                         "steps" => {
                             if args.len() >= 2 {
@@ -1997,7 +1997,7 @@ fn main() {
             "feedback_snapshot" => {
                 let coords: Vec<_> = parts.take(4).collect();
                 if let (Some(x0), Some(y0), Some(w), Some(h)) =
-                    (coords.get(0), coords.get(1), coords.get(2), coords.get(3))
+                    (coords.first(), coords.get(1), coords.get(2), coords.get(3))
                 {
                     if let (Some(x0), Some(y0), Some(w), Some(h)) = (
                         parse_usize(x0),
@@ -2030,7 +2030,7 @@ fn main() {
                 let mut steps: Option<u32> = None;
                 let mut params = engine::physics_feedback::FeedbackParams::default();
                 let mut args: Vec<&str> = parts.collect();
-                while let Some(flag) = args.get(0).cloned() {
+                while let Some(flag) = args.first().cloned() {
                     match flag {
                         "steps" => {
                             if args.len() >= 2 {
@@ -2098,7 +2098,7 @@ fn main() {
                 }
                 let mut params = engine::heat::HeatParams::default();
                 let mut args: Vec<&str> = parts.collect();
-                while let Some(flag) = args.get(0).cloned() {
+                while let Some(flag) = args.first().cloned() {
                     match flag {
                         "inject_scale" => {
                             if args.len() >= 2 {
@@ -2141,7 +2141,7 @@ fn main() {
             "heat_snapshot" => {
                 let coords: Vec<_> = parts.take(4).collect();
                 if let (Some(x0), Some(y0), Some(w), Some(h)) =
-                    (coords.get(0), coords.get(1), coords.get(2), coords.get(3))
+                    (coords.first(), coords.get(1), coords.get(2), coords.get(3))
                 {
                     if let (Some(x0), Some(y0), Some(w), Some(h)) = (
                         parse_usize(x0),
@@ -2173,7 +2173,7 @@ fn main() {
                 }
                 let mut params = engine::charge::ChargeParams::default();
                 let mut args: Vec<&str> = parts.collect();
-                while let Some(flag) = args.get(0).cloned() {
+                while let Some(flag) = args.first().cloned() {
                     match flag {
                         "inject_scale" => {
                             if args.len() >= 2 {
@@ -2216,7 +2216,7 @@ fn main() {
             "charge_snapshot" => {
                 let coords: Vec<_> = parts.take(4).collect();
                 if let (Some(x0), Some(y0), Some(w), Some(h)) =
-                    (coords.get(0), coords.get(1), coords.get(2), coords.get(3))
+                    (coords.first(), coords.get(1), coords.get(2), coords.get(3))
                 {
                     if let (Some(x0), Some(y0), Some(w), Some(h)) = (
                         parse_usize(x0),
@@ -2248,7 +2248,7 @@ fn main() {
                 }
                 let mut params = engine::diffuse::DiffuseParams::default();
                 let mut args: Vec<&str> = parts.collect();
-                while let Some(flag) = args.get(0).cloned() {
+                while let Some(flag) = args.first().cloned() {
                     match flag {
                         "spread" => {
                             if args.len() >= 2 {
@@ -2305,7 +2305,7 @@ fn main() {
                 }
                 let mut params = engine::diffuse::DiffuseParams::default();
                 let mut args: Vec<&str> = parts.collect();
-                while let Some(flag) = args.get(0).cloned() {
+                while let Some(flag) = args.first().cloned() {
                     match flag {
                         "spread" => {
                             if args.len() >= 2 {
@@ -2364,7 +2364,7 @@ fn main() {
                 }
                 let mut params = engine::reaction::ReactionParams::default();
                 let mut args: Vec<&str> = parts.collect();
-                while let Some(flag) = args.get(0).cloned() {
+                while let Some(flag) = args.first().cloned() {
                     match flag {
                         "heat_consume" => {
                             if args.len() >= 2 {
@@ -2461,7 +2461,7 @@ fn main() {
                 let steps = parts.next().and_then(|s| s.parse::<u32>().ok());
                 let mut params = engine::physics_interact::InteractionParams::default();
                 let mut args: Vec<&str> = parts.collect();
-                while let Some(flag) = args.get(0).cloned() {
+                while let Some(flag) = args.first().cloned() {
                     match flag {
                         "heat_affects_charge" => {
                             if args.len() >= 2 {
@@ -2520,7 +2520,7 @@ fn main() {
                 let mut tick_stride = Some(1u32);
                 let mut region_args: Option<Vec<&str>> = None;
                 let mut args: Vec<&str> = parts.collect();
-                while let Some(flag) = args.get(0).cloned() {
+                while let Some(flag) = args.first().cloned() {
                     match flag {
                         "steps" => {
                             if args.len() >= 2 {
@@ -2600,7 +2600,7 @@ fn main() {
                 let mut tick_stride = Some(1u32);
                 let mut _region_args: Vec<&str> = Vec::new();
                 let mut args: Vec<&str> = parts.collect();
-                while let Some(flag) = args.get(0).cloned() {
+                while let Some(flag) = args.first().cloned() {
                     match flag {
                         "tick_stride" => {
                             if args.len() >= 2 {

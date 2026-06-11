@@ -163,7 +163,7 @@ fn cross_layer_dirty_propagation() {
     // set_logic_value_3d updates the atomic but doesn't evaluate — same pattern
     // as software-written Const: must dirty the consumer (ViaUp) explicitly.
     sim.set_logic_value_3d(3, 1, 1, 0x99);
-    let via_up_idx = 0 * sim.tilemap.layer_size + 1 * 8 + 3; // ViaUp on layer 0
+    let via_up_idx = 8 + 3; // ViaUp on layer 0 at (x=3, y=1), gw=8
     sim.dirty.mark_dirty(via_up_idx);
 
     for _ in 0..30 {

@@ -22,7 +22,7 @@ fn test_hybrid_cpu_flow() {
     let amp0 = block.get(0);
     let amp1 = block.get(1);
 
-    let inv_sqrt2 = 0.70710678;
+    let inv_sqrt2 = std::f32::consts::FRAC_1_SQRT_2;
     assert!((amp0.re.to_f32() - inv_sqrt2).abs() < 1e-4);
     assert!((amp1.re.to_f32() - inv_sqrt2).abs() < 1e-4);
 }

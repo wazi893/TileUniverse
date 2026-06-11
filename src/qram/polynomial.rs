@@ -460,7 +460,7 @@ mod tests {
             PI / 4.0
         );
         // But we should have used some T gates
-        assert!(result.t_count > 0 || result.gates.len() > 0);
+        assert!(result.t_count > 0 || !result.gates.is_empty());
     }
 
     #[test]

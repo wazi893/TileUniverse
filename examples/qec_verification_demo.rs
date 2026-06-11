@@ -154,7 +154,7 @@ fn future_qec_scaling() {
 
     for d in [100, 1000, 10000, 100000, 1000000] {
         // Dense would need 2^d * 16 bytes
-        let log10_dense = (d as f64) * 0.30103 + 1.2; // log10(2^d * 16)
+        let log10_dense = (d as f64) * std::f64::consts::LOG10_2 + 1.2; // log10(2^d * 16)
         let dense_str = format!("10^{:.0} bytes", log10_dense);
 
         // Our method

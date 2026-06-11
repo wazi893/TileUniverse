@@ -157,7 +157,7 @@ impl ClassicalGA {
         // Initial evaluation
         self.substrate.evaluate_all();
 
-        let mut best = self.substrate.best_candidate().clone();
+        let mut best = *self.substrate.best_candidate();
         let mut best_generation = 0u64;
         let mut optimal_reached = false;
 
@@ -170,7 +170,7 @@ impl ClassicalGA {
             // Check for improvement
             let current_best = self.substrate.best_candidate();
             if current_best.fitness > best.fitness {
-                best = current_best.clone();
+                best = *current_best;
                 best_generation = gen_idx as u64;
             }
 
@@ -282,7 +282,7 @@ impl ClassicalGA {
                             let (c1, _) = p1.crossover_single_point(p2, point);
                             c1
                         } else {
-                            p1.clone()
+                            *p1
                         };
 
                         // Mutation
@@ -299,7 +299,7 @@ impl ClassicalGA {
 
         // Add elites (unchanged)
         for &idx in &elite_indices {
-            let mut elite = self.substrate.get(idx).clone();
+            let mut elite = *self.substrate.get(idx);
             elite.flags.set_elite(true);
             new_population.push(elite);
         }

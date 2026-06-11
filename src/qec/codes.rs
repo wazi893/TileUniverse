@@ -162,7 +162,7 @@ impl RepetitionCode {
                 } else {
                     // Longer run: multiple adjacent errors or odd error pattern
                     // Decode as error at the center of the run
-                    let center = (run_start + run_end + 1) / 2;
+                    let center = (run_start + run_end).div_ceil(2);
                     errors.push(center);
                 }
             } else {

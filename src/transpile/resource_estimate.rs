@@ -157,7 +157,7 @@ impl FaultTolerantConfig {
         let d = (d_float.ceil() as usize).max(3);
 
         // Round up to odd number
-        if d % 2 == 0 { d + 1 } else { d }
+        if d.is_multiple_of(2) { d + 1 } else { d }
     }
 }
 
@@ -226,7 +226,7 @@ impl PhysicalResourceEstimate {
 
         // Factory cycles = ceil(magic_states / factories)
         let factory_cycles = if num_factories > 0 {
-            (magic_states_required + num_factories - 1) / num_factories
+            magic_states_required.div_ceil(num_factories)
         } else {
             magic_states_required
         };

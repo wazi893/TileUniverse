@@ -563,7 +563,7 @@ impl ObserverGrid {
                 observer.local_probability > threshold
             }
             ObservationRule::NeighborCount(n) => neighbor_collapsed_count >= n,
-            ObservationRule::Periodic(period) => self.tick % period == 0,
+            ObservationRule::Periodic(period) => self.tick.is_multiple_of(period),
             ObservationRule::Never => false,
             ObservationRule::Immediate => true,
             ObservationRule::RegisterThreshold(threshold) => observer.register_r0 > threshold,
@@ -623,7 +623,7 @@ impl ObserverGrid {
                     observer.is_superposition() && neighbor_collapsed[id] >= n
                 }
                 ObservationRule::Periodic(period) => {
-                    observer.is_superposition() && current_tick % period == 0
+                    observer.is_superposition() && current_tick.is_multiple_of(period)
                 }
                 ObservationRule::Never => false,
                 ObservationRule::Immediate => observer.is_superposition(),

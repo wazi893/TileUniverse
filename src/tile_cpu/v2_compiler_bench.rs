@@ -292,15 +292,26 @@ pub const V2_COMPILED_BENCH_GOLDENS: &[(&str, usize, u64, u64)] = &[
 ];
 
 /// Render a one-line report row for a benchmark outcome.
+/// Sprint 384: wall-clock columns added — under the JIT settle, `tiles/instr`
+/// counts the unconditional 5,492-op native scan as evals, so wall time is
+/// the honest cross-build comparison metric.
 pub fn format_bench_row(o: &V2CompiledBenchOutcome) -> String {
+    let wall_ms = o.elapsed.as_secs_f64() * 1_000.0;
+    let cyc_per_sec = if o.elapsed.as_secs_f64() > 0.0 {
+        o.metrics.cycles as f64 / o.elapsed.as_secs_f64()
+    } else {
+        0.0
+    };
     format!(
-        "{:<16} {:>6} {:>9} {:>9} {:>14} {:>11.0} {:>10}",
+        "{:<16} {:>6} {:>9} {:>9} {:>14} {:>11.0} {:>9.1} {:>8.0} {:>10}",
         o.case_name,
         o.program_words,
         o.metrics.instructions_executed,
         o.metrics.cycles,
         o.metrics.total_tiles_evaluated,
         o.tiles_per_instruction(),
+        wall_ms,
+        cyc_per_sec,
         o.r0,
     )
 }
@@ -354,8 +365,8 @@ pub fn phase_report_header() -> String {
 /// The report header matching [`format_bench_row`].
 pub fn bench_report_header() -> String {
     format!(
-        "{:<16} {:>6} {:>9} {:>9} {:>14} {:>11} {:>10}",
-        "benchmark", "words", "instrs", "ticks", "tiles_eval", "tiles/instr", "R0",
+        "{:<16} {:>6} {:>9} {:>9} {:>14} {:>11} {:>9} {:>8} {:>10}",
+        "benchmark", "words", "instrs", "ticks", "tiles_eval", "tiles/instr", "wall_ms", "cyc/s", "R0",
     )
 }
 

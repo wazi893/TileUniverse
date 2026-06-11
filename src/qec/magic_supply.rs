@@ -941,7 +941,7 @@ pub fn estimate_factory_config(
 
     // States needed per T-layer
     let t_per_layer = if t_depth > 0 {
-        (t_count + t_depth - 1) / t_depth
+        t_count.div_ceil(t_depth)
     } else {
         t_count
     };

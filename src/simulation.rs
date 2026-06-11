@@ -22,7 +22,9 @@ use crate::physics::logic_coupling::{
 };
 use crate::tile::Tile;
 use crate::tile_meta::TileType;
-use crate::tilemap::{HEIGHT, TILE_COUNT, Tilemap, WIDTH};
+use crate::tilemap::{HEIGHT, Tilemap, WIDTH};
+#[cfg(test)]
+use crate::tilemap::TILE_COUNT;
 // use crate::net::net_summary::{GlobalSummary, SummaryReport};
 
 #[derive(Debug, Clone, Copy)]
@@ -227,6 +229,9 @@ pub struct Simulation {
     charge_field_interact: FieldGrid<u32>,
     // EPIC 37: reusable dirty-batch buffer to avoid per-tick allocations
     dirty_batch_buf: Vec<u32>,
+    /// Sprint 384: total residual in-scope dirty bits drained after JIT settle
+    /// (diagnostic — measures the residue that previously leaked to later phases).
+    pub jit_settle_drained_total: u64,
     // Sprint 278: reusable slot-dirty bitset for compact scheduler
     schedule_slot_buf: Vec<u64>,
     // Sprint 280: When true, eval_tile/eval_tile_chain_fused skip global dirty
@@ -424,6 +429,7 @@ impl Simulation {
             heat_field_interact,
             charge_field_interact,
             dirty_batch_buf: Vec::with_capacity(tile_count),
+            jit_settle_drained_total: 0,
             schedule_slot_buf: Vec::new(),
             suppress_dirty_propagation: false,
             qtiles: Vec::new(),
@@ -2549,6 +2555,7 @@ impl Simulation {
         &mut self,
         jit: &crate::tile_cpu::tile_jit::TileEvalJitProgram,
         scope_mask: &[u64],
+        in_scope_segments: &[(u32, u64)],
         idx_to_slot: &[u32],
         frontier_offsets: &[u32],
         frontier_targets: &[u32],
@@ -2599,16 +2606,35 @@ impl Simulation {
             }
         }
 
+        // Sprint 384: Drain residual in-scope dirty bits. Blockskip consumed
+        // these via is_dirty_and_clear during its scan; the JIT path never
+        // reads the dirty bitset, so pre-inject seeds and prior-phase frontier
+        // marks inside the settle scope survived this call and were re-processed
+        // by later phases (S341 flagged branch 1.6→3.9 µs under JIT settle).
+        // Every settle-scope tile was just evaluated in topological order, so
+        // these bits carry no information. Frontier marks made above target
+        // out-of-scope tiles only and are unaffected. Sparse (S333 pattern):
+        // a masked drain traverses every dirty segment in the grid (~6 µs with
+        // build-time residue); the sparse list visits only settle-scope segments.
+        self.jit_settle_drained_total += if !in_scope_segments.is_empty() {
+            self.dirty.clear_sparse(in_scope_segments) as u64
+        } else {
+            self.dirty.clear_masked(scope_mask) as u64
+        };
+
         self.dirty_batch_buf = changed_buf;
         (1, jit.op_count as u32, actual_changed as u32)
     }
 
     /// Sprint 337/338/340: Profiled variant — uses same frontier table as production
     /// path (S339), keeps convergence loop for pass-2 counting.
+    /// Sprint 384: Takes scope_mask for the residual-dirty drain (matches production).
     #[cfg(feature = "cranelift_jit")]
     pub fn propagate_jit_settle_profiled(
         &mut self,
         jit: &crate::tile_cpu::tile_jit::TileEvalJitProgram,
+        scope_mask: &[u64],
+        in_scope_segments: &[(u32, u64)],
         idx_to_slot: &[u32],
         frontier_offsets: &[u32],
         frontier_targets: &[u32],
@@ -2671,6 +2697,15 @@ impl Simulation {
                 break;
             }
         }
+
+        // Sprint 384: Residual-dirty drain (matches production path, sparse).
+        let drain_start = std::time::Instant::now();
+        self.jit_settle_drained_total += if !in_scope_segments.is_empty() {
+            self.dirty.clear_sparse(in_scope_segments) as u64
+        } else {
+            self.dirty.clear_masked(scope_mask) as u64
+        };
+        dirty_ns_total += drain_start.elapsed().as_nanos() as u64;
 
         self.dirty_batch_buf = changed_buf;
         (
@@ -2961,6 +2996,139 @@ impl Simulation {
                         cone_set.get(vi / 64).copied().unwrap_or(0) & (1u64 << (vi % 64)) != 0;
                     if !in_cone {
                         self.dirty.mark_dirty(vi);
+                    }
+                }
+            }
+        }
+
+        (1, ops.len() as u32, total_switched)
+    }
+
+    /// Sprint 384: Frontier-table variant of propagate_cone_no_dirty (S339 pattern).
+    /// Identical evaluation semantics, but frontier dirty marks come from a
+    /// precomputed table indexed by op slot instead of the dynamic
+    /// tile_type/neighbors4/scope-bitset walk (~10 ns/changed → ~3-5 ns/changed).
+    /// The table is built by `build_settle_frontier_table(ops, scope_mask)` and
+    /// therefore produces the exact same mark set as `dirty_dependents_frontier`
+    /// + via_fwd. Used for the pruned clock cascade where most ops switch.
+    pub fn propagate_cone_no_dirty_ft(
+        &mut self,
+        ops: &[CompactOp],
+        wvia_params: &[(usize, u8, u64)],
+        frontier_offsets: &[u32],
+        frontier_targets: &[u32],
+    ) -> (u32, u32, u32) {
+        use std::sync::atomic::Ordering;
+        let mut total_switched = 0u32;
+        let mut wvia_idx = 0usize;
+
+        for (slot, op) in ops.iter().enumerate() {
+            let is_wvia = op.op == COP_WVIA;
+            if op.op == COP_CONST {
+                if is_wvia {
+                    wvia_idx += 1;
+                }
+                continue;
+            }
+
+            let idx = op.idx as usize;
+            let ld = |i: u32| -> u64 {
+                if i == u32::MAX {
+                    0
+                } else {
+                    self.tilemap.tiles[i as usize].logic.load(Ordering::Relaxed)
+                }
+            };
+            let v0 = ld(op.in0);
+            let v1 = ld(op.in1);
+            let v2 = ld(op.in2);
+            let current = self.tilemap.tiles[idx].logic.load(Ordering::Relaxed);
+
+            let result = match op.op {
+                COP_WIRE_R | COP_VIA => v0,
+                COP_WIRE_L => v1,
+                COP_WIRE_D | COP_WIRE_U => v2,
+                COP_WIRE_H | COP_OR => v0 | v1,
+                COP_WIRE_V => v1 | v2,
+                COP_AND => v0 & v1,
+                COP_XOR => v0 ^ v1,
+                COP_MUX => {
+                    if v2 != 0 {
+                        v0
+                    } else {
+                        v1
+                    }
+                }
+                COP_NOT => !v0,
+                COP_ZERO => {
+                    if v0 == 0 {
+                        u64::MAX
+                    } else {
+                        0
+                    }
+                }
+                COP_ADD => v0.wrapping_add(v1),
+                COP_SUB => v0.wrapping_sub(v1),
+                COP_SHR => v0 >> (v1 & 63),
+                COP_SHL => v0 << (v1 & 63),
+                COP_MUX16 => {
+                    let lane = v1 & 0xF;
+                    let source = if lane < 8 { v0 } else { v2 };
+                    (source >> ((lane & 7) * 8)) & 0xFF
+                }
+                COP_DEC3 => 1u64 << (v0 & 7),
+                COP_BITSEL => {
+                    if ((v0 >> (v1 & 63)) & 1) != 0 {
+                        u64::MAX
+                    } else {
+                        0
+                    }
+                }
+                COP_CARRY => {
+                    if v0 > v1 {
+                        u64::MAX
+                    } else {
+                        0
+                    }
+                }
+                COP_WVIA => {
+                    let r = if wvia_idx < wvia_params.len() {
+                        let (_, shift, mask) = wvia_params[wvia_idx];
+                        (v0 >> shift) & mask
+                    } else {
+                        v0
+                    };
+                    wvia_idx += 1;
+                    r
+                }
+                COP_MUX4 => (v0 >> ((v2 & 3) * 8)) & 0xFF,
+                COP_RAM => {
+                    if v2 != 0 {
+                        v0
+                    } else {
+                        current
+                    }
+                }
+                _ => {
+                    if is_wvia && op.op != COP_WVIA {
+                        wvia_idx += 1;
+                    }
+                    continue;
+                }
+            };
+
+            if result != current {
+                self.tilemap.tiles[idx]
+                    .logic
+                    .store(result, Ordering::Relaxed);
+                total_switched += 1;
+
+                // Frontier marks from the precomputed table (slot-indexed).
+                if slot + 1 < frontier_offsets.len() {
+                    let start = frontier_offsets[slot] as usize;
+                    let end = frontier_offsets[slot + 1] as usize;
+                    for &t in &frontier_targets[start..end] {
+                        self.dirty.mark_dirty(t as usize);
                     }
                 }
             }
@@ -6598,13 +6766,20 @@ impl Simulation {
     /// seeding AND frontier determination, but evaluates only live ops.
     /// Sprint 324: Fixed — live_scope_mask was too small for frontier, causing
     /// excessive out-of-scope dirty marking. Now uses full scope_mask for cone_set.
+    /// Sprint 384: Optional precomputed frontier table (S339 pattern, built with
+    /// the full scope_mask) replaces the dynamic per-changed frontier walk.
+    /// Empty table → dynamic walk (identical marks either way). The delta-0
+    /// drain uses the sparse in-scope segment list (S333 pattern) when provided
+    /// — a masked drain pays for every dirty segment in the grid.
     pub fn tick_clock_edge_pruned(
         &mut self,
         scope_mask: &[u64],
+        in_scope_segments: &[(u32, u64)],
         in_scope_clock_cache: &[usize],
         live_ops: &[CompactOp],
         live_wvia: &[(usize, u8, u64)],
-        _live_scope_mask: &[u64],
+        frontier_offsets: &[u32],
+        frontier_targets: &[u32],
     ) -> TimingStats {
         // 1. Toggle clock.
         self.prev_clock = self.global_clock;
@@ -6628,13 +6803,20 @@ impl Simulation {
             }
         }
 
-        // 3. Delta 0 (full scope_mask for correct seeding drain).
+        // 3. Delta 0 (full clock scope for correct seeding drain).
+        // Sprint 384: Sparse drain over the precomputed in-scope segment list
+        // when provided — identical drained set, skips out-of-scope dirty
+        // segments (build-time residue made the masked traversal cost ~5 µs).
         self.current_delta = 0;
         let mut total_evaluated: u32 = 0;
         let mut total_switched: u32 = 0;
         {
             let mut batch = std::mem::take(&mut self.dirty_batch_buf);
-            self.dirty.fill_into_masked(scope_mask, &mut batch);
+            if !in_scope_segments.is_empty() {
+                self.dirty.fill_into_sparse(in_scope_segments, &mut batch);
+            } else {
+                self.dirty.fill_into_masked(scope_mask, &mut batch);
+            }
             total_evaluated += batch.len() as u32;
             for &idx32 in batch.iter() {
                 let idx = idx32 as usize;
@@ -6655,9 +6837,20 @@ impl Simulation {
         }
 
         // 4. Cascade on PRUNED ops only, but use FULL scope_mask for frontier.
+        // Sprint 384: Frontier table (built against the same full scope_mask)
+        // when available; dynamic walk otherwise.
         let mut cascade_passes: u32 = 0;
         if !live_ops.is_empty() {
-            let (d, e, s) = self.propagate_cone_no_dirty(live_ops, live_wvia, scope_mask);
+            let (d, e, s) = if !frontier_offsets.is_empty() {
+                self.propagate_cone_no_dirty_ft(
+                    live_ops,
+                    live_wvia,
+                    frontier_offsets,
+                    frontier_targets,
+                )
+            } else {
+                self.propagate_cone_no_dirty(live_ops, live_wvia, scope_mask)
+            };
             cascade_passes = d;
             total_evaluated += e;
             total_switched += s;
@@ -10233,14 +10426,22 @@ mod branchless_parity_tests {
 
 impl Clone for Simulation {
     fn clone(&self) -> Self {
-        let mut tilemap = Tilemap::new();
+        // Preserve the source's actual (possibly layered) dimensions. The old
+        // hardcoded `Tilemap::new()` / `TILE_COUNT` silently truncated clones of
+        // any non-default-size sim (e.g. the 128x640x16 V2 grid) — see the SIMT
+        // build-amortization path. For a default 512x512x1 sim this is identical.
+        let mut tilemap = Tilemap::with_size_layered(
+            self.tilemap.width,
+            self.tilemap.height,
+            self.tilemap.num_layers,
+        );
         for (dst, src) in tilemap.tiles.iter_mut().zip(self.tilemap.tiles.iter()) {
             dst.meta = src.meta;
             let v = src.logic.load(Ordering::Relaxed);
             dst.logic.store(v, Ordering::Relaxed);
         }
 
-        let dirty = DirtyBitset::new(TILE_COUNT);
+        let dirty = DirtyBitset::new(self.tilemap.tile_count());
         for (dst, src) in dirty.segments.iter().zip(self.dirty.segments.iter()) {
             dst.set(src.get());
         }
@@ -10272,6 +10473,7 @@ impl Clone for Simulation {
             heat_field_interact: self.heat_field_interact.clone(),
             charge_field_interact: self.charge_field_interact.clone(),
             dirty_batch_buf: Vec::with_capacity(self.dirty_batch_buf.capacity()),
+            jit_settle_drained_total: 0,
             schedule_slot_buf: Vec::new(),
             suppress_dirty_propagation: false,
             qtiles: Vec::new(),

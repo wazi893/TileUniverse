@@ -458,9 +458,9 @@ mod tests {
         // Fitness should be deterministic
         let f1 = nk.evaluate(&c1);
         let f2 = nk.evaluate(&c2);
-        // Just check they're valid fitness values
-        assert!(f1 <= 255);
-        assert!(f2 <= 255);
+        // Re-evaluating must give identical results
+        assert_eq!(f1, nk.evaluate(&c1));
+        assert_eq!(f2, nk.evaluate(&c2));
     }
 
     #[test]

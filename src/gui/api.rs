@@ -67,7 +67,7 @@ pub fn load_run(dir: &Path) -> Result<GuiRunInfo, std::io::Error> {
                 let mut buf = Vec::new();
                 f.read_to_end(&mut buf)?;
                 let (w, h, _) = parse_ppm_header(&buf)
-                    .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "bad ppm"))?;
+                    .ok_or_else(|| std::io::Error::other("bad ppm"))?;
                 width = w;
                 height = h;
             }
@@ -85,21 +85,21 @@ pub fn load_run(dir: &Path) -> Result<GuiRunInfo, std::io::Error> {
 
 pub fn load_frame(dir: &Path, index: usize) -> Result<GuiFrame, std::io::Error> {
     let stream = open_recorded_frames(dir)
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "open frames"))?;
+        .map_err(|_| std::io::Error::other("open frames"))?;
     let meta = stream
         .meta(index as u32)
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "index"))?
+        .ok_or_else(|| std::io::Error::other("index"))?
         .clone();
     let bytes = stream
         .frame_bytes(index as u32)
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "bytes"))?
+        .ok_or_else(|| std::io::Error::other("bytes"))?
         .to_vec();
     Ok(GuiFrame { meta, bytes })
 }
 
 pub fn load_frame_range(dir: &Path, range: Range<usize>) -> Result<Vec<GuiFrame>, std::io::Error> {
     let stream = open_recorded_frames(dir)
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "open frames"))?;
+        .map_err(|_| std::io::Error::other("open frames"))?;
     let mut out = Vec::new();
     for i in range {
         if let (Some(m), Some(b)) = (stream.meta(i as u32), stream.frame_bytes(i as u32)) {
@@ -121,7 +121,7 @@ pub struct GuiStream {
 pub fn stream_from_recorded(dir: &Path) -> Result<GuiStream, std::io::Error> {
     let info = load_run(dir)?;
     let frames = open_recorded_frames(dir)
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "open frames"))?;
+        .map_err(|_| std::io::Error::other("open frames"))?;
     Ok(GuiStream { info, frames })
 }
 
@@ -133,11 +133,11 @@ pub fn preview_organism(
     origin_y: u32,
 ) -> Result<GuiStream, std::io::Error> {
     let frames = run_organism_frames(sim, name, origin_x, origin_y, steps)
-        .map_err(|_| std::io::Error::new(std::io::ErrorKind::Other, "preview"))?;
+        .map_err(|_| std::io::Error::other("preview"))?;
     // derive info from first frame
     let meta0 = frames
         .meta(0)
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "empty"))?;
+        .ok_or_else(|| std::io::Error::other("empty"))?;
     let man = read_manifest(Path::new(".")) // dummy manifest for preview, minimal
         .unwrap_or_else(|_| crate::recorder::RecordManifest {
             run_kind: "preview".into(),

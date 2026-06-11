@@ -664,7 +664,7 @@ fn estimate_depth(circuit: &QuantumCircuit) -> usize {
     if circuit.n_qubits == 0 {
         0
     } else {
-        (circuit.gate_count() + circuit.n_qubits - 1) / circuit.n_qubits
+        circuit.gate_count().div_ceil(circuit.n_qubits)
     }
 }
 

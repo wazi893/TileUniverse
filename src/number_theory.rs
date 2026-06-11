@@ -146,13 +146,13 @@ pub fn is_prime(n: u64) -> bool {
     if n == 2 {
         return true;
     }
-    if n % 2 == 0 {
+    if n.is_multiple_of(2) {
         return false;
     }
 
     let limit = (n as f64).sqrt() as u64 + 1;
     for i in (3..=limit).step_by(2) {
-        if n % i == 0 {
+        if n.is_multiple_of(i) {
             return false;
         }
     }
@@ -168,10 +168,10 @@ pub fn is_prime_power(n: u64) -> Option<(u64, u32)> {
 
     // Check small primes
     for p in 2..=((n as f64).sqrt() as u64 + 1) {
-        if n % p == 0 {
+        if n.is_multiple_of(p) {
             let mut k = 0u32;
             let mut temp = n;
-            while temp % p == 0 {
+            while temp.is_multiple_of(p) {
                 temp /= p;
                 k += 1;
             }
@@ -347,6 +347,6 @@ mod tests {
 
         // For s/2^n = 85/256 ≈ 0.332, continued fraction should find period candidates
         // This is a probabilistic test - just verify we get some candidates
-        assert!(candidates.len() > 0 && candidates.len() < 20);
+        assert!(!candidates.is_empty() && candidates.len() < 20);
     }
 }

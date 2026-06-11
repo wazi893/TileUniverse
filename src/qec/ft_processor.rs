@@ -2001,7 +2001,7 @@ mod tests {
     fn test_reset() {
         let mut processor = FaultTolerantProcessor::new(2, FTConfig::default());
 
-        processor.execute(&vec![LogicalGate::T(0)]);
+        processor.execute(&[LogicalGate::T(0)]);
         assert!(processor.stats().t_gates > 0);
 
         processor.reset();
@@ -2014,7 +2014,7 @@ mod tests {
         let mut processor = FaultTolerantProcessor::new(1, FTConfig::default()).with_seed(12345);
 
         // Measure |0⟩ should give 0
-        let result = processor.execute(&vec![LogicalGate::MeasureZ(0)]);
+        let result = processor.execute(&[LogicalGate::MeasureZ(0)]);
         assert_eq!(result.measurement_outcomes.len(), 1);
         // |0⟩ measured in Z basis should give 0
         assert!(!result.measurement_outcomes[0].value);
@@ -2661,7 +2661,7 @@ mod tests {
 
         // Check resource log has events
         let events = processor.resource_log().events();
-        assert!(events.len() > 0, "Should have recorded events");
+        assert!(!events.is_empty(), "Should have recorded events");
 
         // Get summary
         let summary = processor.resource_summary();

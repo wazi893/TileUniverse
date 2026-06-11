@@ -1,3 +1,6 @@
+// Literal angles below are verbatim Qiskit synthesis output; keeping them as
+// printed documents what the synthesizer emitted (π-valued or not).
+#![allow(clippy::approx_constant)]
 use std::io::Write as IoWrite;
 use std::process::{Command, Stdio};
 /// SPRINT 37.0: Benchmark Qiskit synthesis overhead vs native execution

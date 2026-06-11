@@ -189,7 +189,7 @@ pub fn estimate_magic_cost(
 
     // Factory cycles based on T-depth (parallelism)
     let factory_cycles = if analysis.t_depth > 0 {
-        (analysis.t_count + analysis.t_depth - 1) / analysis.t_depth
+        analysis.t_count.div_ceil(analysis.t_depth)
     } else {
         0
     };

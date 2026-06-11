@@ -470,7 +470,7 @@ impl QuboBrain {
     /// If no bits are set, default to Stay
     pub fn decode_action(&self, state: &[u8]) -> Move {
         // Check action bits in priority order
-        if state.len() > 0 && state[0] == 1 {
+        if !state.is_empty() && state[0] == 1 {
             Move::Up
         } else if state.len() > 1 && state[1] == 1 {
             Move::Down

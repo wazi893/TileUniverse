@@ -686,7 +686,7 @@ impl UnlimitedGhzState {
     /// Get approximate log10 of qubit count (for display)
     pub fn log10_qubits(&self) -> f64 {
         let bits = self.n_qubits.bits();
-        bits as f64 * 0.30103 // log10(2)
+        bits as f64 * std::f64::consts::LOG10_2
     }
 
     /// Get the state space size as a string: "2^n where n = ..."
@@ -699,7 +699,7 @@ impl std::fmt::Display for UnlimitedGhzState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let bits = self.n_qubits.bits();
         if bits > 1000 {
-            write!(f, "|GHZ_(~10^{:.0})⟩", bits as f64 * 0.30103)
+            write!(f, "|GHZ_(~10^{:.0})⟩", bits as f64 * std::f64::consts::LOG10_2)
         } else if bits > 100 {
             write!(f, "|GHZ_(2^{})⟩", bits)
         } else {
@@ -722,7 +722,7 @@ pub struct UnlimitedGhzVerification {
 impl std::fmt::Display for UnlimitedGhzVerification {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let bits = self.n_qubits.bits();
-        let log10 = bits as f64 * 0.30103;
+        let log10 = bits as f64 * std::f64::consts::LOG10_2;
 
         writeln!(f, "Unlimited GHZ Verification [NO UPPER LIMIT]")?;
         if bits > 1000 {
@@ -842,7 +842,7 @@ impl SymbolicNumber {
             Self::Big(n) => {
                 let bits = n.bits();
                 if bits > 1000 {
-                    format!("~10^{:.0}", bits as f64 * 0.30103)
+                    format!("~10^{:.0}", bits as f64 * std::f64::consts::LOG10_2)
                 } else {
                     format!("{}", n)
                 }
@@ -929,7 +929,7 @@ impl SymbolicNumber {
     pub fn estimate_log10(&self) -> Option<f64> {
         match self {
             Self::Literal(n) => Some((*n as f64).log10()),
-            Self::Big(n) => Some(n.bits() as f64 * 0.30103),
+            Self::Big(n) => Some(n.bits() as f64 * std::f64::consts::LOG10_2),
             Self::Pow { base, exponent } => {
                 // log₁₀(base^exp) = exp * log₁₀(base)
                 let exp_log = exponent.estimate_log10()?;
@@ -2708,7 +2708,7 @@ mod tests {
         let amp2 = SymbolicAmplitude::Zero;
         assert_eq!(amp2.to_notation(), "0");
 
-        let amp3 = SymbolicAmplitude::Real(0.707107);
+        let amp3 = SymbolicAmplitude::Real(std::f64::consts::FRAC_1_SQRT_2);
         assert!(amp3.to_notation().starts_with("0.707"));
     }
 

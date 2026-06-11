@@ -757,7 +757,7 @@ impl HybridScheduler {
                     .iter()
                     .enumerate()
                     .map(|(i, &p)| {
-                        let delta = if (iteration + i) % 2 == 0 { 1.0 } else { -1.0 };
+                        let delta = if (iteration + i).is_multiple_of(2) { 1.0 } else { -1.0 };
                         p - ak * delta * ck
                     })
                     .collect()

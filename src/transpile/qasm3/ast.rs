@@ -357,6 +357,7 @@ mod tests {
     use super::*;
 
     #[test]
+    #[allow(clippy::approx_constant)] // 1.5708 is literal display-format test data, not π/2
     fn test_gate_display() {
         assert_eq!(QasmGate::H(0).to_string(), "h q[0]");
         assert_eq!(QasmGate::CX(0, 1).to_string(), "cx q[0], q[1]");

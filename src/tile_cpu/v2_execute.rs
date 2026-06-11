@@ -491,6 +491,11 @@ pub struct TileCpuV2 {
     pub(crate) live_clock_wvia_flags: std::cell::RefCell<Vec<(usize, u8, u64)>>,
     pub(crate) live_clock_ops_noflags: std::cell::RefCell<Vec<crate::simulation::CompactOp>>,
     pub(crate) live_clock_wvia_noflags: std::cell::RefCell<Vec<(usize, u8, u64)>>,
+    // Sprint 384: Per-profile frontier tables for the pruned clock cascade
+    // (S339 pattern: (offsets, targets) built against the full clock scope_mask).
+    // Empty → tick_clock_edge_pruned falls back to the dynamic frontier walk.
+    pub(crate) live_clock_frontier_flags: std::cell::RefCell<(Vec<u32>, Vec<u32>)>,
+    pub(crate) live_clock_frontier_noflags: std::cell::RefCell<(Vec<u32>, Vec<u32>)>,
     // Sprint 324/325: Warmup counting state — separate counters for each profile.
     clock_cascade_counts_flags: std::cell::RefCell<Vec<u32>>,
     clock_cascade_counts_noflags: std::cell::RefCell<Vec<u32>>,
@@ -536,6 +541,8 @@ pub struct TileCpuV2 {
     // Sprint 291: Settle-scope cone set — bitset for frontier-only dirty propagation.
     // Sprint 306: Also used as scope_mask for prefiltered settle evaluation.
     pub(crate) settle_cone_set: Vec<u64>,
+    // Sprint 384: (segment, scope-word) pairs for the sparse post-JIT settle drain.
+    pub(crate) settle_in_scope_segments: Vec<(u32, u64)>,
     // Sprint 318: Targeted trunk re-settle ops (forward closure from trunk terminals).
     // Used for alu_trunk re-settle instead of full 5,492-op settle scope.
     pub(crate) trunk_settle_ops: Vec<crate::simulation::CompactOp>,
@@ -661,6 +668,8 @@ pub struct TileCpuV2 {
 
     // Sprint 166: unified clock scope mask for masked clock tick
     pub(crate) clock_scope_mask: Vec<u64>,
+    // Sprint 384: (segment, scope-word) pairs for sparse clock delta-0 drain (S333 pattern).
+    pub(crate) clock_scope_segments: Vec<(u32, u64)>,
     // Sprint 276: compact ops for clock edge combinational cascade
     pub(crate) clock_compact_ops: Vec<crate::simulation::CompactOp>,
     pub(crate) clock_compact_wvia: Vec<(usize, u8, u64)>,
@@ -1087,6 +1096,8 @@ impl TileCpuV2 {
             live_clock_ops_flags: std::cell::RefCell::new(Vec::new()),
             live_clock_wvia_flags: std::cell::RefCell::new(Vec::new()),
             live_clock_ops_noflags: std::cell::RefCell::new(Vec::new()),
+            live_clock_frontier_flags: std::cell::RefCell::new((Vec::new(), Vec::new())),
+            live_clock_frontier_noflags: std::cell::RefCell::new((Vec::new(), Vec::new())),
             live_clock_wvia_noflags: std::cell::RefCell::new(Vec::new()),
             clock_cascade_counts_flags: std::cell::RefCell::new(Vec::new()),
             clock_cascade_counts_noflags: std::cell::RefCell::new(Vec::new()),
@@ -1116,6 +1127,7 @@ impl TileCpuV2 {
             settle_compact_ops: Vec::new(),
             settle_compact_wvia: Vec::new(),
             settle_cone_set: Vec::new(),
+            settle_in_scope_segments: Vec::new(),
             trunk_settle_ops: Vec::new(),
             trunk_settle_wvia: Vec::new(),
             settle_idx_to_slot: Vec::new(),
@@ -1172,6 +1184,16 @@ impl TileCpuV2 {
             commit_eval_order: idx.commit_eval_order,
             branch_scope_mask: idx.branch_scope_mask,
             commit_scope_mask: idx.commit_scope_mask,
+            // Sprint 384: Sparse segment list (S333 pattern) so the clock
+            // delta-0 drain visits only in-scope segments instead of every
+            // dirty segment in the grid.
+            clock_scope_segments: idx
+                .clock_scope_mask
+                .iter()
+                .enumerate()
+                .filter(|&(_, &w)| w != 0)
+                .map(|(i, &w)| (i as u32, w))
+                .collect(),
             clock_scope_mask: idx.clock_scope_mask,
             clock_compact_ops: Vec::new(),
             clock_compact_wvia: Vec::new(),
@@ -1704,6 +1726,7 @@ impl TileCpuV2 {
                 let r = sim.propagate_jit_settle(
                     jit,
                     &self.backbone_cone_set,
+                    &[], // in_scope_segments empty → masked drain over backbone scope
                     &[], // idx_to_slot unused with empty frontier
                     &[], // frontier_offsets empty → fallback to dirty_dependents_frontier
                     &[], // frontier_targets
@@ -1856,6 +1879,8 @@ impl TileCpuV2 {
                     let (d, e, s, eval_ns, dirty_ns, passes, changed, p1c, p2c) = sim
                         .propagate_jit_settle_profiled(
                             jit,
+                            &self.settle_cone_set,
+                            &self.settle_in_scope_segments,
                             &self.settle_idx_to_slot,
                             &self.settle_frontier_offsets,
                             &self.settle_frontier_targets,
@@ -1877,6 +1902,7 @@ impl TileCpuV2 {
                     sim.propagate_jit_settle(
                         jit,
                         &self.settle_cone_set,
+                        &self.settle_in_scope_segments,
                         &self.settle_idx_to_slot,
                         &self.settle_frontier_offsets,
                         &self.settle_frontier_targets,
@@ -2218,6 +2244,12 @@ impl TileCpuV2 {
         switch_counts: &[u32],
         target_ops: &std::cell::RefCell<Vec<crate::simulation::CompactOp>>,
         target_wvia: &std::cell::RefCell<Vec<(usize, u8, u64)>>,
+        // Sprint 384: when Some, also build the cascade frontier table
+        // (S339 pattern) for these live ops against the full clock scope_mask.
+        target_frontier: Option<(
+            &Simulation,
+            &std::cell::RefCell<(Vec<u32>, Vec<u32>)>,
+        )>,
     ) {
         let sched = match &self.clock_schedule {
             Some(s) => s,
@@ -2244,22 +2276,28 @@ impl TileCpuV2 {
             }
         }
 
+        if let Some((sim, tf)) = target_frontier {
+            *tf.borrow_mut() = sim.build_settle_frontier_table(&ops, &self.clock_scope_mask);
+        }
         *target_ops.borrow_mut() = ops;
         *target_wvia.borrow_mut() = wvia;
     }
 
     /// Sprint 322/325: Build pruned live-clock-ops (unified — builds both profiles
     /// from the same counts for backward compatibility with tests).
+    /// No frontier tables (no sim available here) — cascade uses the dynamic walk.
     pub fn build_live_clock_ops(&self, switch_counts: &[u32]) {
         self.build_live_clock_profile(
             switch_counts,
             &self.live_clock_ops_flags,
             &self.live_clock_wvia_flags,
+            None,
         );
         self.build_live_clock_profile(
             switch_counts,
             &self.live_clock_ops_noflags,
             &self.live_clock_wvia_noflags,
+            None,
         );
     }
 
@@ -4400,12 +4438,14 @@ impl TileCpuV2 {
             // Sprint 325: Dual-profile auto-warmup — separate for flag-writing
             // and non-flag cycles. Each profile warmups independently (5 cycles).
             let is_flags = writes_flags || !self.physical_flag_writeback.get();
-            let (live_ops_ref, live_wvia_ref, counts_ref, warmup_cell) = if is_flags {
+            let (live_ops_ref, live_wvia_ref, counts_ref, warmup_cell, frontier_ref) = if is_flags
+            {
                 (
                     &self.live_clock_ops_flags,
                     &self.live_clock_wvia_flags,
                     &self.clock_cascade_counts_flags,
                     &self.clock_warmup_flags_remaining,
+                    &self.live_clock_frontier_flags,
                 )
             } else {
                 (
@@ -4413,6 +4453,7 @@ impl TileCpuV2 {
                     &self.live_clock_wvia_noflags,
                     &self.clock_cascade_counts_noflags,
                     &self.clock_warmup_noflags_remaining,
+                    &self.live_clock_frontier_noflags,
                 )
             };
 
@@ -4443,9 +4484,14 @@ impl TileCpuV2 {
                 if rem > 0 {
                     warmup_cell.set(rem - 1);
                     if rem == 1 {
-                        // Warmup complete: build pruned profile.
+                        // Warmup complete: build pruned profile (+ S383 frontier table).
                         let counts = std::mem::take(&mut *counts_ref.borrow_mut());
-                        self.build_live_clock_profile(&counts, live_ops_ref, live_wvia_ref);
+                        self.build_live_clock_profile(
+                            &counts,
+                            live_ops_ref,
+                            live_wvia_ref,
+                            Some((&*sim, frontier_ref)),
+                        );
                     }
                 }
                 r
@@ -4453,12 +4499,15 @@ impl TileCpuV2 {
                 // Use pruned live-clock ops for this profile.
                 let ops = live_ops_ref.borrow();
                 let wvia = live_wvia_ref.borrow();
+                let ft = frontier_ref.borrow();
                 sim.tick_clock_edge_pruned(
                     &self.clock_scope_mask,
+                    &self.clock_scope_segments,
                     clock_cache,
                     &ops,
                     &wvia,
-                    &[], // unused — full scope_mask used for frontier
+                    &ft.0,
+                    &ft.1,
                 )
             } else {
                 sim.tick_clock_edge_scheduled(
@@ -7251,6 +7300,15 @@ impl TileCpuV2 {
                 cone_set[i / 64] |= 1u64 << (i % 64);
             }
             self.settle_cone_set = cone_set;
+            // Sprint 384: Sparse segment list (S333 pattern) for the post-JIT
+            // residual-dirty drain — visit only settle-scope segments.
+            self.settle_in_scope_segments = self
+                .settle_cone_set
+                .iter()
+                .enumerate()
+                .filter(|&(_, &w)| w != 0)
+                .map(|(i, &w)| (i as u32, w))
+                .collect();
             self.settle_compact_ops = s_ops;
             self.settle_compact_wvia = s_wvia;
             // Sprint 339: Build frontier table for JIT settle dirty propagation.

@@ -227,7 +227,7 @@ impl BlockSparseState {
 
     /// Create from a single basis state |index⟩
     pub fn from_basis(n_qubits: u8, index: u64) -> Self {
-        assert!(n_qubits >= BLOCK_SHIFT && n_qubits <= 64);
+        assert!((BLOCK_SHIFT..=64).contains(&n_qubits));
         // For 64 qubits, all u64 indices are valid (0 to 2^64-1)
         // For <64 qubits, check that index fits within the state space
         if n_qubits < 64 {
@@ -295,8 +295,8 @@ impl BlockSparseState {
 
         for block_id in existing_ids {
             let partner_id = block_id ^ block_mask;
-            if !self.blocks.contains_key(&partner_id) {
-                self.blocks.insert(partner_id, Block::new_zero());
+            if let std::collections::hash_map::Entry::Vacant(e) = self.blocks.entry(partner_id) {
+                e.insert(Block::new_zero());
                 created += 1;
             }
         }

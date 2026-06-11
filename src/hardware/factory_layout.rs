@@ -590,7 +590,7 @@ mod tests {
         let footprint = FactoryFootprint::fifteen_to_one();
 
         let placements = optimizer.place_factories(&footprint, 3);
-        assert!(placements.len() >= 1);
+        assert!(!placements.is_empty());
 
         // Check no overlap
         let mut all_qubits = std::collections::HashSet::new();

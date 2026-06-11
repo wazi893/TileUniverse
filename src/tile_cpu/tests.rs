@@ -1331,7 +1331,7 @@ fn test_physical_writeback_bus_debug() {
 
     // After tick 2, check what the ALU result tree root has
     // ALU root is at L0@(ox+20, oy+54)
-    let alu_root_l0_idx = 0 * layer_size + (oy + 54) * gw + (ox + 20);
+    let alu_root_l0_idx = (oy + 54) * gw + (ox + 20);
     let alu_root_val = sim.get_logic_value_by_idx(alu_root_l0_idx);
     eprintln!(
         "After tick 2: ALU root L0@({},{}) = {}",
@@ -1411,7 +1411,7 @@ fn test_physical_writeback_bus_debug() {
     );
 
     // Check L0 ViaUp at (ox+40, oy+21) — should read L1 merge Mux
-    let viaup_l0_idx = 0 * layer_size + (oy + 21) * gw + (ox + 40);
+    let viaup_l0_idx = (oy + 21) * gw + (ox + 40);
     let viaup_val = sim.get_logic_value_by_idx(viaup_l0_idx);
     eprintln!(
         "After tick 2: ViaUp L0@({},{}) = {}",
@@ -1421,7 +1421,7 @@ fn test_physical_writeback_bus_debug() {
     );
 
     // Check L0 Mux(wb) at (ox+41, oy+21) — feedback Mux for R0
-    let muxwb_l0_idx = 0 * layer_size + (oy + 21) * gw + (ox + 41);
+    let muxwb_l0_idx = (oy + 21) * gw + (ox + 41);
     let muxwb_val = sim.get_logic_value_by_idx(muxwb_l0_idx);
     eprintln!(
         "After tick 2: Mux(wb) L0@({},{}) = {}",
@@ -1431,7 +1431,7 @@ fn test_physical_writeback_bus_debug() {
     );
 
     // Check L0 Register8 at (ox+42, oy+21)
-    let reg8_l0_idx = 0 * layer_size + (oy + 21) * gw + (ox + 42);
+    let reg8_l0_idx = (oy + 21) * gw + (ox + 42);
     let reg8_val = sim.get_logic_value_by_idx(reg8_l0_idx);
     eprintln!(
         "After tick 2: Register8 L0@({},{}) = {}",
@@ -1441,7 +1441,7 @@ fn test_physical_writeback_bus_debug() {
     );
 
     // Check AddCarry tile at L0@(ox+38, oy+43)
-    let addcarry_idx = 0 * layer_size + (oy + 43) * gw + (ox + 38);
+    let addcarry_idx = (oy + 43) * gw + (ox + 38);
     let addcarry_val = sim.get_logic_value_by_idx(addcarry_idx);
     eprintln!(
         "After tick 2: AddCarry L0@({},{}) = {} (low8={})",
@@ -1452,7 +1452,7 @@ fn test_physical_writeback_bus_debug() {
     );
 
     // Check alu_sel2 BitSelect at L0@(ox+14, oy+15) — should be bit 2 of ctrl_a
-    let asel2_bs_idx = 0 * layer_size + (oy + 15) * gw + (ox + 14);
+    let asel2_bs_idx = (oy + 15) * gw + (ox + 14);
     let asel2_bs_val = sim.get_logic_value_by_idx(asel2_bs_idx);
     eprintln!(
         "After tick 2: alu_sel2 BitSelect L0@({},{}) = {}",
@@ -1492,7 +1492,7 @@ fn test_physical_writeback_bus_debug() {
     );
 
     // Check S2 ViaUp at L0@(ox+20, oy+52)
-    let s2_via_idx = 0 * layer_size + (oy + 52) * gw + (ox + 20);
+    let s2_via_idx = (oy + 52) * gw + (ox + 20);
     let s2_val = sim.get_logic_value_by_idx(s2_via_idx);
     eprintln!(
         "After tick 2: S2 ViaUp L0@({},{}) = {}",

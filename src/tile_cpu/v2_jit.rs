@@ -80,8 +80,10 @@ impl V2JitState {
     /// Merge JIT state back into an IssState.
     pub fn to_iss_state(&self) -> crate::tile_cpu::v2_iss::V2IssState {
         crate::tile_cpu::v2_iss::V2IssState {
-            pc: (self.pc & 0x7F) as u8,
-            lr: (self.lr & 0x7F) as u8,
+            // Sprint 370 widened V2IssState.pc/lr to u32; the JIT still models
+            // the 7-bit PC era, so the 0x7F mask is preserved.
+            pc: self.pc & 0x7F,
+            lr: self.lr & 0x7F,
             flag_z: self.flag_z != 0,
             flag_c: self.flag_c != 0,
             halted: self.halted != 0,

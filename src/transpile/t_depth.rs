@@ -116,7 +116,7 @@ fn t_commutes_with(t_qubit: u8, other: &QGate) -> bool {
         QGate::U3(q, _, _, _) => *q != t_qubit,
 
         // Toffoli/CCZ: T commutes if not on target
-        QGate::Toffoli(c1, c2, t) => t_qubit != *t && (t_qubit == *c1 || t_qubit == *c2 || true),
+        QGate::Toffoli(_, _, t) => t_qubit != *t,
         QGate::CCZ(_, _, _) => true, // CCZ is diagonal
 
         // Controlled rotations

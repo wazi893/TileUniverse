@@ -245,7 +245,7 @@ impl LineageTracker {
         if let Some(node) = self.nodes.get_mut(&id) {
             node.update_peak_energy(energy);
 
-            if self.current_tick % self.snapshot_interval == 0 {
+            if self.current_tick.is_multiple_of(self.snapshot_interval) {
                 let snapshot = OrganismSnapshot {
                     id,
                     tick: self.current_tick,

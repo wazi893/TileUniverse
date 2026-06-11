@@ -5139,7 +5139,7 @@ fn ensure_common_gates_cached() {
     drop(cache);
 
     // Common gates to pre-cache
-    let _common_gates = vec![
+    let _common_gates = [
         ("iSWAP", create_iswap_matrix()),
         ("SWAP", create_swap_matrix()),
         ("CZ", create_cz_matrix()),

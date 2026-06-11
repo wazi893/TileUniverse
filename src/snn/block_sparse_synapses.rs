@@ -133,7 +133,7 @@ pub struct BlockSparseSynapseMap {
 impl BlockSparseSynapseMap {
     /// Create a new block sparse synapse map
     pub fn new(n_neurons: usize, block_size: usize, pattern: SparsityPattern) -> Self {
-        let n_blocks = (n_neurons + block_size - 1) / block_size;
+        let n_blocks = n_neurons.div_ceil(block_size);
 
         Self {
             block_size,
@@ -193,9 +193,9 @@ impl BlockSparseSynapseMap {
         rng: &mut SimpleRng,
     ) {
         let src_block_start = src_start / self.block_size;
-        let src_block_end = (src_end + self.block_size - 1) / self.block_size;
+        let src_block_end = src_end.div_ceil(self.block_size);
         let dst_block_start = dst_start / self.block_size;
-        let dst_block_end = (dst_end + self.block_size - 1) / self.block_size;
+        let dst_block_end = dst_end.div_ceil(self.block_size);
 
         // Determine which block pairs should be active
         // Use connectivity to decide block-level sparsity

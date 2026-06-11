@@ -187,7 +187,7 @@ fn build_balanced_and(aig: &mut Aig, leaves: &mut Vec<AigLit>) -> AigLit {
 
     // Bottom-up: combine pairs until one remains
     while leaves.len() > 1 {
-        let mut next = Vec::with_capacity((leaves.len() + 1) / 2);
+        let mut next = Vec::with_capacity(leaves.len().div_ceil(2));
         let mut i = 0;
         while i + 1 < leaves.len() {
             let combined = aig.and(leaves[i], leaves[i + 1]);

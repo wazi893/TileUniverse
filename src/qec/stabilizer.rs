@@ -47,7 +47,7 @@ pub struct PauliOperator {
 impl PauliOperator {
     /// Create identity operator on n qubits
     pub fn identity(n_qubits: usize) -> Self {
-        let n_words = (n_qubits + 63) / 64;
+        let n_words = n_qubits.div_ceil(64);
         Self {
             x: vec![0u64; n_words],
             z: vec![0u64; n_words],
@@ -177,7 +177,7 @@ impl PauliOperator {
         }
 
         // Commutes if even number of anti-commuting positions
-        anticommute_count % 2 == 0
+        anticommute_count.is_multiple_of(2)
     }
 
     /// Check if operator is identity
@@ -499,7 +499,7 @@ impl StabilizerTableau {
                 // Deterministic outcome case - optimized phase-only calculation
                 // We only need the phase, not the full Pauli operator
                 let mut total_phase = 0u32;
-                let n_words = (self.n_qubits + 63) / 64;
+                let n_words = self.n_qubits.div_ceil(64);
 
                 // Track accumulated x,z for phase calculation
                 let mut acc_x = vec![0u64; n_words];
@@ -636,7 +636,7 @@ impl StabilizerTableau {
             return;
         }
 
-        let _n_words = (self.n_qubits + 63) / 64;
+        let _n_words = self.n_qubits.div_ceil(64);
 
         for row in &mut self.generators {
             let mut phase_delta = 0u8;

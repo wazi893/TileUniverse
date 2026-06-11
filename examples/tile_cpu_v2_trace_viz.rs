@@ -128,15 +128,15 @@ fn print_help() {
     println!("  q                       quit");
 }
 
-fn parse_pc(raw: &str) -> Option<u8> {
+fn parse_pc(raw: &str) -> Option<u32> {
     let trimmed = raw.trim();
     if let Some(hex) = trimmed
         .strip_prefix("0x")
         .or_else(|| trimmed.strip_prefix("0X"))
     {
-        u8::from_str_radix(hex, 16).ok()
+        u32::from_str_radix(hex, 16).ok()
     } else {
-        trimmed.parse::<u8>().ok()
+        trimmed.parse::<u32>().ok()
     }
 }
 

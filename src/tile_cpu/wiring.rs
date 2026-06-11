@@ -736,14 +736,8 @@ pub fn wire_physical_cpu(
         | (0x08 << 48)
         | (0x00 << 56);
     let packed_ctrl_b_lo: u64 = 0;
-    let packed_ctrl_b_hi: u64 = 0x00
-        | (0x00 << 8)
-        | (0x00 << 16)
-        | (0x01 << 24)
-        | (0x02u64 << 32)
-        | (0x04 << 40)
-        | (0x08 << 48)
-        | (0x10 << 56);
+    let packed_ctrl_b_hi: u64 =
+        (0x01 << 24) | (0x02u64 << 32) | (0x04 << 40) | (0x08 << 48) | (0x10 << 56);
 
     let packed_values = [
         packed_ctrl_a_lo,
@@ -3053,14 +3047,8 @@ pub fn wire_complete_cpu(
         | (0x00 << 56);
     let packed_ctrl_b_lo: u64 = 0;
     //                  SHL   SHR   CMP   JMP   JZ    JNZ   LD    ST
-    let packed_ctrl_b_hi: u64 = 0x00
-        | (0x00 << 8)
-        | (0x00 << 16)
-        | (0x01 << 24)
-        | (0x02u64 << 32)
-        | (0x04 << 40)
-        | (0x08 << 48)
-        | (0x10 << 56);
+    let packed_ctrl_b_hi: u64 =
+        (0x01 << 24) | (0x02u64 << 32) | (0x04 << 40) | (0x08 << 48) | (0x10 << 56);
 
     ctx.guard(ox + 15, oy);
     ctx.guard(ox + 16, oy);

@@ -1491,7 +1491,7 @@ impl HybridQuantumNetwork {
             // Apply T gates on some qubits (the non-Clifford magic!)
             if self.config.enable_magic_states && cluster.n_qubits() > 0 {
                 // Apply T to first qubit every other tick
-                if self.tick % 2 == 0 {
+                if self.tick.is_multiple_of(2) {
                     cluster.t(0);
                 }
             }

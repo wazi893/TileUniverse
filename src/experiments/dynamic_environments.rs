@@ -109,7 +109,7 @@ impl DynamicEnvironment {
         self.tick += 1;
 
         // Check if it's time to update
-        if self.tick % self.change_frequency != 0 {
+        if !self.tick.is_multiple_of(self.change_frequency) {
             return;
         }
 

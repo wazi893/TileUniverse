@@ -556,7 +556,7 @@ mod ghz {
         /// Get approximate log10 of qubit count (for display)
         pub fn log10_qubits(&self) -> f64 {
             let bits = self.n_qubits.bits();
-            bits as f64 * 0.30103 // log10(2)
+            bits as f64 * std::f64::consts::LOG10_2
         }
 
         /// Get the state space size as a string: "2^n where n = ..."
@@ -569,7 +569,7 @@ mod ghz {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             let bits = self.n_qubits.bits();
             if bits > 1000 {
-                write!(f, "|GHZ_(~10^{:.0})>", bits as f64 * 0.30103)
+                write!(f, "|GHZ_(~10^{:.0})>", bits as f64 * std::f64::consts::LOG10_2)
             } else if bits > 100 {
                 write!(f, "|GHZ_(2^{})>", bits)
             } else {
@@ -592,7 +592,7 @@ mod ghz {
     impl std::fmt::Display for UnlimitedGhzVerification {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             let bits = self.n_qubits.bits();
-            let log10 = bits as f64 * 0.30103;
+            let log10 = bits as f64 * std::f64::consts::LOG10_2;
 
             writeln!(f, "BigUint GHZ Verification [endpoint representation]")?;
             if bits > 1000 {
@@ -729,7 +729,7 @@ mod w_state {
         /// ```
         pub fn new(n_qubits: usize) -> Self {
             assert!(n_qubits >= 7, "Minimum 7 qubits required");
-            let n_blocks = (n_qubits + BLOCK_SIZE - 1) / BLOCK_SIZE;
+            let n_blocks = n_qubits.div_ceil(BLOCK_SIZE);
 
             Self {
                 n_qubits,
@@ -743,7 +743,7 @@ mod w_state {
         /// Blocks are allocated on first access, saving memory for sparse states.
         pub fn new_lazy(n_qubits: usize) -> Self {
             assert!(n_qubits >= 7, "Minimum 7 qubits required");
-            let n_blocks = (n_qubits + BLOCK_SIZE - 1) / BLOCK_SIZE;
+            let n_blocks = n_qubits.div_ceil(BLOCK_SIZE);
 
             Self {
                 n_qubits,
@@ -1081,7 +1081,7 @@ mod symbolic {
                 Self::Big(n) => {
                     let bits = n.bits();
                     if bits > 1000 {
-                        format!("~10^{:.0}", bits as f64 * 0.30103)
+                        format!("~10^{:.0}", bits as f64 * std::f64::consts::LOG10_2)
                     } else {
                         format!("{}", n)
                     }
@@ -1093,7 +1093,7 @@ mod symbolic {
                     format!("{}^^{}", base, height.to_notation())
                 }
                 Self::KnuthArrow { a, arrows, b } => {
-                    let arrow_str: String = std::iter::repeat('↑').take(*arrows as usize).collect();
+                    let arrow_str: String = std::iter::repeat_n('↑', *arrows as usize).collect();
                     format!("{}{}{}", a, arrow_str, b.to_notation())
                 }
                 Self::Graham => "G (Graham's number)".to_string(),
@@ -1168,7 +1168,7 @@ mod symbolic {
         pub fn estimate_log10(&self) -> Option<f64> {
             match self {
                 Self::Literal(n) => Some((*n as f64).log10()),
-                Self::Big(n) => Some(n.bits() as f64 * 0.30103),
+                Self::Big(n) => Some(n.bits() as f64 * std::f64::consts::LOG10_2),
                 Self::Pow { base, exponent } => {
                     let exp_log = exponent.estimate_log10()?;
                     Some(10f64.powf(exp_log) * (*base as f64).log10())
@@ -1923,39 +1923,35 @@ mod symbolic {
             if let SymbolicNumber::Literal(0) = &self.k {
                 return SimplifiedBinomial::One;
             }
-            if let SymbolicNumber::Big(k) = &self.k {
-                if k == &num_bigint::BigUint::from(0u32) {
+            if let SymbolicNumber::Big(k) = &self.k
+                && k == &num_bigint::BigUint::from(0u32) {
                     return SimplifiedBinomial::One;
                 }
-            }
 
             if self.n.structurally_equal(&self.k) {
                 return SimplifiedBinomial::One;
             }
 
-            if matches!(&self.n, SymbolicNumber::Infinity) {
-                if !matches!(&self.k, SymbolicNumber::Infinity) {
+            if matches!(&self.n, SymbolicNumber::Infinity)
+                && !matches!(&self.k, SymbolicNumber::Infinity) {
                     return SimplifiedBinomial::Infinite;
                 }
-            }
 
             if let SymbolicNumber::Literal(1) = &self.k {
                 return SimplifiedBinomial::N(self.n.clone());
             }
-            if let SymbolicNumber::Big(k) = &self.k {
-                if k == &num_bigint::BigUint::from(1u32) {
+            if let SymbolicNumber::Big(k) = &self.k
+                && k == &num_bigint::BigUint::from(1u32) {
                     return SimplifiedBinomial::N(self.n.clone());
                 }
-            }
 
             if let SymbolicNumber::Literal(2) = &self.k {
                 return SimplifiedBinomial::NChoose2(self.n.clone());
             }
-            if let SymbolicNumber::Big(k) = &self.k {
-                if k == &num_bigint::BigUint::from(2u32) {
+            if let SymbolicNumber::Big(k) = &self.k
+                && k == &num_bigint::BigUint::from(2u32) {
                     return SimplifiedBinomial::NChoose2(self.n.clone());
                 }
-            }
 
             if let (SymbolicNumber::Literal(n), SymbolicNumber::Literal(k)) = (&self.n, &self.k) {
                 if k > n {
@@ -2481,11 +2477,10 @@ mod symbolic {
             if matches!(&self.k_excitations, SymbolicNumber::Literal(0)) {
                 return None;
             }
-            if let SymbolicNumber::Big(k) = &self.k_excitations {
-                if k == &num_bigint::BigUint::from(0u32) {
+            if let SymbolicNumber::Big(k) = &self.k_excitations
+                && k == &num_bigint::BigUint::from(0u32) {
                     return None;
                 }
-            }
 
             let new_k = SymbolicNumber::Sub {
                 minuend: Box::new(self.k_excitations.clone()),
@@ -2535,11 +2530,10 @@ mod symbolic {
             if matches!(&self.k_excitations, SymbolicNumber::Literal(0)) {
                 return true;
             }
-            if let SymbolicNumber::Big(k) = &self.k_excitations {
-                if k == &num_bigint::BigUint::from(0u32) {
+            if let SymbolicNumber::Big(k) = &self.k_excitations
+                && k == &num_bigint::BigUint::from(0u32) {
                     return true;
                 }
-            }
             self.n_qubits.structurally_equal(&self.k_excitations)
         }
 

@@ -121,7 +121,7 @@ impl StabilizerQRAM {
         let total_qubits = depth + 1 + 2 * routers;
 
         // Calculate memory usage: 2n generators * (n/64) u64s * 8 bytes
-        let n_words = (total_qubits + 63) / 64;
+        let n_words = total_qubits.div_ceil(64);
         let tableau_bytes = 2 * total_qubits * n_words * 8;
 
         Self {
@@ -475,7 +475,7 @@ impl StabilizerQRAM {
         };
 
         // Our stabilizer tableau: 2n generators * (n/64) words * 8 bytes
-        let n_words = (qubits + 63) / 64;
+        let n_words = qubits.div_ceil(64);
         let stabilizer_bytes = 2 * qubits * n_words * 8;
 
         StabilizerResourceComparison {

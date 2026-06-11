@@ -499,7 +499,7 @@ mod tests {
 
         // Route from corner to corner (0,0) to (3,3)
         let swaps = router.route_gate(0, 15);
-        assert!(swaps.len() > 0);
+        assert!(!swaps.is_empty());
     }
 
     #[test]
@@ -525,7 +525,6 @@ mod tests {
         ];
 
         let routed = router.route_circuit(&gates);
-        assert!(routed.swap_count >= 0);
         assert!(routed.physical_gates.len() >= gates.len());
     }
 
@@ -571,7 +570,6 @@ mod tests {
         let counts = routed.gate_counts();
 
         assert_eq!(counts.two_qubit, 2);
-        assert!(counts.swaps >= 0);
     }
 
     #[test]

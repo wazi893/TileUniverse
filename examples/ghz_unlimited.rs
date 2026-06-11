@@ -172,7 +172,7 @@ fn test_named_number(name: &str, n_qubits: BigUint) {
     let verify_time = start.elapsed();
 
     let bits = ghz.n_qubits().bits();
-    let log10 = bits as f64 * 0.30103;
+    let log10 = bits as f64 * std::f64::consts::LOG10_2;
 
     println!("{}: {} qubits (~10^{:.0})", name, ghz, log10);
     println!(

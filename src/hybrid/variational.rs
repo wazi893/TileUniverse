@@ -626,13 +626,13 @@ mod tests {
             .with_config(VariationalConfig::default().with_convergence_threshold(0.01));
 
         // Not converged - not enough history
-        assert!(!executor.check_convergence(&vec![1.0, 1.0]));
+        assert!(!executor.check_convergence(&[1.0, 1.0]));
 
         // Not converged - large variation
-        assert!(!executor.check_convergence(&vec![1.0, 0.5, 0.8, 0.3, 0.9]));
+        assert!(!executor.check_convergence(&[1.0, 0.5, 0.8, 0.3, 0.9]));
 
         // Converged - small variation
-        assert!(executor.check_convergence(&vec![1.0, 1.001, 0.999, 1.002, 0.998]));
+        assert!(executor.check_convergence(&[1.0, 1.001, 0.999, 1.002, 0.998]));
     }
 
     #[test]

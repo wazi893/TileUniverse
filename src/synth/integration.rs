@@ -1653,7 +1653,7 @@ pub fn try_inject_synth_export_z(
 
     // Build scope mask for propagate_combinational_masked().
     let total_tiles = sim.tilemap.tiles.len();
-    let mask_len = (total_tiles + 63) / 64;
+    let mask_len = total_tiles.div_ceil(64);
     let mut scope_mask = vec![0u64; mask_len];
     for &idx in input_indices
         .iter()
@@ -1899,7 +1899,7 @@ pub fn build_mul_aig() -> Aig {
 
     for k in 0..8 {
         // Row k: partial products a[i] & b[k], shifted left by k bits.
-        let mut row = vec![AigLit::FALSE; 16];
+        let mut row = [AigLit::FALSE; 16];
         for i in 0..8 {
             row[i + k] = aig.and(a[i], b[k]);
         }

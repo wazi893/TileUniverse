@@ -349,10 +349,61 @@ impl Parser {
         Ok(params)
     }
 
+    fn require_operand_count(
+        name: &str,
+        operands: &[usize],
+        expected: usize,
+        line: usize,
+        column: usize,
+    ) -> ParseResult<()> {
+        if operands.len() == expected {
+            return Ok(());
+        }
+
+        let plural = if expected == 1 { "" } else { "s" };
+        Err(ParseError::new(
+            format!(
+                "Gate '{}' expects {} qubit operand{}, found {}",
+                name,
+                expected,
+                plural,
+                operands.len()
+            ),
+            line,
+            column,
+        ))
+    }
+
+    fn require_param_count(
+        name: &str,
+        params: &[f64],
+        expected: usize,
+        line: usize,
+        column: usize,
+    ) -> ParseResult<()> {
+        if params.len() == expected {
+            return Ok(());
+        }
+
+        let plural = if expected == 1 { "" } else { "s" };
+        Err(ParseError::new(
+            format!(
+                "Gate '{}' expects {} parameter{}, found {}",
+                name,
+                expected,
+                plural,
+                params.len()
+            ),
+            line,
+            column,
+        ))
+    }
+
     /// Parse gate application
     fn parse_gate(&mut self) -> ParseResult<QasmGate> {
-        let name = if let TokenKind::Identifier(s) = &self.current().kind {
-            s.clone()
+        let (name, gate_line, gate_column) = if let TokenKind::Identifier(s) = &self.current().kind
+        {
+            (s.clone(), self.current().line, self.current().column)
         } else {
             return Err(ParseError::new(
                 "Expected gate name",
@@ -379,99 +430,178 @@ impl Parser {
         // Create gate based on name and operands
         let gate = match name.to_lowercase().as_str() {
             // Single-qubit gates (no params)
-            "h" => QasmGate::H(operands[0]),
-            "x" => QasmGate::X(operands[0]),
-            "y" => QasmGate::Y(operands[0]),
-            "z" => QasmGate::Z(operands[0]),
-            "t" => QasmGate::T(operands[0]),
-            "tdg" => QasmGate::Tdg(operands[0]),
-            "s" => QasmGate::S(operands[0]),
-            "sdg" => QasmGate::Sdg(operands[0]),
-            "sx" => QasmGate::SX(operands[0]),
-            "sxdg" => QasmGate::SXdg(operands[0]),
-            "id" | "i" => QasmGate::Id(operands[0]),
+            "h" => {
+                Self::require_param_count(&name, &params, 0, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 1, gate_line, gate_column)?;
+                QasmGate::H(operands[0])
+            }
+            "x" => {
+                Self::require_param_count(&name, &params, 0, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 1, gate_line, gate_column)?;
+                QasmGate::X(operands[0])
+            }
+            "y" => {
+                Self::require_param_count(&name, &params, 0, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 1, gate_line, gate_column)?;
+                QasmGate::Y(operands[0])
+            }
+            "z" => {
+                Self::require_param_count(&name, &params, 0, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 1, gate_line, gate_column)?;
+                QasmGate::Z(operands[0])
+            }
+            "t" => {
+                Self::require_param_count(&name, &params, 0, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 1, gate_line, gate_column)?;
+                QasmGate::T(operands[0])
+            }
+            "tdg" => {
+                Self::require_param_count(&name, &params, 0, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 1, gate_line, gate_column)?;
+                QasmGate::Tdg(operands[0])
+            }
+            "s" => {
+                Self::require_param_count(&name, &params, 0, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 1, gate_line, gate_column)?;
+                QasmGate::S(operands[0])
+            }
+            "sdg" => {
+                Self::require_param_count(&name, &params, 0, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 1, gate_line, gate_column)?;
+                QasmGate::Sdg(operands[0])
+            }
+            "sx" => {
+                Self::require_param_count(&name, &params, 0, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 1, gate_line, gate_column)?;
+                QasmGate::SX(operands[0])
+            }
+            "sxdg" => {
+                Self::require_param_count(&name, &params, 0, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 1, gate_line, gate_column)?;
+                QasmGate::SXdg(operands[0])
+            }
+            "id" | "i" => {
+                Self::require_param_count(&name, &params, 0, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 1, gate_line, gate_column)?;
+                QasmGate::Id(operands[0])
+            }
 
             // Single-qubit rotation gates
-            "rx" => QasmGate::Rx(operands[0], params.get(0).copied().unwrap_or(0.0)),
-            "ry" => QasmGate::Ry(operands[0], params.get(0).copied().unwrap_or(0.0)),
-            "rz" => QasmGate::Rz(operands[0], params.get(0).copied().unwrap_or(0.0)),
-            "p" | "phase" => QasmGate::P(operands[0], params.get(0).copied().unwrap_or(0.0)),
-            "u1" => QasmGate::U1(operands[0], params.get(0).copied().unwrap_or(0.0)),
-            "u2" => QasmGate::U2(
-                operands[0],
-                params.get(0).copied().unwrap_or(0.0),
-                params.get(1).copied().unwrap_or(0.0),
-            ),
-            "u3" | "u" => QasmGate::U3(
-                operands[0],
-                params.get(0).copied().unwrap_or(0.0),
-                params.get(1).copied().unwrap_or(0.0),
-                params.get(2).copied().unwrap_or(0.0),
-            ),
+            "rx" => {
+                Self::require_param_count(&name, &params, 1, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 1, gate_line, gate_column)?;
+                QasmGate::Rx(operands[0], params[0])
+            }
+            "ry" => {
+                Self::require_param_count(&name, &params, 1, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 1, gate_line, gate_column)?;
+                QasmGate::Ry(operands[0], params[0])
+            }
+            "rz" => {
+                Self::require_param_count(&name, &params, 1, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 1, gate_line, gate_column)?;
+                QasmGate::Rz(operands[0], params[0])
+            }
+            "p" | "phase" => {
+                Self::require_param_count(&name, &params, 1, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 1, gate_line, gate_column)?;
+                QasmGate::P(operands[0], params[0])
+            }
+            "u1" => {
+                Self::require_param_count(&name, &params, 1, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 1, gate_line, gate_column)?;
+                QasmGate::U1(operands[0], params[0])
+            }
+            "u2" => {
+                Self::require_param_count(&name, &params, 2, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 1, gate_line, gate_column)?;
+                QasmGate::U2(operands[0], params[0], params[1])
+            }
+            "u3" | "u" => {
+                Self::require_param_count(&name, &params, 3, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 1, gate_line, gate_column)?;
+                QasmGate::U3(operands[0], params[0], params[1], params[2])
+            }
 
             // Two-qubit gates
-            "cx" | "cnot" => QasmGate::CX(operands[0], operands.get(1).copied().unwrap_or(1)),
-            "cz" => QasmGate::CZ(operands[0], operands.get(1).copied().unwrap_or(1)),
-            "swap" => QasmGate::Swap(operands[0], operands.get(1).copied().unwrap_or(1)),
-            "iswap" => QasmGate::ISwap(operands[0], operands.get(1).copied().unwrap_or(1)),
-            "crx" => QasmGate::CRx(
-                operands[0],
-                operands.get(1).copied().unwrap_or(1),
-                params.get(0).copied().unwrap_or(0.0),
-            ),
-            "cry" => QasmGate::CRy(
-                operands[0],
-                operands.get(1).copied().unwrap_or(1),
-                params.get(0).copied().unwrap_or(0.0),
-            ),
-            "crz" => QasmGate::CRz(
-                operands[0],
-                operands.get(1).copied().unwrap_or(1),
-                params.get(0).copied().unwrap_or(0.0),
-            ),
-            "cp" | "cphase" => QasmGate::CP(
-                operands[0],
-                operands.get(1).copied().unwrap_or(1),
-                params.get(0).copied().unwrap_or(0.0),
-            ),
-            "rzz" => QasmGate::RZZ(
-                operands[0],
-                operands.get(1).copied().unwrap_or(1),
-                params.get(0).copied().unwrap_or(0.0),
-            ),
-            "rxx" => QasmGate::RXX(
-                operands[0],
-                operands.get(1).copied().unwrap_or(1),
-                params.get(0).copied().unwrap_or(0.0),
-            ),
-            "ryy" => QasmGate::RYY(
-                operands[0],
-                operands.get(1).copied().unwrap_or(1),
-                params.get(0).copied().unwrap_or(0.0),
-            ),
+            "cx" | "cnot" => {
+                Self::require_param_count(&name, &params, 0, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 2, gate_line, gate_column)?;
+                QasmGate::CX(operands[0], operands[1])
+            }
+            "cz" => {
+                Self::require_param_count(&name, &params, 0, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 2, gate_line, gate_column)?;
+                QasmGate::CZ(operands[0], operands[1])
+            }
+            "swap" => {
+                Self::require_param_count(&name, &params, 0, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 2, gate_line, gate_column)?;
+                QasmGate::Swap(operands[0], operands[1])
+            }
+            "iswap" => {
+                Self::require_param_count(&name, &params, 0, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 2, gate_line, gate_column)?;
+                QasmGate::ISwap(operands[0], operands[1])
+            }
+            "crx" => {
+                Self::require_param_count(&name, &params, 1, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 2, gate_line, gate_column)?;
+                QasmGate::CRx(operands[0], operands[1], params[0])
+            }
+            "cry" => {
+                Self::require_param_count(&name, &params, 1, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 2, gate_line, gate_column)?;
+                QasmGate::CRy(operands[0], operands[1], params[0])
+            }
+            "crz" => {
+                Self::require_param_count(&name, &params, 1, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 2, gate_line, gate_column)?;
+                QasmGate::CRz(operands[0], operands[1], params[0])
+            }
+            "cp" | "cphase" => {
+                Self::require_param_count(&name, &params, 1, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 2, gate_line, gate_column)?;
+                QasmGate::CP(operands[0], operands[1], params[0])
+            }
+            "rzz" => {
+                Self::require_param_count(&name, &params, 1, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 2, gate_line, gate_column)?;
+                QasmGate::RZZ(operands[0], operands[1], params[0])
+            }
+            "rxx" => {
+                Self::require_param_count(&name, &params, 1, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 2, gate_line, gate_column)?;
+                QasmGate::RXX(operands[0], operands[1], params[0])
+            }
+            "ryy" => {
+                Self::require_param_count(&name, &params, 1, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 2, gate_line, gate_column)?;
+                QasmGate::RYY(operands[0], operands[1], params[0])
+            }
 
             // Three-qubit gates
-            "ccx" | "toffoli" => QasmGate::CCX(
-                operands[0],
-                operands.get(1).copied().unwrap_or(1),
-                operands.get(2).copied().unwrap_or(2),
-            ),
-            "ccz" => QasmGate::CCZ(
-                operands[0],
-                operands.get(1).copied().unwrap_or(1),
-                operands.get(2).copied().unwrap_or(2),
-            ),
-            "cswap" | "fredkin" => QasmGate::CSwap(
-                operands[0],
-                operands.get(1).copied().unwrap_or(1),
-                operands.get(2).copied().unwrap_or(2),
-            ),
+            "ccx" | "toffoli" => {
+                Self::require_param_count(&name, &params, 0, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 3, gate_line, gate_column)?;
+                QasmGate::CCX(operands[0], operands[1], operands[2])
+            }
+            "ccz" => {
+                Self::require_param_count(&name, &params, 0, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 3, gate_line, gate_column)?;
+                QasmGate::CCZ(operands[0], operands[1], operands[2])
+            }
+            "cswap" | "fredkin" => {
+                Self::require_param_count(&name, &params, 0, gate_line, gate_column)?;
+                Self::require_operand_count(&name, &operands, 3, gate_line, gate_column)?;
+                QasmGate::CSwap(operands[0], operands[1], operands[2])
+            }
 
             _ => {
                 return Err(ParseError::new(
                     format!("Unknown gate: {}", name),
-                    self.current().line,
-                    self.current().column,
+                    gate_line,
+                    gate_column,
                 ));
             }
         };
@@ -720,6 +850,58 @@ mod tests {
         let circuit = parse_qasm3(qasm).unwrap();
         assert_eq!(circuit.len(), 1);
         assert!(matches!(circuit[0], QGate::U3(0, _, _, _)));
+    }
+
+    #[test]
+    fn test_reject_missing_two_qubit_operand() {
+        let qasm = r#"
+            OPENQASM 3.0;
+            qubit[2] q;
+            cx q[0];
+        "#;
+
+        let err = parse_qasm3(qasm).unwrap_err();
+        assert!(err.message.contains("expects 2 qubit operands"));
+        assert!(err.message.contains("found 1"));
+    }
+
+    #[test]
+    fn test_reject_extra_single_qubit_operand() {
+        let qasm = r#"
+            OPENQASM 3.0;
+            qubit[2] q;
+            h q[0], q[1];
+        "#;
+
+        let err = parse_qasm3(qasm).unwrap_err();
+        assert!(err.message.contains("expects 1 qubit operand"));
+        assert!(err.message.contains("found 2"));
+    }
+
+    #[test]
+    fn test_reject_missing_rotation_parameter() {
+        let qasm = r#"
+            OPENQASM 3.0;
+            qubit[1] q;
+            rx q[0];
+        "#;
+
+        let err = parse_qasm3(qasm).unwrap_err();
+        assert!(err.message.contains("expects 1 parameter"));
+        assert!(err.message.contains("found 0"));
+    }
+
+    #[test]
+    fn test_reject_extra_gate_parameter() {
+        let qasm = r#"
+            OPENQASM 3.0;
+            qubit[1] q;
+            h(pi) q[0];
+        "#;
+
+        let err = parse_qasm3(qasm).unwrap_err();
+        assert!(err.message.contains("expects 0 parameters"));
+        assert!(err.message.contains("found 1"));
     }
 
     #[test]

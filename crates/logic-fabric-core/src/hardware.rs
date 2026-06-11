@@ -138,13 +138,13 @@ impl SimpleRouter {
         for gate in circuit {
             match gate {
                 QGate::CZ(c, t) => {
-                    self.route_two_qubit_gate(&mut routed_circuit, *c, *t, |c, t| QGate::CZ(c, t))
+                    self.route_two_qubit_gate(&mut routed_circuit, *c, *t, QGate::CZ)
                 }
                 QGate::CNot(c, t) => {
-                    self.route_two_qubit_gate(&mut routed_circuit, *c, *t, |c, t| QGate::CNot(c, t))
+                    self.route_two_qubit_gate(&mut routed_circuit, *c, *t, QGate::CNot)
                 }
                 QGate::Swap(a, b) => {
-                    self.route_two_qubit_gate(&mut routed_circuit, *a, *b, |a, b| QGate::Swap(a, b))
+                    self.route_two_qubit_gate(&mut routed_circuit, *a, *b, QGate::Swap)
                 }
                 // Single qubit gates just apply to current physical location
                 g => {

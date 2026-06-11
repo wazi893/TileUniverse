@@ -65,9 +65,9 @@ impl PyV2Cpu {
         self.cpu.is_halted()
     }
 
-    /// Current program counter (0-127).
+    /// Current program counter (wide PC: 0-65535 on wide-PC builds).
     #[getter]
-    fn pc(&self) -> u8 {
+    fn pc(&self) -> u32 {
         let sim = self.sim.borrow();
         self.cpu.read_pc(&sim)
     }
@@ -276,7 +276,7 @@ fn parse_synth_mode(mode: &str) -> PyResult<PySynthMode> {
 /// Per-cycle execution trace from a V2 CPU run.
 #[pyclass(unsendable, name = "V2Trace")]
 pub struct PyV2Trace {
-    pcs: Vec<u8>,
+    pcs: Vec<u32>,
     regs: Vec<Vec<u64>>,
     flag_z: Vec<bool>,
     flag_c: Vec<bool>,
@@ -286,7 +286,7 @@ pub struct PyV2Trace {
 impl PyV2Trace {
     /// List of PC values at each cycle.
     #[getter]
-    fn pcs(&self) -> Vec<u8> {
+    fn pcs(&self) -> Vec<u32> {
         self.pcs.clone()
     }
 

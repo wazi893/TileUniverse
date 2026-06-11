@@ -1645,7 +1645,6 @@ mod tests {
         let result = apply_zne_parallel(cost_fn, &params, &base_noise, &config);
 
         // Should have validation results
-        assert!(result.validation.is_monotonic || !result.validation.is_monotonic);
         assert!(result.validation.fit_quality >= 0.0);
 
         // If valid, extrapolated value should be used; otherwise fallback to baseline

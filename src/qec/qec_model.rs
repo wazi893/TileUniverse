@@ -130,7 +130,7 @@ impl QecModel {
 
         // Round up to next odd number (surface code requires odd distance)
         let d_ceil = d.ceil() as usize;
-        if d_ceil % 2 == 0 {
+        if d_ceil.is_multiple_of(2) {
             d_ceil + 1
         } else {
             d_ceil.max(3) // Minimum distance is 3

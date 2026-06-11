@@ -506,7 +506,7 @@ fn batch_identical(gates: &[QGate], batches: &mut usize, enable_reduction: bool)
             let effective_count = if enable_reduction {
                 match current {
                     QGate::H(_) | QGate::X(_) | QGate::Z(_) => {
-                        if count % 2 == 0 {
+                        if count.is_multiple_of(2) {
                             0 // Even count = identity
                         } else {
                             1 // Odd count = single gate
@@ -1448,7 +1448,7 @@ impl TwoTierSelector {
             FusedOp::Layer(gates) => gates.len() as u32,
             FusedOp::BatchedLayer { count, .. } => *count,
             FusedOp::Identity => 0,
-            FusedOp::WmmaBlock { depth, .. } => *depth as u32,
+            FusedOp::WmmaBlock { depth, .. } => *depth,
             // EPIC 84: MegaGate is 1 op but represents gate_count gates worth of work
             FusedOp::Mega(mega) => mega.gate_count,
         }
@@ -1459,9 +1459,9 @@ impl TwoTierSelector {
         match op {
             FusedOp::Single(gate) => Self::gate_targets_qubit_0(gate),
             FusedOp::Batched { gate, .. } => Self::gate_targets_qubit_0(gate),
-            FusedOp::Layer(gates) => gates.iter().all(|g| Self::gate_targets_qubit_0(g)),
+            FusedOp::Layer(gates) => gates.iter().all(Self::gate_targets_qubit_0),
             FusedOp::BatchedLayer { gates, .. } => {
-                gates.iter().all(|g| Self::gate_targets_qubit_0(g))
+                gates.iter().all(Self::gate_targets_qubit_0)
             }
             FusedOp::Identity => true, // Identity is trivially aligned
             FusedOp::WmmaBlock { start_qubit, .. } => *start_qubit == 0,
@@ -1962,11 +1962,11 @@ pub fn explain_plan(
     for (i, op) in program.ops.iter().enumerate() {
         let depth = match op {
             FusedOp::Single(_) => 1,
-            FusedOp::Batched { count, .. } => *count as u32,
+            FusedOp::Batched { count, .. } => *count,
             FusedOp::Layer(gates) => gates.len() as u32,
             FusedOp::BatchedLayer { count, .. } => *count,
             FusedOp::Identity => 0,
-            FusedOp::WmmaBlock { depth, .. } => *depth as u32,
+            FusedOp::WmmaBlock { depth, .. } => *depth,
             // EPIC 84: MegaGate depth is gate_count
             FusedOp::Mega(mega) => mega.gate_count,
         };
@@ -2028,7 +2028,7 @@ pub fn explain_plan(
         } else if cost_fp16 <= cost_fp32 {
             gpu_total += cost_fp16;
             let reason = if wmma_eligible || wmma_packed_eligible {
-                format!("FP16: WMMA not faster (cost margin not met)")
+                "FP16: WMMA not faster (cost margin not met)".to_string()
             } else if !aligned {
                 "FP16: not aligned (no WMMA)".to_string()
             } else {
@@ -2121,9 +2121,9 @@ impl TwoTierSelector {
         match op {
             FusedOp::Single(gate) => Self::gate_targets_qubit_0(gate),
             FusedOp::Batched { gate, .. } => Self::gate_targets_qubit_0(gate),
-            FusedOp::Layer(gates) => gates.iter().all(|g| Self::gate_targets_qubit_0(g)),
+            FusedOp::Layer(gates) => gates.iter().all(Self::gate_targets_qubit_0),
             FusedOp::BatchedLayer { gates, .. } => {
-                gates.iter().all(|g| Self::gate_targets_qubit_0(g))
+                gates.iter().all(Self::gate_targets_qubit_0)
             }
             FusedOp::Identity => true,
             FusedOp::WmmaBlock { start_qubit, .. } => *start_qubit == 0,
@@ -2329,7 +2329,7 @@ fn analyze_gate_alignment(gate: &QGate, _n_qubits: u8) -> WmmaGateAlignment {
     // - qubit 6: stride=64 → gather/scatter + WMMA
     // - qubit 7: stride=128 → gather/scatter + WMMA
     let is_aligned = target_qubit < 4; // qubits 0-3 are naturally aligned
-    let is_gather_scatter_aligned = target_qubit >= 4 && target_qubit <= 7; // EPIC 87
+    let is_gather_scatter_aligned = (4..=7).contains(&target_qubit); // EPIC 87
 
     // Gate type compatibility - EPIC 87 adds Rx/Ry/Rz support for high qubits
     // EPIC 89: CNOT/CZ are WMMA-compatible when both qubits are 0-3 (fit in 16x16 tile)
@@ -2531,7 +2531,7 @@ impl WmmaPackingMeta {
     /// * `span_width` - Number of qubits (1-4)
     /// * `n_qubits` - Total qubits in the system
     pub fn new(span_start: u8, span_width: u8, n_qubits: u8) -> Self {
-        assert!(span_width >= 1 && span_width <= 4, "span_width must be 1-4");
+        assert!((1..=4).contains(&span_width), "span_width must be 1-4");
         assert!(
             span_start + span_width <= n_qubits,
             "span exceeds qubit count"
@@ -5834,7 +5834,7 @@ mod tests {
         assert_eq!(all_indices.len(), 64);
 
         // Each amplitude should appear exactly once
-        let mut seen = vec![false; 64];
+        let mut seen = [false; 64];
         for idx in all_indices {
             assert!(!seen[idx as usize], "Duplicate index {}", idx);
             seen[idx as usize] = true;

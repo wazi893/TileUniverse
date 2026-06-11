@@ -512,7 +512,6 @@ mod tests {
 
         assert_eq!(estimate.t_count, 4);
         assert!(estimate.total_cycles > 0);
-        assert!(estimate.swap_overhead >= 0);
         assert!(estimate.total_qubits > 0);
     }
 

@@ -131,7 +131,7 @@ fn main() {
         "", "", "", "", ""
     );
 
-    let baseline_throughput = results.get(0).map(|r| r.6).unwrap_or(1.0);
+    let baseline_throughput = results.first().map(|r| r.6).unwrap_or(1.0);
     for (width, height, tiles, mem_mb, iters, _elapsed, throughput) in &results {
         let ratio = *throughput / baseline_throughput;
         println!(

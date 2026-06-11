@@ -153,7 +153,7 @@ impl DistillationProtocol {
 
     /// Get resource cost for producing N clean states
     pub fn resources_for(&self, n_clean: usize) -> ProtocolResources {
-        let rounds = (n_clean + self.output_states - 1) / self.output_states;
+        let rounds = n_clean.div_ceil(self.output_states);
         let input_consumed = rounds * self.input_states;
         let qubits = self.qubit_overhead;
         let cycles = rounds * self.cycle_overhead;

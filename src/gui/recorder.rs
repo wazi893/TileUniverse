@@ -168,7 +168,7 @@ pub fn record_organism(
             tmpl.height as u32,
             &rparams,
         )
-        .map_err(|_| io::Error::new(io::ErrorKind::Other, "render error"))?;
+        .map_err(|_| io::Error::other("render error"))?;
         let frame_name = format!("frame_{:04}.ppm", i);
         let frame_path = out_dir.join(&frame_name);
         {
@@ -242,7 +242,7 @@ pub fn record_region_with<F: FnMut(&mut Simulation, u32)>(
         sim.tick();
         step_hook(sim, i);
         let img = render::render_region(sim, x0, y0, w, h, &rparams)
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "render error"))?;
+            .map_err(|_| io::Error::other("render error"))?;
         let frame_name = format!("frame_{:04}.ppm", i);
         let frame_path = out_dir.join(&frame_name);
         {

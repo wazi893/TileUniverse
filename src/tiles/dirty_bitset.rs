@@ -132,6 +132,50 @@ impl DirtyBitset {
         }
     }
 
+    /// Sprint 384: Clear all dirty bits inside `scope_mask` WITHOUT extracting
+    /// their indices. Same traversal as `fill_into_masked` minus the per-bit
+    /// push loop — used to drain informationless residue after the JIT settle
+    /// (every in-scope tile was just evaluated unconditionally). Returns the
+    /// number of bits cleared.
+    pub fn clear_masked(&self, scope_mask: &[u64]) -> u32 {
+        let mut cleared = 0u32;
+        for (l1_idx, l1_cell) in self.summary_l1.iter().enumerate() {
+            let l1_word = l1_cell.get();
+            if l1_word == 0 {
+                continue;
+            }
+            let mut l1_remaining = l1_word;
+            let mut bits = l1_word;
+            while bits != 0 {
+                let l0_offset = bits.trailing_zeros() as usize;
+                bits &= bits - 1;
+                let seg_idx = l1_idx * 64 + l0_offset;
+                if seg_idx >= self.segments.len() {
+                    break;
+                }
+                let scope = scope_mask.get(seg_idx).copied().unwrap_or(0);
+                if scope == 0 {
+                    continue;
+                }
+                let dirty = self.segments[seg_idx].get();
+                let dirty_in_scope = dirty & scope;
+                if dirty_in_scope == 0 {
+                    continue;
+                }
+                cleared += dirty_in_scope.count_ones();
+                let remaining = dirty & !dirty_in_scope;
+                self.segments[seg_idx].set(remaining);
+                if remaining == 0 {
+                    l1_remaining &= !(1u64 << l0_offset);
+                }
+            }
+            if l1_remaining != l1_word {
+                l1_cell.set(l1_remaining);
+            }
+        }
+        cleared
+    }
+
     pub fn fill_into_masked(&self, scope_mask: &[u64], out: &mut Vec<u32>) {
         out.clear();
         for (l1_idx, l1_cell) in self.summary_l1.iter().enumerate() {
@@ -183,6 +227,58 @@ impl DirtyBitset {
     /// Sprint 333: Sparse segment drain — only checks segments in the precomputed
     /// in-scope list. Each entry is (segment_index, scope_mask_word). O(in_scope_segments)
     /// instead of O(L1_bits × L0_segments).
+    /// Sprint 384: Sparse clear — clears dirty bits in the given (segment, scope)
+    /// pairs without extracting indices. The sparse counterpart of `clear_masked`,
+    /// visiting only in-scope segments (S333 pattern) instead of every dirty
+    /// segment in the grid. Returns the number of bits cleared.
+    pub fn clear_sparse(&self, in_scope_segments: &[(u32, u64)]) -> u32 {
+        let mut cleared = 0u32;
+        for &(seg_idx_u32, scope) in in_scope_segments {
+            let seg_idx = seg_idx_u32 as usize;
+            if seg_idx >= self.segments.len() {
+                continue;
+            }
+            let l1_idx = seg_idx / 64;
+            let l1_bit = 1u64 << (seg_idx % 64);
+            if let Some(l1_cell) = self.summary_l1.get(l1_idx) {
+                if l1_cell.get() & l1_bit == 0 {
+                    continue;
+                }
+            } else {
+                continue;
+            }
+            let dirty = self.segments[seg_idx].get();
+            let dirty_in_scope = dirty & scope;
+            if dirty_in_scope == 0 {
+                continue;
+            }
+            cleared += dirty_in_scope.count_ones();
+            let remaining = dirty & !dirty_in_scope;
+            self.segments[seg_idx].set(remaining);
+            if remaining == 0 {
+                if let Some(l1_cell) = self.summary_l1.get(l1_idx) {
+                    l1_cell.set(l1_cell.get() & !l1_bit);
+                }
+            }
+        }
+        cleared
+    }
+
+    /// Sprint 384: Diagnostic — count (dirty_segments, dirty_bits) across the
+    /// whole bitset. Not for hot paths.
+    pub fn debug_counts(&self) -> (u32, u32) {
+        let mut segs = 0u32;
+        let mut bits = 0u32;
+        for seg in &self.segments {
+            let d = seg.get();
+            if d != 0 {
+                segs += 1;
+                bits += d.count_ones();
+            }
+        }
+        (segs, bits)
+    }
+
     pub fn fill_into_sparse(&self, in_scope_segments: &[(u32, u64)], out: &mut Vec<u32>) {
         out.clear();
         for &(seg_idx_u32, scope) in in_scope_segments {

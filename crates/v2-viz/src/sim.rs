@@ -18,7 +18,7 @@ pub struct SimState {
 #[derive(Resource)]
 pub struct SimSnapshot {
     pub cycle: u64,
-    pub pc: u8,
+    pub pc: u32,
     pub flag_z: bool,
     pub flag_c: bool,
     pub halted: bool,

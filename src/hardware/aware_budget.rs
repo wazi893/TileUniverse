@@ -465,7 +465,7 @@ mod tests {
     fn test_compare_hardware() {
         let budget = MagicStateBudget::for_qram_routing(6, 10);
 
-        let profiles = vec![profiles::ibm_falcon(), profiles::ionq_aria()];
+        let profiles = [profiles::ibm_falcon(), profiles::ionq_aria()];
 
         let budgets = compare_on_hardware(&budget, &profiles.iter().collect::<Vec<_>>(), 1);
         assert_eq!(budgets.len(), 2);

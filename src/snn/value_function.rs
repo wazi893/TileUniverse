@@ -378,7 +378,7 @@ mod tests {
     fn test_delayed_reward_credit() {
         let mut tdc = TDCreditAssignment::new(2, 0.1, 0.9, 50.0);
 
-        let states = vec![
+        let states = [
             vec![1.0, 0.0], // s0
             vec![0.5, 0.5], // s1
             vec![0.0, 1.0], // s2 (gets reward)

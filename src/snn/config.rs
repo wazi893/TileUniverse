@@ -298,7 +298,7 @@ impl SNNConfig {
     /// Number of CPUs required to host this network
     pub fn required_cpus(&self) -> usize {
         let total = self.total_neurons();
-        (total + self.neurons_per_cpu - 1) / self.neurons_per_cpu
+        total.div_ceil(self.neurons_per_cpu)
     }
 
     /// Get layer sizes as a vector [inputs, hidden1, hidden2, ..., outputs]

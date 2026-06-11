@@ -144,7 +144,7 @@ pub fn run_plan(sim: &mut Simulation, plan: &AgentPlan, dry_run: bool) -> AgentR
                     "fields={} blobs0={}",
                     fields.len(),
                     rep.field_summaries
-                        .get(0)
+                        .first()
                         .map(|s| s.blobs.len())
                         .unwrap_or(0)
                 );

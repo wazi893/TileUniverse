@@ -167,7 +167,7 @@ impl Graph {
     /// Note: n*k must be even for this to be possible
     pub fn regular(n: usize, k: usize, _seed: u64) -> Self {
         assert!(k < n, "Degree k must be less than n");
-        assert!((n * k) % 2 == 0, "n*k must be even for regular graph");
+        assert!((n * k).is_multiple_of(2), "n*k must be even for regular graph");
 
         // Simple construction: cycle + chords
         // For k=2, this is just a cycle
@@ -184,7 +184,7 @@ impl Graph {
 
         // If k is odd, need perfect matching (only works for even n)
         if k % 2 == 1 {
-            assert!(n % 2 == 0, "Odd k requires even n");
+            assert!(n.is_multiple_of(2), "Odd k requires even n");
             for i in 0..(n / 2) {
                 graph.add_unweighted_edge(i, i + n / 2);
             }

@@ -864,10 +864,10 @@ mod tests {
     #[test]
     fn test_measure_identity_term() {
         let state = QState::new_zero(2);
-        let term = PauliTerm::identity(2, 3.14);
+        let term = PauliTerm::identity(2, 2.5);
 
         let expectation = measure_pauli_expectation(&state, &term, 100, 42);
-        assert!((expectation - 3.14).abs() < 1e-6); // Identity always contributes coefficient
+        assert!((expectation - 2.5).abs() < 1e-6); // Identity always contributes coefficient
     }
 
     #[test]

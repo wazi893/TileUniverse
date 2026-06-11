@@ -18,6 +18,7 @@ unsafe impl<T> Sync for SendPtr<T> {}
 
 impl<T> SendPtr<T> {
     #[inline]
+    #[allow(clippy::mut_from_ref)] // intentional: raw pointer arithmetic in unsafe context
     unsafe fn get_mut(&self, offset: usize) -> &mut T {
         unsafe { &mut *self.0.add(offset) }
     }

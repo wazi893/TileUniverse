@@ -390,7 +390,7 @@ impl DistillationConfig {
         let log_inv = (-target.log10()).ceil() as usize;
         let d = 2 * log_inv + 3;
         // Round up to odd number (surface code requirement)
-        if d % 2 == 0 { d + 1 } else { d }
+        if d.is_multiple_of(2) { d + 1 } else { d }
     }
 
     /// Get overhead ratio (noisy states per clean state)

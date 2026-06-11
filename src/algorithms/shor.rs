@@ -411,7 +411,7 @@ fn extract_period_candidates(measured: u64, register_size: u64, n: u64) -> Vec<u
 /// ```
 pub fn factor_with_shor(n: u64) -> Option<(u64, u64)> {
     // Classical shortcuts
-    if n % 2 == 0 {
+    if n.is_multiple_of(2) {
         return Some((2, n / 2));
     }
 

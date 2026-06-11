@@ -168,7 +168,7 @@ pub fn auto_config_for_block_sparse(input: AutoConfigInput) -> WorkerConfig {
 /// Find largest divisor of n that is <= limit
 fn largest_divisor(n: usize, limit: usize) -> usize {
     for divisor in (1..=limit).rev() {
-        if n % divisor == 0 {
+        if n.is_multiple_of(divisor) {
             return divisor;
         }
     }
@@ -507,7 +507,7 @@ fn apply_gate_to_block(state: &mut BlockSparseState, gate: &QGate, block_id: usi
     use logic_fabric_core::quantum::QGate;
 
     const BLOCK_SIZE: usize = 128;
-    const INV_SQRT2: f32 = 0.70710678118_f32;
+    const INV_SQRT2: f32 = std::f32::consts::FRAC_1_SQRT_2;
 
     // Get mutable access to block
     let block = state.get_block_mut(block_id);
@@ -838,8 +838,8 @@ fn apply_gate_to_block(state: &mut BlockSparseState, gate: &QGate, block_id: usi
         // SPRINT 48.0: T gates
         QGate::T(target_qubit) => {
             // T gate: |0⟩ → |0⟩, |1⟩ → e^(iπ/4)|1⟩ = (1+i)/√2 |1⟩
-            const T_REAL: f32 = 0.7071067811865476;
-            const T_IMAG: f32 = 0.7071067811865476;
+            const T_REAL: f32 = std::f32::consts::FRAC_1_SQRT_2;
+            const T_IMAG: f32 = std::f32::consts::FRAC_1_SQRT_2;
             let bit = 1usize << (*target_qubit as usize);
             for i in 0..BLOCK_SIZE {
                 if (i & bit) != 0 {
@@ -854,8 +854,8 @@ fn apply_gate_to_block(state: &mut BlockSparseState, gate: &QGate, block_id: usi
 
         QGate::Tdg(target_qubit) => {
             // T† gate: |0⟩ → |0⟩, |1⟩ → e^(-iπ/4)|1⟩ = (1-i)/√2 |1⟩
-            const T_REAL: f32 = 0.7071067811865476;
-            const T_IMAG: f32 = -0.7071067811865476;
+            const T_REAL: f32 = std::f32::consts::FRAC_1_SQRT_2;
+            const T_IMAG: f32 = -std::f32::consts::FRAC_1_SQRT_2;
             let bit = 1usize << (*target_qubit as usize);
             for i in 0..BLOCK_SIZE {
                 if (i & bit) != 0 {

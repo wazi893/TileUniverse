@@ -1294,7 +1294,7 @@ mod tests {
         f2.genome = shared_genome.clone();
         // f3 keeps its random genome
 
-        let foragers = vec![f1, f2, f3];
+        let foragers = [f1, f2, f3];
         let batches = group_organisms_by_circuit(foragers.iter());
 
         // Should have 2 batches: one with f1+f2, one with f3

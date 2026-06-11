@@ -90,7 +90,7 @@ pub mod known_optima {
     /// Even cycle: n edges, cut n (all edges)
     /// Odd cycle: n edges, cut n-1
     pub fn cycle(n: usize) -> f64 {
-        if n % 2 == 0 { n as f64 } else { (n - 1) as f64 }
+        if n.is_multiple_of(2) { n as f64 } else { (n - 1) as f64 }
     }
 
     /// Star S_n: optimal cut = n-1 (all edges)

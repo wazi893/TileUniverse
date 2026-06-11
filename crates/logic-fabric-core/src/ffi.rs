@@ -11,6 +11,7 @@ pub extern "C" fn lfc_context_create() -> *mut LfcContext {
 }
 
 #[no_mangle]
+#[allow(clippy::not_unsafe_ptr_arg_deref)] // FFI boundary: caller guarantees ptr validity; null check precedes unsafe block
 pub extern "C" fn lfc_context_destroy(ctx: *mut LfcContext) {
     if ctx.is_null() {
         return;

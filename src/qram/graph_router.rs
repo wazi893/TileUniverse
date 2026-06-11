@@ -484,7 +484,7 @@ impl GraphRouter {
         };
 
         // Stabilizer: 2n generators * (n/64) words * 8 bytes
-        let n_words = (n_qubits + 63) / 64;
+        let n_words = n_qubits.div_ceil(64);
         let stabilizer_bytes = 2 * n_qubits * n_words * 8;
 
         GraphRouterResourceComparison {

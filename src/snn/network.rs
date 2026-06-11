@@ -1582,7 +1582,7 @@ mod tests {
         let network = SNNNetwork::new(config);
 
         assert_eq!(network.n_neurons(), 4 + 8 + 2); // inputs + hidden + outputs
-        assert!(network.populations.len() > 0);
+        assert!(!network.populations.is_empty());
     }
 
     #[test]

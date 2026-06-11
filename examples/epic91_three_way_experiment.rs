@@ -76,7 +76,7 @@ fn main() {
     let _sq_vs_cn_sig = results.sq_vs_cn.p_value < 0.05;
 
     println!("Ranking: ");
-    let mut groups = vec![
+    let mut groups = [
         ("Full Quantum", fq_mean),
         ("Separable Quantum", sq_mean),
         ("Classical NN", cn_mean),

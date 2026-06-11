@@ -256,7 +256,7 @@ impl Debugger {
 
         // 3. Snapshot — keyframe or delta.
         let interval = self.snapshots.keyframe_interval;
-        if interval > 0 && self.current_tick % interval == 0 {
+        if interval > 0 && self.current_tick.is_multiple_of(interval) {
             self.snapshots
                 .capture_keyframe(&self.sim, self.current_tick);
         } else {

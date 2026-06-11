@@ -418,6 +418,6 @@ mod tests {
         assert!(!dist.is_empty());
 
         // Should use mix of protocols
-        assert!(dist.len() >= 1);
+        assert!(!dist.is_empty());
     }
 }

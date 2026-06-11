@@ -32,12 +32,15 @@
 
 pub mod aig;
 pub mod aiger;
+pub mod alphafabric;
 pub mod balance;
 pub mod benchmark;
 pub mod bridge;
 pub mod cell_lib;
 pub mod cuts;
 pub mod export;
+pub mod hls;
+pub mod hls_seq;
 pub mod integration;
 pub mod mapping;
 pub mod npn;
@@ -56,6 +59,14 @@ pub use benchmark::{SynthBenchmarkResult, run_synth_benchmarks};
 pub use cell_lib::{Cell, CellLibrary};
 pub use cuts::{Cut, NodeCuts};
 pub use export::{SynthExport, evaluate_exported, export_to_simulation};
+pub use hls::{
+    eval_expr_ref, report_aig, report_func, synthesize_expr, synthesize_func, HlsConfig, HlsError,
+    HlsReport, PlacedFootprint,
+};
+pub use hls_seq::{
+    build_cdfg, build_seq_aig, eval_func_ref, synthesize_seq_func, BasicBlock, Cdfg, SeqDatapath,
+    SeqRunOutcome, SeqStats, Terminator,
+};
 pub use integration::place_const_guard_region;
 pub use mapping::{MapConfig, MappedGate, MappedNetlist};
 pub use npn::npn4_classify;

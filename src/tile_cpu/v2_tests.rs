@@ -25132,6 +25132,82 @@ fn test_v2_s341_production_rebaseline() {
     eprintln!("\n=== End Sprint 341 Re-Baseline ===\n");
 }
 
+/// Sprint 384: Diagnostic — attribute branch-phase cost under JIT settle.
+/// Prints residual dirty bits drained per settle (the S341 branch-regression
+/// suspect), plus branch calls/evals so scan vs eval cost can be separated.
+#[test]
+#[cfg(feature = "cranelift_jit")]
+fn test_v2_s384_jit_settle_residue_diag() {
+    let cases = benchmark_cases();
+    eprintln!("\n=== Sprint 384: JIT Settle Residue Diagnostic ===\n");
+    eprintln!(
+        "  {:<18} {:>6} {:>9} {:>9} {:>9} {:>9} {:>9} {:>9}",
+        "Case", "Cyc", "Drained", "Drn/cyc", "BrCalls", "BrEvals", "Br µs", "Clk µs"
+    );
+    eprintln!("  {}", "-".repeat(88));
+
+    for case in cases.iter().take(5) {
+        let program = assemble_v2(case.source).unwrap();
+        let mut sim = Simulation::with_size_layered(128, 640, 16);
+        let mut cpu = V2Builder::new()
+            .with_origin(0, 0)
+            .with_program(&program)
+            .with_rom_size(case.rom_size)
+            .with_ram_size(128)
+            .with_synth_blocks(V2SynthConfig::max_authority())
+            .build(&mut sim);
+        cpu.set_stage_timing(true);
+
+        for _ in 0..22 {
+            if cpu.is_halted() {
+                break;
+            }
+            cpu.tick(&mut sim);
+        }
+
+        let drained0 = sim.jit_settle_drained_total;
+        let stats0 = cpu.per_path_prop_stats();
+        let mut br = 0u64;
+        let mut clk = 0u64;
+        let mut n = 0u64;
+        for _ in 0..case.max_cycles {
+            if cpu.is_halted() {
+                break;
+            }
+            cpu.tick(&mut sim);
+            let t = cpu.read_last_stage_timing();
+            br += t.branch_ns;
+            clk += t.clock_ns;
+            n += 1;
+        }
+        if n == 0 {
+            continue;
+        }
+        let drained = sim.jit_settle_drained_total - drained0;
+        let stats1 = cpu.per_path_prop_stats();
+        let br_calls = stats1[3].0 - stats0[3].0;
+        let br_evals = stats1[3].1 - stats0[3].1;
+        // Global dirty-bitset state at steady state — out-of-scope residue
+        // makes every masked traversal pay per dirty segment (S333 motivation).
+        let (gsegs, gbits) = sim.dirty.debug_counts();
+
+        eprintln!(
+            "  {:<18} {:>6} {:>9} {:>9.1} {:>9} {:>9} {:>9.2} {:>9.1} {:>7}s/{:<7}b",
+            case.name,
+            n,
+            drained,
+            drained as f64 / n as f64,
+            br_calls,
+            br_evals,
+            br as f64 / 1000.0 / n as f64,
+            clk as f64 / 1000.0 / n as f64,
+            gsegs,
+            gbits,
+        );
+    }
+    eprintln!("\n=== End Sprint 384 Diagnostic ===\n");
+}
+
 /// Sprint 339: Guard — JIT settle pass 2 must always be zero-change.
 /// If this fails, the single-pass assumption from S338 is violated.
 #[test]

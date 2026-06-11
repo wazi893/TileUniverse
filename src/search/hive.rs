@@ -30,7 +30,7 @@ impl HiveConfig {
     pub fn for_population(size: usize) -> Self {
         // Find roughly square dimensions
         let width = (size as f64).sqrt().ceil() as usize;
-        let height = (size + width - 1) / width;
+        let height = size.div_ceil(width);
 
         Self {
             width,
@@ -332,7 +332,7 @@ impl HiveMesh {
 
         // If no improvement available from neighbors, return unchanged
         if gradient.gradient <= 0 || gradient.suggested_bits.is_none() {
-            return candidate.clone();
+            return *candidate;
         }
 
         let neighbor_bits = gradient.suggested_bits.unwrap();
@@ -365,13 +365,13 @@ impl HiveMesh {
         fitness_fn: &dyn super::fitness::FitnessFunction,
         rng: &mut impl Rng,
     ) -> Candidate {
-        let mut best = candidate.clone();
+        let mut best = *candidate;
         best.fitness = fitness_fn.evaluate(&best);
 
         // Try flipping a few random bits
         for _ in 0..self.config.local_search_bits {
             let bit = (rng.next_u64() as usize) % 64;
-            let mut trial = best.clone();
+            let mut trial = best;
             trial.flip_bit(bit);
             trial.fitness = fitness_fn.evaluate(&trial);
 
@@ -635,11 +635,9 @@ mod tests {
 
         let mut rng = Xorshift64::new(123);
         let original = substrate.get(50).clone();
-        let influenced = mesh.apply_influence(50, &original, &substrate, &mut rng);
-
-        // Influenced candidate may or may not be different depending on gradients
-        // Just verify it's a valid candidate
-        assert!(influenced.bits <= u64::MAX);
+        // Influenced candidate may or may not be different depending on gradients;
+        // just verify the call completes without panicking
+        let _influenced = mesh.apply_influence(50, &original, &substrate, &mut rng);
     }
 
     #[test]

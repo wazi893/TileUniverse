@@ -77,14 +77,14 @@ impl NNConfig {
     pub fn wmma_efficiency(&self) -> f64 {
         // Layer 1: sensors × hidden
         let l1_actual = (self.n_sensors * self.n_hidden) as f64;
-        let l1_padded_rows = ((self.n_sensors + 15) / 16) * 16;
-        let l1_padded_cols = ((self.n_hidden + 15) / 16) * 16;
+        let l1_padded_rows = self.n_sensors.div_ceil(16) * 16;
+        let l1_padded_cols = self.n_hidden.div_ceil(16) * 16;
         let l1_padded = (l1_padded_rows * l1_padded_cols) as f64;
 
         // Layer 2: hidden × outputs
         let l2_actual = (self.n_hidden * self.n_outputs) as f64;
-        let l2_padded_rows = ((self.n_hidden + 15) / 16) * 16;
-        let l2_padded_cols = ((self.n_outputs + 15) / 16) * 16;
+        let l2_padded_rows = self.n_hidden.div_ceil(16) * 16;
+        let l2_padded_cols = self.n_outputs.div_ceil(16) * 16;
         let l2_padded = (l2_padded_rows * l2_padded_cols) as f64;
 
         let total_actual = l1_actual + l2_actual;

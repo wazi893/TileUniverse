@@ -491,7 +491,7 @@ mod tests {
             Err(errors) => {
                 // Parser collected multiple errors
                 assert!(
-                    errors.len() >= 1,
+                    !errors.is_empty(),
                     "should have at least 1 error from malformed statements"
                 );
             }

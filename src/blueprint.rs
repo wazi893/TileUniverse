@@ -375,7 +375,7 @@ impl Blueprint {
                             .ok_or_else(|| {
                                 BlueprintError::Parse("logic must be 0x... or -".to_string())
                             })?;
-                        if s.len() == 0 || s.len() > 16 {
+                        if s.is_empty() || s.len() > 16 {
                             return Err(BlueprintError::Parse(
                                 "invalid logic hex length".to_string(),
                             ));

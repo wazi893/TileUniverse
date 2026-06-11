@@ -433,6 +433,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::approx_constant)] // 3.14 is literal lexer test data, not π
     fn test_numbers() {
         let input = "42 3.14 -1 1e-5";
         let tokens = Lexer::new(input).tokenize();

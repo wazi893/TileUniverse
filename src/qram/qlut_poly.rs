@@ -83,7 +83,7 @@ impl QLUTPolyConfig {
     pub fn new(n_cells: usize) -> Self {
         let sqrt_n = (n_cells as f64).sqrt().ceil() as usize;
         let n_rows = sqrt_n;
-        let n_cols = (n_cells + n_rows - 1) / n_rows; // Ceiling division
+        let n_cols = n_cells.div_ceil(n_rows); // Ceiling division
 
         Self {
             n_cells,
