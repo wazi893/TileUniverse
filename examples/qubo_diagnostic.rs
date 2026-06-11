@@ -76,7 +76,6 @@ fn main() {
         beta: 5.0,
     };
     // Manually build problem and run annealer to debug
-    
 
     let problem = brain.build_problem();
 

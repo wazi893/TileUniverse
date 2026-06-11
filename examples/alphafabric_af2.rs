@@ -8,7 +8,7 @@
 //! Run: `cargo run --release --example alphafabric_af2`
 
 use engine::synth::alphafabric::corpus::{build_eq_comparator, build_parity, build_ripple_adder};
-use engine::synth::alphafabric::{anneal, AnnealConfig, Circuit, PlacementEnv};
+use engine::synth::alphafabric::{AnnealConfig, Circuit, PlacementEnv, anneal};
 use engine::synth::benchmark::build_4bit_multiplier;
 use std::time::Instant;
 

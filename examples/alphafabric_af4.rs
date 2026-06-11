@@ -18,7 +18,7 @@ use engine::synth::alphafabric::corpus::{
     build_and_reduce, build_eq_comparator, build_parity, build_ripple_adder,
 };
 use engine::synth::alphafabric::{
-    anneal, place, train, AnnealConfig, Circuit, PlacementEnv, TrainConfig,
+    AnnealConfig, Circuit, PlacementEnv, TrainConfig, anneal, place, train,
 };
 use engine::synth::benchmark::build_4bit_multiplier;
 

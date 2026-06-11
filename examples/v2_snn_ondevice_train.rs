@@ -35,17 +35,32 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let mut seed: u64 = 42;
     let mut n_train: usize = 1000;
-    let mut n_test:  usize = 500;
+    let mut n_test: usize = 500;
     let mut n_epochs: usize = 10;
     let mut lr: f32 = 0.01;
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
-            "--seed"   => { i += 1; seed     = args[i].parse().expect("seed"); }
-            "--train"  => { i += 1; n_train  = args[i].parse().expect("train count"); }
-            "--test"   => { i += 1; n_test   = args[i].parse().expect("test count"); }
-            "--epochs" => { i += 1; n_epochs = args[i].parse().expect("epochs"); }
-            "--lr"     => { i += 1; lr       = args[i].parse().expect("lr"); }
+            "--seed" => {
+                i += 1;
+                seed = args[i].parse().expect("seed");
+            }
+            "--train" => {
+                i += 1;
+                n_train = args[i].parse().expect("train count");
+            }
+            "--test" => {
+                i += 1;
+                n_test = args[i].parse().expect("test count");
+            }
+            "--epochs" => {
+                i += 1;
+                n_epochs = args[i].parse().expect("epochs");
+            }
+            "--lr" => {
+                i += 1;
+                lr = args[i].parse().expect("lr");
+            }
             _ => {}
         }
         i += 1;
@@ -64,8 +79,10 @@ fn main() {
     )
     .expect("load MNIST train data");
     let train_imgs: Vec<Vec<u8>> = train_ds.images[..n_train.min(train_ds.images.len())].to_vec();
-    let train_lbls: Vec<usize> =
-        train_ds.labels[..n_train.min(train_ds.labels.len())].iter().map(|&l| l as usize).collect();
+    let train_lbls: Vec<usize> = train_ds.labels[..n_train.min(train_ds.labels.len())]
+        .iter()
+        .map(|&l| l as usize)
+        .collect();
     let n_train = train_imgs.len();
     println!("  Loaded {} train samples", n_train);
 
@@ -98,10 +115,15 @@ fn main() {
 
     // ── Dataset device for label lookup / SUBMIT_PREDICTION ─────────────────
     let samples: Vec<DatasetSample> = (0..n_train)
-        .map(|i| DatasetSample { features: 0, label: train_lbls[i] as u64 })
+        .map(|i| DatasetSample {
+            features: 0,
+            label: train_lbls[i] as u64,
+        })
         .collect();
     let dataset = V2MmioDatasetDevice::from_samples(samples);
-    let combined = Rc::new(V2MmioCombinedDevice::with_snn_and_dataset(seed, snn, dataset));
+    let combined = Rc::new(V2MmioCombinedDevice::with_snn_and_dataset(
+        seed, snn, dataset,
+    ));
 
     // ── Pre-training sanity check: GET_CORRECT before any epoch ─────────────
     let dataset_ref = combined.dataset.as_ref().expect("dataset device present");
@@ -115,13 +137,19 @@ fn main() {
     }
 
     // ── Assemble training program once ──────────────────────────────────────
-    let words = assemble_v2(SHOWCASE_SNN_TRAIN_EPOCH.source)
-        .expect("assemble SHOWCASE_SNN_TRAIN_EPOCH");
-    println!("  Assembled SHOWCASE_SNN_TRAIN_EPOCH: {} instruction words", words.len());
+    let words =
+        assemble_v2(SHOWCASE_SNN_TRAIN_EPOCH.source).expect("assemble SHOWCASE_SNN_TRAIN_EPOCH");
+    println!(
+        "  Assembled SHOWCASE_SNN_TRAIN_EPOCH: {} instruction words",
+        words.len()
+    );
 
     // ── Epoch loop ──────────────────────────────────────────────────────────
     println!("\n  Training trajectory:");
-    println!("  {:<6} {:>10} {:>12} {:>10}", "epoch", "correct", "acc", "wall (s)");
+    println!(
+        "  {:<6} {:>10} {:>12} {:>10}",
+        "epoch", "correct", "acc", "wall (s)"
+    );
     println!("  {:-<44}", "");
 
     let mut accs: Vec<f32> = Vec::with_capacity(n_epochs);
@@ -144,7 +172,9 @@ fn main() {
         let max_cycles: u64 = (n_train as u64) * 200 + 1000;
         let ep_t0 = Instant::now();
         for _ in 0..max_cycles {
-            if cpu.is_halted() { break; }
+            if cpu.is_halted() {
+                break;
+            }
             cpu.step(&mut sim);
         }
         let ep_secs = ep_t0.elapsed().as_secs_f32();
@@ -157,7 +187,13 @@ fn main() {
         let epoch_acc = 100.0 * epoch_correct as f32 / n_train as f32;
         accs.push(epoch_acc);
         prev_correct = post;
-        println!("  {:<6} {:>10} {:>11.2}% {:>9.2}s", ep + 1, epoch_correct, epoch_acc, ep_secs);
+        println!(
+            "  {:<6} {:>10} {:>11.2}% {:>9.2}s",
+            ep + 1,
+            epoch_correct,
+            epoch_acc,
+            ep_secs
+        );
     }
     let total_secs = train_t0.elapsed().as_secs_f32();
 
@@ -170,15 +206,14 @@ fn main() {
 
     // Load test images from disk and reload the model checkpoint (LiveSnnModel
     // is consumed by the bridge constructor, so we deserialize twice).
-    let test_ds = MnistDataset::load(
-        "data/t10k-images-idx3-ubyte",
-        "data/t10k-labels-idx1-ubyte",
-    )
-    .expect("load MNIST test data");
+    let test_ds = MnistDataset::load("data/t10k-images-idx3-ubyte", "data/t10k-labels-idx1-ubyte")
+        .expect("load MNIST test data");
     let n_test = n_test.min(test_ds.images.len());
     let test_imgs: Vec<Vec<u8>> = test_ds.images[..n_test].to_vec();
-    let test_lbls: Vec<usize> =
-        test_ds.labels[..n_test].iter().map(|&l| l as usize).collect();
+    let test_lbls: Vec<usize> = test_ds.labels[..n_test]
+        .iter()
+        .map(|&l| l as usize)
+        .collect();
     let test_model = LiveSnnModel::load(&ckpt_path).expect("re-load checkpoint");
 
     let mut test_snn = V2MmioSnnBridgeDevice::with_live_model(
@@ -191,15 +226,20 @@ fn main() {
     );
     test_snn.set_readout_weights(n_hid, n_classes, trained_w, trained_b);
     let test_samples: Vec<DatasetSample> = (0..n_test)
-        .map(|i| DatasetSample { features: 0, label: test_lbls[i] as u64 })
+        .map(|i| DatasetSample {
+            features: 0,
+            label: test_lbls[i] as u64,
+        })
         .collect();
     let test_dataset = V2MmioDatasetDevice::from_samples(test_samples);
     let test_combined = Rc::new(V2MmioCombinedDevice::with_snn_and_dataset(
-        seed, test_snn, test_dataset,
+        seed,
+        test_snn,
+        test_dataset,
     ));
 
-    let eval_words = assemble_v2(SHOWCASE_SNN_EVAL_READOUT.source)
-        .expect("assemble SHOWCASE_SNN_EVAL_READOUT");
+    let eval_words =
+        assemble_v2(SHOWCASE_SNN_EVAL_READOUT.source).expect("assemble SHOWCASE_SNN_EVAL_READOUT");
     let mmio_handle = V2MmioHandle::from_rc(test_combined.clone());
     let mut sim = Simulation::with_size_layered(128, 128, 4);
     let cpu = V2Builder::new()
@@ -213,7 +253,9 @@ fn main() {
     let test_t0 = Instant::now();
     let max_cycles: u64 = (n_test as u64) * 200 + 1000;
     for _ in 0..max_cycles {
-        if cpu.is_halted() { break; }
+        if cpu.is_halted() {
+            break;
+        }
         cpu.step(&mut sim);
     }
     let test_secs = test_t0.elapsed().as_secs_f32();
@@ -231,13 +273,23 @@ fn main() {
     println!("\n===============================================================");
     println!("  Summary");
     println!("===============================================================");
-    println!("  Total train wall-clock:  {:.1}s ({:.2}s/epoch avg)", total_secs, total_secs / n_epochs as f32);
-    println!("  First-epoch train acc:   {:.2}% (random readout init)", first_acc);
+    println!(
+        "  Total train wall-clock:  {:.1}s ({:.2}s/epoch avg)",
+        total_secs,
+        total_secs / n_epochs as f32
+    );
+    println!(
+        "  First-epoch train acc:   {:.2}% (random readout init)",
+        first_acc
+    );
     println!("  Final-epoch train acc:   {:.2}%", final_acc);
     println!("  Best-epoch train acc:    {:.2}%", best_acc);
     println!("  Δ first→last (train):    {:+.2}pp", final_acc - first_acc);
     println!();
-    println!("  >>> Held-out test accuracy: {:.2}% ({} samples) <<<", test_acc, n_test);
+    println!(
+        "  >>> Held-out test accuracy: {:.2}% ({} samples) <<<",
+        test_acc, n_test
+    );
     println!();
     println!("  Reference baselines (test accuracy):");
     println!("    Chance (10 classes)                  = 10.0%");
@@ -252,10 +304,14 @@ fn main() {
         println!("  FAIL gate 1 (>=55%, learning verified): {:.2}%", test_acc);
     }
     if test_acc >= 65.0 {
-        println!("  PASS gate 2 (>=65%, close to M7P1):     {:.2}%  (Δ vs M7P1: {:+.1}pp)",
-                 test_acc, delta_m7p1);
+        println!(
+            "  PASS gate 2 (>=65%, close to M7P1):     {:.2}%  (Δ vs M7P1: {:+.1}pp)",
+            test_acc, delta_m7p1
+        );
     } else {
-        println!("  -- gate 2 (>=65%, close to M7P1):       {:.2}%  (Δ vs M7P1: {:+.1}pp)",
-                 test_acc, delta_m7p1);
+        println!(
+            "  -- gate 2 (>=65%, close to M7P1):       {:.2}%  (Δ vs M7P1: {:+.1}pp)",
+            test_acc, delta_m7p1
+        );
     }
 }

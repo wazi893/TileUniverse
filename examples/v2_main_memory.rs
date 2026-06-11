@@ -109,7 +109,10 @@ fn main() {
     println!("\n===============================================================");
     if sum == expected {
         println!("  PASS — the V2 CPU processed a {N}-element array in main memory.");
-        println!("  Old ceiling: 128 data cells. New ceiling: {} words.", cpu.main_mem_len());
+        println!(
+            "  Old ceiling: 128 data cells. New ceiling: {} words.",
+            cpu.main_mem_len()
+        );
     } else {
         println!("  FAIL — sum {sum} != expected {expected}");
         std::process::exit(1);

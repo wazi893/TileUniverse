@@ -12,7 +12,6 @@
 //!
 //! Target: 5-10× kernel speedup, 3-4× batched workload speedup
 
-
 #[cfg(feature = "cuda")]
 use engine::brain::{BrainWeights, forward_batch_shared_weights};
 #[cfg(feature = "cuda")]

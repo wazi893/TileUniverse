@@ -9,8 +9,8 @@
 
 use engine::snn::tile_neuron::TileNeuron;
 use engine::synth::cell_library_with_vias;
-use engine::synth::mapping::{map_to_library, MapConfig};
-use engine::synth::timing::{analyze_timing, TimingConstraint};
+use engine::synth::mapping::{MapConfig, map_to_library};
+use engine::synth::timing::{TimingConstraint, analyze_timing};
 
 fn truth_row(neuron: &TileNeuron, inputs: &[bool]) -> (bool, bool) {
     (neuron.fire_reference(inputs), neuron.fire_physical(inputs))

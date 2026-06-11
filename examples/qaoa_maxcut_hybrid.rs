@@ -19,7 +19,8 @@
 use std::time::Instant;
 
 use engine::hybrid::{
-    CostFunction, Gate, HybridScheduler, Optimizer, QuantumCircuit, QuantumSubstrate, VariationalExecutor, VariationalSpec,
+    CostFunction, Gate, HybridScheduler, Optimizer, QuantumCircuit, QuantumSubstrate,
+    VariationalExecutor, VariationalSpec,
 };
 
 fn main() {

@@ -7,12 +7,17 @@
 //!
 //! Run: `cargo run --release --example synth_via_layout`
 
-use engine::synth::via_layout::{realize, ViaCircuit, ViaClause, ViaStack};
+use engine::synth::via_layout::{ViaCircuit, ViaClause, ViaStack, realize};
 
 fn dump(name: &str, circuit: &ViaCircuit, labels: &[&str]) {
     let mut phys = realize(circuit);
     let n = circuit.num_pis;
-    println!("\n{} — {} layer(s), {} tiles placed", name, circuit.max_depth(), phys.tile_count());
+    println!(
+        "\n{} — {} layer(s), {} tiles placed",
+        name,
+        circuit.max_depth(),
+        phys.tile_count()
+    );
     let header: String = (0..n).map(|i| ((b'a' + i as u8) as char)).collect();
     println!("   {}   {:<24} (ref vs tile)", header, labels.join(" "));
     let mut all_ok = true;
@@ -45,7 +50,11 @@ fn main() {
             ViaStack::new(vec![ViaClause::majority(vec![0, 1, 2])]),
         ],
     );
-    dump("Threshold layer [AND, OR, MAJ]", &layer, &["AND", "OR", "MAJ"]);
+    dump(
+        "Threshold layer [AND, OR, MAJ]",
+        &layer,
+        &["AND", "OR", "MAJ"],
+    );
 
     // Depth-3 monotone CNF in one vertical via stack:
     //   (a|b) & (c|d) & maj(a,c,d)

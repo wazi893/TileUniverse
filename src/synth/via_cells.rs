@@ -229,7 +229,11 @@ pub fn eval_threshold_via_physical(threshold: u8, inputs: &[bool]) -> bool {
 
     for (j, &(nx, ny)) in npos.iter().enumerate() {
         sim.set_tile_3d(nx, ny, 0, TileType::Const);
-        let val = if j < inputs.len() && inputs[j] { 1u64 } else { 0u64 };
+        let val = if j < inputs.len() && inputs[j] {
+            1u64
+        } else {
+            0u64
+        };
         sim.set_logic_value_by_idx(idx_at(w, nx, ny, 0, layer_size), val);
     }
 
@@ -251,12 +255,7 @@ pub fn verify_via_cell(cell: &ViaCell) -> bool {
     let layer_size = w * h;
     let (cx, cy) = (3usize, 3usize);
     // Neighbor positions in input order: left, right, up, down.
-    let npos = [
-        (cx - 1, cy),
-        (cx + 1, cy),
-        (cx, cy - 1),
-        (cx, cy + 1),
-    ];
+    let npos = [(cx - 1, cy), (cx + 1, cy), (cx, cy - 1), (cx, cy + 1)];
     let k = cell.num_neighbors as usize;
 
     for combo in 0u32..(1u32 << cell.num_inputs) {
@@ -454,7 +453,7 @@ mod tests {
         use crate::synth::benchmark::{
             build_4bit_adder, build_8bit_adder, build_8bit_eq_comparator, build_priority_encoder8,
         };
-        use crate::synth::mapping::{map_to_library, verify_equivalence, MapConfig};
+        use crate::synth::mapping::{MapConfig, map_to_library, verify_equivalence};
 
         let lib = cell_library_with_vias();
         for (name, aig) in [
@@ -478,8 +477,8 @@ mod tests {
     #[test]
     fn via_mapping_reduces_adder_delay() {
         use crate::synth::benchmark::build_8bit_adder;
-        use crate::synth::mapping::{map_to_library, MapConfig};
-        use crate::synth::timing::{analyze_timing, TimingConstraint};
+        use crate::synth::mapping::{MapConfig, map_to_library};
+        use crate::synth::timing::{TimingConstraint, analyze_timing};
 
         let base_lib = CellLibrary::tile_native();
         let via_lib = cell_library_with_vias();
@@ -504,7 +503,7 @@ mod tests {
     #[test]
     fn full_adder_carry_folds_to_maj3() {
         use crate::synth::aig::Aig;
-        use crate::synth::mapping::{map_to_library, verify_equivalence, MapConfig};
+        use crate::synth::mapping::{MapConfig, map_to_library, verify_equivalence};
 
         // cout = (a & b) | (cin & (a ^ b)) = majority(a, b, cin).
         let mut aig = Aig::new();

@@ -345,10 +345,7 @@ impl QState {
     pub fn new_zero_multitile(n_qubits: u8, tile_count: u16) -> Self {
         // EPIC 114: Raised limit from 30 to 32 qubits for RTX 5090 (32GB VRAM)
         assert!(n_qubits > 0 && n_qubits <= 32, "n_qubits must be 1-32");
-        assert!(
-            (1..=256).contains(&tile_count),
-            "tile_count must be 1-256"
-        );
+        assert!((1..=256).contains(&tile_count), "tile_count must be 1-256");
 
         // EPIC 114: Warn about high memory usage
         if n_qubits >= 30 {

@@ -9,8 +9,8 @@
 //!
 //! Run with: cargo run --release --example quantum_snn_mnist_ab
 
-use engine::snn::quantum_hybrid::{InterferenceMode, QuantumSNN, QuantumSNNConfig};
 use engine::snn::MnistDataset;
+use engine::snn::quantum_hybrid::{InterferenceMode, QuantumSNN, QuantumSNNConfig};
 use std::time::Instant;
 
 const N_INPUTS: usize = 784;
@@ -62,7 +62,9 @@ fn balanced_subset(ds: &MnistDataset, per_class: usize) -> (Vec<Vec<u8>>, Vec<u8
 /// Deterministic Fisher-Yates shuffle.
 fn shuffle(state: &mut u64, indices: &mut [usize]) {
     for i in (1..indices.len()).rev() {
-        *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+        *state = state
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
         let j = ((*state >> 33) as usize) % (i + 1);
         indices.swap(i, j);
     }
@@ -94,7 +96,11 @@ fn train_and_eval(
             } else {
                 qsnn.decide()
             };
-            let reward: i8 = if predicted == train_lbls[idx] as usize { 50 } else { -50 };
+            let reward: i8 = if predicted == train_lbls[idx] as usize {
+                50
+            } else {
+                -50
+            };
             qsnn.learn(reward);
         }
     }
@@ -128,18 +134,21 @@ fn main() {
         "data/train-labels-idx1-ubyte",
     )
     .expect("Failed to load MNIST train set");
-    let test_ds = MnistDataset::load(
-        "data/t10k-images-idx3-ubyte",
-        "data/t10k-labels-idx1-ubyte",
-    )
-    .expect("Failed to load MNIST test set");
+    let test_ds = MnistDataset::load("data/t10k-images-idx3-ubyte", "data/t10k-labels-idx1-ubyte")
+        .expect("Failed to load MNIST test set");
 
     let (train_imgs, train_lbls) = balanced_subset(&train_ds, N_TRAIN / 10);
     let (test_imgs, test_lbls) = balanced_subset(&test_ds, N_TEST / 10);
 
     println!("Config:");
-    println!("  n_inputs={}, hidden={:?}, n_outputs={}", N_INPUTS, HIDDEN, N_OUTPUTS);
-    println!("  ticks_per_decision={}, mix_angle={}", TICKS_PER_DECISION, MIX_ANGLE);
+    println!(
+        "  n_inputs={}, hidden={:?}, n_outputs={}",
+        N_INPUTS, HIDDEN, N_OUTPUTS
+    );
+    println!(
+        "  ticks_per_decision={}, mix_angle={}",
+        TICKS_PER_DECISION, MIX_ANGLE
+    );
     println!(
         "  train={} ({}/class), test={} ({}/class), epochs={}",
         train_imgs.len(),
@@ -155,10 +164,10 @@ fn main() {
     let modes: &[(&str, InterferenceMode, bool)] = &[
         ("Classical-WTA", InterferenceMode::None, true),
         ("NoInterf-Prop", InterferenceMode::None, false),
-        ("SoftMix",       InterferenceMode::SoftMix, false),
-        ("Grover",        InterferenceMode::Grover, false),
-        ("AntiGrover",    InterferenceMode::AntiGrover, false),
-        ("Adaptive",      InterferenceMode::Adaptive, false),
+        ("SoftMix", InterferenceMode::SoftMix, false),
+        ("Grover", InterferenceMode::Grover, false),
+        ("AntiGrover", InterferenceMode::AntiGrover, false),
+        ("Adaptive", InterferenceMode::Adaptive, false),
     ];
 
     let mut results: Vec<(&str, Vec<f32>)> = Vec::new();
@@ -168,9 +177,13 @@ fn main() {
         let mut accs = Vec::new();
         for &seed in SEEDS {
             let acc = train_and_eval(
-                name, mode, use_classical,
-                &train_imgs, &train_lbls,
-                &test_imgs, &test_lbls,
+                name,
+                mode,
+                use_classical,
+                &train_imgs,
+                &train_lbls,
+                &test_imgs,
+                &test_lbls,
                 seed,
             );
             accs.push(acc);
@@ -179,14 +192,26 @@ fn main() {
         let mean: f32 = accs.iter().sum::<f32>() / accs.len() as f32;
         let var: f32 = accs.iter().map(|&a| (a - mean).powi(2)).sum::<f32>() / accs.len() as f32;
         let std = var.sqrt();
-        println!("  -> mean={:.1}% (±{:.1}pp)  [{:.1}s for {} seeds]\n", mean, std, elapsed, SEEDS.len());
+        println!(
+            "  -> mean={:.1}% (±{:.1}pp)  [{:.1}s for {} seeds]\n",
+            mean,
+            std,
+            elapsed,
+            SEEDS.len()
+        );
         results.push((name, accs));
     }
 
     println!("================================================================");
-    println!("  SUMMARY (test accuracy, mean ± std across {} seeds)", SEEDS.len());
+    println!(
+        "  SUMMARY (test accuracy, mean ± std across {} seeds)",
+        SEEDS.len()
+    );
     println!("================================================================");
-    println!("{:<18} {:>10} {:>10} {:>10} {:>14}", "Mode", "Seed42", "Seed123", "Seed777", "Mean ± Std");
+    println!(
+        "{:<18} {:>10} {:>10} {:>10} {:>14}",
+        "Mode", "Seed42", "Seed123", "Seed777", "Mean ± Std"
+    );
     println!("{:-<70}", "");
     for (name, accs) in &results {
         let mean: f32 = accs.iter().sum::<f32>() / accs.len() as f32;

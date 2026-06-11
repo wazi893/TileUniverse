@@ -20,8 +20,8 @@ use std::collections::HashMap;
 use std::time::Instant;
 
 use engine::hybrid::{
-    CircuitBatch, HybridScheduler, JobHandle, JobSpec, MeasurementSpec,
-    QuantumCircuit, QuantumSpec, QuantumSubstrate, StageOutputs, execute_batch, linspace,
+    CircuitBatch, HybridScheduler, JobHandle, JobSpec, MeasurementSpec, QuantumCircuit,
+    QuantumSpec, QuantumSubstrate, StageOutputs, execute_batch, linspace,
 };
 
 fn main() {

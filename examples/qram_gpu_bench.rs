@@ -7,7 +7,6 @@
 //! cargo run --release --example qram_gpu_bench --features gpu-prototype
 //! ```
 
-
 #[cfg(feature = "gpu-prototype")]
 use engine::qram::{GpuBucketBrigade, SparseBucketBrigade};
 

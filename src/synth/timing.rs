@@ -394,8 +394,8 @@ mod tests {
     use super::*;
     use crate::synth::aig::Aig;
     use crate::synth::cell_lib::CellLibrary;
-    use crate::synth::mapping::map_to_library;
     use crate::synth::mapping::MapConfig;
+    use crate::synth::mapping::map_to_library;
 
     /// Build a chain of `depth` ANDs: y = ((((a&b)&c)&d)...) so the critical
     /// path is unambiguous and its length is known.

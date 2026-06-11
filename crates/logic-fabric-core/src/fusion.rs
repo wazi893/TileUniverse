@@ -1460,9 +1460,7 @@ impl TwoTierSelector {
             FusedOp::Single(gate) => Self::gate_targets_qubit_0(gate),
             FusedOp::Batched { gate, .. } => Self::gate_targets_qubit_0(gate),
             FusedOp::Layer(gates) => gates.iter().all(Self::gate_targets_qubit_0),
-            FusedOp::BatchedLayer { gates, .. } => {
-                gates.iter().all(Self::gate_targets_qubit_0)
-            }
+            FusedOp::BatchedLayer { gates, .. } => gates.iter().all(Self::gate_targets_qubit_0),
             FusedOp::Identity => true, // Identity is trivially aligned
             FusedOp::WmmaBlock { start_qubit, .. } => *start_qubit == 0,
             // EPIC 84: MegaGate is aligned if its qubit is 0
@@ -2122,9 +2120,7 @@ impl TwoTierSelector {
             FusedOp::Single(gate) => Self::gate_targets_qubit_0(gate),
             FusedOp::Batched { gate, .. } => Self::gate_targets_qubit_0(gate),
             FusedOp::Layer(gates) => gates.iter().all(Self::gate_targets_qubit_0),
-            FusedOp::BatchedLayer { gates, .. } => {
-                gates.iter().all(Self::gate_targets_qubit_0)
-            }
+            FusedOp::BatchedLayer { gates, .. } => gates.iter().all(Self::gate_targets_qubit_0),
             FusedOp::Identity => true,
             FusedOp::WmmaBlock { start_qubit, .. } => *start_qubit == 0,
             // EPIC 84: MegaGate targets qubit 0 if its qubit field is 0

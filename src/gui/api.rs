@@ -66,8 +66,8 @@ pub fn load_run(dir: &Path) -> Result<GuiRunInfo, std::io::Error> {
                 let mut f = File::open(dir.join(&art.path))?;
                 let mut buf = Vec::new();
                 f.read_to_end(&mut buf)?;
-                let (w, h, _) = parse_ppm_header(&buf)
-                    .ok_or_else(|| std::io::Error::other("bad ppm"))?;
+                let (w, h, _) =
+                    parse_ppm_header(&buf).ok_or_else(|| std::io::Error::other("bad ppm"))?;
                 width = w;
                 height = h;
             }
@@ -84,8 +84,7 @@ pub fn load_run(dir: &Path) -> Result<GuiRunInfo, std::io::Error> {
 }
 
 pub fn load_frame(dir: &Path, index: usize) -> Result<GuiFrame, std::io::Error> {
-    let stream = open_recorded_frames(dir)
-        .map_err(|_| std::io::Error::other("open frames"))?;
+    let stream = open_recorded_frames(dir).map_err(|_| std::io::Error::other("open frames"))?;
     let meta = stream
         .meta(index as u32)
         .ok_or_else(|| std::io::Error::other("index"))?
@@ -98,8 +97,7 @@ pub fn load_frame(dir: &Path, index: usize) -> Result<GuiFrame, std::io::Error> 
 }
 
 pub fn load_frame_range(dir: &Path, range: Range<usize>) -> Result<Vec<GuiFrame>, std::io::Error> {
-    let stream = open_recorded_frames(dir)
-        .map_err(|_| std::io::Error::other("open frames"))?;
+    let stream = open_recorded_frames(dir).map_err(|_| std::io::Error::other("open frames"))?;
     let mut out = Vec::new();
     for i in range {
         if let (Some(m), Some(b)) = (stream.meta(i as u32), stream.frame_bytes(i as u32)) {
@@ -120,8 +118,7 @@ pub struct GuiStream {
 
 pub fn stream_from_recorded(dir: &Path) -> Result<GuiStream, std::io::Error> {
     let info = load_run(dir)?;
-    let frames = open_recorded_frames(dir)
-        .map_err(|_| std::io::Error::other("open frames"))?;
+    let frames = open_recorded_frames(dir).map_err(|_| std::io::Error::other("open frames"))?;
     Ok(GuiStream { info, frames })
 }
 

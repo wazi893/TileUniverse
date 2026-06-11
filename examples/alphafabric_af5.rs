@@ -13,7 +13,7 @@
 
 use engine::synth::alphafabric::corpus::{build_eq_comparator, build_parity, build_ripple_adder};
 use engine::synth::alphafabric::{
-    place, place_policy, train, train_route_aware, Circuit, PlacementEnv, TrainConfig,
+    Circuit, PlacementEnv, TrainConfig, place, place_policy, train, train_route_aware,
 };
 use engine::synth::benchmark::build_4bit_multiplier;
 use std::time::Instant;

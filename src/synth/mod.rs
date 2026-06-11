@@ -60,12 +60,12 @@ pub use cell_lib::{Cell, CellLibrary};
 pub use cuts::{Cut, NodeCuts};
 pub use export::{SynthExport, evaluate_exported, export_to_simulation};
 pub use hls::{
-    eval_expr_ref, report_aig, report_func, synthesize_expr, synthesize_func, HlsConfig, HlsError,
-    HlsReport, PlacedFootprint,
+    HlsConfig, HlsError, HlsReport, PlacedFootprint, eval_expr_ref, report_aig, report_func,
+    synthesize_expr, synthesize_func,
 };
 pub use hls_seq::{
-    build_cdfg, build_seq_aig, eval_func_ref, synthesize_seq_func, BasicBlock, Cdfg, SeqDatapath,
-    SeqRunOutcome, SeqStats, Terminator,
+    BasicBlock, Cdfg, SeqDatapath, SeqRunOutcome, SeqStats, Terminator, build_cdfg, build_seq_aig,
+    eval_func_ref, synthesize_seq_func,
 };
 pub use integration::place_const_guard_region;
 pub use mapping::{MapConfig, MappedGate, MappedNetlist};
@@ -76,16 +76,16 @@ pub use placement::{
 };
 pub use routing::{RouteConfig, RoutingError, route_placed_netlist};
 pub use timing::{
-    analyze_timing, critical_path, report_timing, CriticalPath, PathNode, TimingConstraint,
-    TimingReport,
+    CriticalPath, PathNode, TimingConstraint, TimingReport, analyze_timing, critical_path,
+    report_timing,
 };
 pub use via_cells::{
-    cell_library_with_vias, eval_threshold_via_physical, threshold_tt, threshold_tt_enabled,
-    via_cell_catalog, via_npn4_coverage, verify_via_cell, ViaCell,
+    ViaCell, cell_library_with_vias, eval_threshold_via_physical, threshold_tt,
+    threshold_tt_enabled, verify_via_cell, via_cell_catalog, via_npn4_coverage,
 };
 pub use via_layout::{
-    realize as realize_via_circuit, verify_circuit as verify_via_circuit, PhysicalViaCircuit,
-    ViaCircuit, ViaClause, ViaStack,
+    PhysicalViaCircuit, ViaCircuit, ViaClause, ViaStack, realize as realize_via_circuit,
+    verify_circuit as verify_via_circuit,
 };
 
 // ---------------------------------------------------------------------------

@@ -366,7 +366,15 @@ pub fn phase_report_header() -> String {
 pub fn bench_report_header() -> String {
     format!(
         "{:<16} {:>6} {:>9} {:>9} {:>14} {:>11} {:>9} {:>8} {:>10}",
-        "benchmark", "words", "instrs", "ticks", "tiles_eval", "tiles/instr", "wall_ms", "cyc/s", "R0",
+        "benchmark",
+        "words",
+        "instrs",
+        "ticks",
+        "tiles_eval",
+        "tiles/instr",
+        "wall_ms",
+        "cyc/s",
+        "R0",
     )
 }
 
@@ -416,7 +424,10 @@ mod tests {
             }
             cpu.step(&mut sim);
         }
-        assert!(cpu.is_halted(), "physical program did not halt in {max_cycles} cycles");
+        assert!(
+            cpu.is_halted(),
+            "physical program did not halt in {max_cycles} cycles"
+        );
         (cpu.read_reg(&sim, 0), console.ref_pack.console_string())
     }
 
@@ -486,7 +497,11 @@ mod tests {
             };
             let phys = run_v2_compiled_benchmark(&case)
                 .unwrap_or_else(|e| panic!("physical run '{name}' failed: {e}"));
-            assert_eq!(phys.r0, iss_r0, "{name}: R0 ISS({iss_r0}) != physical({})", phys.r0);
+            assert_eq!(
+                phys.r0, iss_r0,
+                "{name}: R0 ISS({iss_r0}) != physical({})",
+                phys.r0
+            );
             assert_eq!(
                 phys.console, iss_con,
                 "{name}: console ISS({iss_con:?}) != physical({:?})",
@@ -567,7 +582,10 @@ mod tests {
         assert_eq!(iss_r0, 0, "ISS r0");
 
         let (phys_r0, phys_con) = phys_run(&src, 1_000_000);
-        assert_eq!(phys_con, iss_con, "console: physical({phys_con:?}) != ISS({iss_con:?})");
+        assert_eq!(
+            phys_con, iss_con,
+            "console: physical({phys_con:?}) != ISS({iss_con:?})"
+        );
         assert_eq!(phys_r0, iss_r0, "r0: physical({phys_r0}) != ISS({iss_r0})");
     }
 

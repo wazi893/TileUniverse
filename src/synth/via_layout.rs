@@ -225,13 +225,10 @@ impl PhysicalViaCircuit {
                 for (slot, &(dx, dy)) in NEIGHBORS.iter().enumerate() {
                     let nx = (sx as isize + dx) as usize;
                     let ny = (self.sy as isize + dy) as usize;
-                    let val = clause
-                        .inputs
-                        .get(slot)
-                        .map(|&pi| pis[pi])
-                        .unwrap_or(false);
+                    let val = clause.inputs.get(slot).map(|&pi| pis[pi]).unwrap_or(false);
                     let nidx = idx_at(width, nx, ny, level, ls);
-                    self.sim.set_logic_value_by_idx(nidx, if val { 1 } else { 0 });
+                    self.sim
+                        .set_logic_value_by_idx(nidx, if val { 1 } else { 0 });
                 }
             }
             // Re-assert the tied-high source for the top stage.
@@ -296,9 +293,10 @@ mod tests {
     #[test]
     fn single_clause_majority_runs_in_tiles() {
         // One stack, one clause = MAJ3. Equivalent to a single physical neuron.
-        let circuit = ViaCircuit::new(3, vec![ViaStack::new(vec![ViaClause::majority(
-            vec![0, 1, 2],
-        )])]);
+        let circuit = ViaCircuit::new(
+            3,
+            vec![ViaStack::new(vec![ViaClause::majority(vec![0, 1, 2])])],
+        );
         assert!(verify_circuit(&circuit));
     }
 
@@ -313,7 +311,10 @@ mod tests {
             ])],
         );
         // Spot-check the reference itself.
-        assert_eq!(circuit.eval_reference(&[true, false, true, true]), vec![true]);
+        assert_eq!(
+            circuit.eval_reference(&[true, false, true, true]),
+            vec![true]
+        );
         assert_eq!(
             circuit.eval_reference(&[false, false, true, true]),
             vec![false]

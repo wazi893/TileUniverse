@@ -7,8 +7,8 @@
 
 use engine::quantum::{QGate, QRng, QState, apply_gate_scalar};
 use engine::tensor_network::{
-    GreedyMetric, PathConfig, circuit_to_network, compute_amplitude,
-    find_greedy_order, find_optimal_path, verify_path_peak_memory,
+    GreedyMetric, PathConfig, circuit_to_network, compute_amplitude, find_greedy_order,
+    find_optimal_path, verify_path_peak_memory,
 };
 use std::time::Instant;
 

@@ -699,7 +699,11 @@ impl std::fmt::Display for UnlimitedGhzState {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let bits = self.n_qubits.bits();
         if bits > 1000 {
-            write!(f, "|GHZ_(~10^{:.0})⟩", bits as f64 * std::f64::consts::LOG10_2)
+            write!(
+                f,
+                "|GHZ_(~10^{:.0})⟩",
+                bits as f64 * std::f64::consts::LOG10_2
+            )
         } else if bits > 100 {
             write!(f, "|GHZ_(2^{})⟩", bits)
         } else {

@@ -254,10 +254,7 @@ struct FnCtx {
 
 impl FnCtx {
     fn loc_of(&self, name: &str) -> Option<LocalLoc> {
-        self.locals
-            .iter()
-            .find(|(n, _)| n == name)
-            .map(|(_, l)| *l)
+        self.locals.iter().find(|(n, _)| n == name).map(|(_, l)| *l)
     }
 }
 
@@ -387,7 +384,10 @@ impl Codegen {
                         self.emit(format!("POP {LEFT}")); // R4 = a, R0 = b
                         match op {
                             // Commutative: R0 = b op a = a op b.
-                            ArithOp::Add | ArithOp::Mul | ArithOp::And | ArithOp::Or
+                            ArithOp::Add
+                            | ArithOp::Mul
+                            | ArithOp::And
+                            | ArithOp::Or
                             | ArithOp::Xor => {
                                 self.emit(format!("{} {RESULT}, {LEFT}", binop_mnem(*op)));
                             }
@@ -817,7 +817,10 @@ pub fn compile_program(program: &Program) -> Result<String, CompileError> {
             return Err(CompileError(format!("duplicate global array '{}'", g.name)));
         }
         if g.len == 0 {
-            return Err(CompileError(format!("global array '{}' has length 0", g.name)));
+            return Err(CompileError(format!(
+                "global array '{}' has length 0",
+                g.name
+            )));
         }
         // Pick the first region (low, then high) that fits the whole array contiguously.
         let base = if lo_cursor + g.len <= lo_end {
@@ -850,7 +853,8 @@ pub fn compile_program(program: &Program) -> Result<String, CompileError> {
             }
             total_init.push(((base + j) as u8, cell));
         }
-        cg.globals.push((g.name.clone(), GlobalLoc { base: base as u8 }));
+        cg.globals
+            .push((g.name.clone(), GlobalLoc { base: base as u8 }));
     }
 
     // Entry stub: set up the stack, zero/literal-initialize globals, call the entry

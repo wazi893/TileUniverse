@@ -117,6 +117,9 @@ pub use v2_compiler::{
     ArithOp, CmpOp, CompileError, Cond, Expr, Func, Program, Stmt, compile_program,
     compile_to_words,
 };
+pub use v2_compiler_bench::{
+    V2_COMPILED_BENCHMARKS, V2CompiledBenchCase, V2CompiledBenchOutcome, run_v2_compiled_benchmark,
+};
 pub use v2_disassembler::{V2DecodedInstruction, decode_v2_word, disassemble_v2_word};
 pub use v2_execute::{
     TileCpuV2, V2DebugBreakpoint, V2DebugRunResult, V2DebugSnapshot, V2DebugStopReason,
@@ -145,9 +148,6 @@ pub use v2_mmio_devices::{
     V2_MMIO_SNN_SNAPSHOT_KIND, V2LinkMailboxDevice, V2MmioCombinedDevice, V2MmioDatasetDevice,
     V2MmioDisplayDevice, V2MmioMathDevice, V2MmioPbitBridgeDevice, V2MmioQuantumDevice,
     V2MmioRefDevicePack, V2MmioSnnBridgeDevice,
-};
-pub use v2_compiler_bench::{
-    V2_COMPILED_BENCHMARKS, V2CompiledBenchCase, V2CompiledBenchOutcome, run_v2_compiled_benchmark,
 };
 pub use v2_parser::{ParseError, compile_source, parse_program};
 pub use v2_replay::{

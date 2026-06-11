@@ -7,13 +7,13 @@
 //! Run: `cargo run --release --example synth_timing_report`
 
 use engine::synth::benchmark::{
-    build_16bit_adder, build_8bit_adder, build_8bit_eq_comparator, build_decoder4to16,
+    build_8bit_adder, build_8bit_eq_comparator, build_16bit_adder, build_decoder4to16,
     build_priority_encoder8,
 };
-use engine::synth::{
-    analyze_timing, critical_path, synthesize, Aig, CellLibrary, SynthConfig, TimingConstraint,
-};
 use engine::synth::timing::format_path;
+use engine::synth::{
+    Aig, CellLibrary, SynthConfig, TimingConstraint, analyze_timing, critical_path, synthesize,
+};
 
 fn run(name: &str, aig: &Aig) {
     let lib = CellLibrary::tile_native();

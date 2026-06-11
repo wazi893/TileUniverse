@@ -40,17 +40,17 @@ pub mod hls_corpus;
 pub mod learned;
 pub mod reward;
 
-pub use anneal::{anneal, AnnealConfig, AnnealResult};
+pub use anneal::{AnnealConfig, AnnealResult, anneal};
 pub use circuit::Circuit;
-pub use learned::{
-    construct_placement, construct_with_policy, evaluate, mean_hpwl_ratio, place, place_policy,
-    train, train_route_aware, CircuitEval, OrderWeights, Policy, PolicyWeights, RouteAwareOutcome,
-    TrainConfig, TrainOutcome,
-};
 pub use corpus::{
-    build_and_reduce, build_eq_comparator, build_parity, build_ripple_adder, corpus, split,
-    CorpusEntry, Split,
+    CorpusEntry, Split, build_and_reduce, build_eq_comparator, build_parity, build_ripple_adder,
+    corpus, split,
 };
-pub use env::{verify_physical, Canvas, EnvError, PlacementEnv};
-pub use hls_corpus::{hls_instances, HlsInstance};
+pub use env::{Canvas, EnvError, PlacementEnv, verify_physical};
+pub use hls_corpus::{HlsInstance, hls_instances};
+pub use learned::{
+    CircuitEval, OrderWeights, Policy, PolicyWeights, RouteAwareOutcome, TrainConfig, TrainOutcome,
+    construct_placement, construct_with_policy, evaluate, mean_hpwl_ratio, place, place_policy,
+    train, train_route_aware,
+};
 pub use reward::{PlacementMetrics, PlacementScore, RewardWeights};

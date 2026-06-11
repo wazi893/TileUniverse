@@ -9,7 +9,7 @@
 //! Run: `cargo run --release --example alphafabric_af1`
 
 use engine::synth::alphafabric::{
-    build_eq_comparator, build_parity, build_ripple_adder, Circuit, PlacementEnv,
+    Circuit, PlacementEnv, build_eq_comparator, build_parity, build_ripple_adder,
 };
 
 fn main() {

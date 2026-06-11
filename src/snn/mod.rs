@@ -117,8 +117,8 @@ pub use stdp::{apply_rstdp, apply_stdp};
 pub use synapse::{CrossCpuSynapse, Synapse, SynapseFlags};
 
 pub use network::{SNNNetwork, SNNTopology};
-pub use tile_neuron::TileNeuron;
 pub use spike_router::{SpikePacket, SpikeRouter};
+pub use tile_neuron::TileNeuron;
 
 #[cfg(feature = "cuda")]
 pub use gpu_kernels::GpuSNNState;

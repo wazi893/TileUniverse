@@ -1440,8 +1440,8 @@ mod tests {
 
     #[test]
     fn test_showcase_snn_cached_mnist_assembles() {
-        let words = assemble_v2(SHOWCASE_SNN_CACHED_MNIST.source)
-            .expect("M11 SNN cached MNIST asm failed");
+        let words =
+            assemble_v2(SHOWCASE_SNN_CACHED_MNIST.source).expect("M11 SNN cached MNIST asm failed");
         // M11 inference loop is ~26 instructions; cap at 64 (ROM size).
         assert!(
             words.len() <= 64,
@@ -1452,8 +1452,8 @@ mod tests {
 
     #[test]
     fn test_showcase_snn_live_mnist_assembles() {
-        let words = assemble_v2(SHOWCASE_SNN_LIVE_MNIST.source)
-            .expect("M12 SNN live MNIST asm failed");
+        let words =
+            assemble_v2(SHOWCASE_SNN_LIVE_MNIST.source).expect("M12 SNN live MNIST asm failed");
         // M12 inference loop is ~26 instructions; cap at 64 (ROM size).
         assert!(
             words.len() <= 64,
@@ -1477,8 +1477,8 @@ mod tests {
 
     #[test]
     fn test_showcase_snn_train_epoch_assembles() {
-        let words = assemble_v2(SHOWCASE_SNN_TRAIN_EPOCH.source)
-            .expect("SNN train epoch asm failed");
+        let words =
+            assemble_v2(SHOWCASE_SNN_TRAIN_EPOCH.source).expect("SNN train epoch asm failed");
         assert!(
             words.len() <= 64,
             "SNN train epoch: {} instructions > 64",
@@ -1488,8 +1488,8 @@ mod tests {
 
     #[test]
     fn test_showcase_snn_eval_readout_assembles() {
-        let words = assemble_v2(SHOWCASE_SNN_EVAL_READOUT.source)
-            .expect("SNN eval readout asm failed");
+        let words =
+            assemble_v2(SHOWCASE_SNN_EVAL_READOUT.source).expect("SNN eval readout asm failed");
         assert!(
             words.len() <= 64,
             "SNN eval readout: {} instructions > 64",
@@ -1576,8 +1576,6 @@ mod tests {
 
     #[test]
     fn test_showcase_mnist_halts() {
-        
-
         // Even with empty dataset, program should halt quickly (loop exits immediately)
         let result = run_v2_showcase_mnist(vec![], 0, 0).expect("MNIST showcase failed");
         assert!(result.halted, "MNIST should halt with empty dataset");

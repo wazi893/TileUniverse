@@ -4,7 +4,6 @@
 //!
 //! Run with: cargo run --release --example cross_block_cnot_gpu_bench --features gpu-prototype
 
-
 #[cfg(feature = "gpu-prototype")]
 use engine::tile8::sparse_quantum_gpu::SparseQuantumGpu;
 

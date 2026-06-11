@@ -76,7 +76,9 @@ pub struct OrderWeights {
 impl OrderWeights {
     /// The AF4 default: pure degree-descending order.
     pub fn degree_descending() -> Self {
-        Self { psi: [1.0, 0.0, 0.0] }
+        Self {
+            psi: [1.0, 0.0, 0.0],
+        }
     }
 }
 
@@ -571,7 +573,10 @@ mod tests {
         let c = Circuit::from_aig("adder4", build_ripple_adder(4));
         let mut env = PlacementEnv::new(&c).expect("env builds");
         place(&mut env, &PolicyWeights::hand_tuned());
-        assert!(env.score().metrics.routable, "constructed layout must route");
+        assert!(
+            env.score().metrics.routable,
+            "constructed layout must route"
+        );
         assert!(env.verify_physical(), "constructed layout must be correct");
     }
 
@@ -593,7 +598,7 @@ mod tests {
 
     #[test]
     fn warm_start_does_not_worsen_hpwl_and_stays_correct() {
-        use crate::synth::alphafabric::{anneal, AnnealConfig};
+        use crate::synth::alphafabric::{AnnealConfig, anneal};
         let c = Circuit::from_aig("eq8", build_eq_comparator(8));
         let mut env = PlacementEnv::new(&c).expect("env builds");
         place(&mut env, &PolicyWeights::hand_tuned());
@@ -625,7 +630,10 @@ mod tests {
 
         let held_out = [Circuit::from_aig("eq8", build_eq_comparator(8))];
         let ratio = mean_hpwl_ratio(&held_out, &slot_policy(outcome.weights));
-        assert!(ratio < 1.0, "learned policy should generalize (ratio {ratio})");
+        assert!(
+            ratio < 1.0,
+            "learned policy should generalize (ratio {ratio})"
+        );
     }
 
     #[test]

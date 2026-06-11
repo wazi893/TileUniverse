@@ -167,7 +167,10 @@ impl Graph {
     /// Note: n*k must be even for this to be possible
     pub fn regular(n: usize, k: usize, _seed: u64) -> Self {
         assert!(k < n, "Degree k must be less than n");
-        assert!((n * k).is_multiple_of(2), "n*k must be even for regular graph");
+        assert!(
+            (n * k).is_multiple_of(2),
+            "n*k must be even for regular graph"
+        );
 
         // Simple construction: cycle + chords
         // For k=2, this is just a cycle

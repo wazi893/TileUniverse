@@ -16,7 +16,7 @@
 
 use engine::synth::alphafabric::corpus::{build_eq_comparator, build_ripple_adder};
 use engine::synth::alphafabric::env::PhysicalDiagnosis;
-use engine::synth::alphafabric::{anneal, AnnealConfig, Circuit, PlacementEnv};
+use engine::synth::alphafabric::{AnnealConfig, Circuit, PlacementEnv, anneal};
 use engine::synth::benchmark::build_4bit_multiplier;
 
 /// Timing weight for the timing-aware run. Strong enough to bend the search
@@ -55,7 +55,15 @@ fn main() {
     );
     println!(
         "{:<9} {:>5} | {:>13} {:>13} {:>8} | {:>13} {:>13} {:>8} | {:>9}",
-        "circuit", "gates", "hpwl(H>T)", "crit-wl(H>T)", "wire(H>T)", "Δcrit-wl", "Δhpwl", "phys", "verdict"
+        "circuit",
+        "gates",
+        "hpwl(H>T)",
+        "crit-wl(H>T)",
+        "wire(H>T)",
+        "Δcrit-wl",
+        "Δhpwl",
+        "phys",
+        "verdict"
     );
 
     // Blocks naive timing-aware SA left unroutable, recovered by the
@@ -135,9 +143,7 @@ fn main() {
     if !recovered.is_empty() {
         println!("\nRoute-validated recovery (route_validated_best = true):");
         for (name, routes, crit_wl, diag) in &recovered {
-            println!(
-                "  {name:<9} routes: {routes}   crit-wl {crit_wl:.0}   physical: {diag:?}"
-            );
+            println!("  {name:<9} routes: {routes}   crit-wl {crit_wl:.0}   physical: {diag:?}");
         }
         println!(
             "  -> route_validated_best reclaims a ROUTABLE layout via a bounded route\n\

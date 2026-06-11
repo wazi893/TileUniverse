@@ -14,8 +14,8 @@
 //!
 //! Run with: cargo run --release --example quantum_decision_on_m10
 
-use engine::snn::mlp_weights::{CachedRates, MlpWeights};
 use engine::snn::MnistDataset;
+use engine::snn::mlp_weights::{CachedRates, MlpWeights};
 use std::time::Instant;
 
 const SEEDS: &[u64] = &[42, 123, 777];
@@ -71,7 +71,9 @@ fn softmax(logits: &[f32; N_CLASSES], temp: f32) -> [f32; N_CLASSES] {
         sum += exps[c];
     }
     if sum > 0.0 {
-        for c in 0..N_CLASSES { exps[c] /= sum; }
+        for c in 0..N_CLASSES {
+            exps[c] /= sum;
+        }
     }
     exps
 }
@@ -81,14 +83,19 @@ fn argmax(v: &[f32; N_CLASSES]) -> usize {
     let mut best = 0;
     let mut best_v = v[0];
     for c in 1..N_CLASSES {
-        if v[c] > best_v { best_v = v[c]; best = c; }
+        if v[c] > best_v {
+            best_v = v[c];
+            best = c;
+        }
     }
     best
 }
 
 /// LCG step → [0,1) sample.
 fn rng_next(state: &mut u64) -> f32 {
-    *state = state.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+    *state = state
+        .wrapping_mul(6364136223846793005)
+        .wrapping_add(1442695040888963407);
     ((*state >> 33) as f32) / ((1u64 << 31) as f32)
 }
 
@@ -98,7 +105,9 @@ fn sample_categorical(probs: &[f32; N_CLASSES], rng: &mut u64) -> usize {
     let mut c = 0.0f32;
     for i in 0..N_CLASSES {
         c += probs[i];
-        if r < c { return i; }
+        if r < c {
+            return i;
+        }
     }
     N_CLASSES - 1
 }
@@ -165,12 +174,12 @@ enum Policy {
 impl Policy {
     fn name(&self) -> &'static str {
         match self {
-            Policy::Argmax        => "Argmax (M10)",
-            Policy::Proportional  => "Prop-sample",
-            Policy::Grover        => "Grover-sample",
-            Policy::AntiGrover    => "AntiGrover-samp",
-            Policy::SoftMix       => "SoftMix-sample",
-            Policy::GroverArgmax  => "Grover-argmax",
+            Policy::Argmax => "Argmax (M10)",
+            Policy::Proportional => "Prop-sample",
+            Policy::Grover => "Grover-sample",
+            Policy::AntiGrover => "AntiGrover-samp",
+            Policy::SoftMix => "SoftMix-sample",
+            Policy::GroverArgmax => "Grover-argmax",
         }
     }
     fn decide(&self, logits: &[f32; N_CLASSES], rng: &mut u64) -> usize {
@@ -219,10 +228,13 @@ fn evaluate(
         let label = labels[i] as usize;
         for (p_idx, policy) in policies.iter().enumerate() {
             let pred = policy.decide(&logits, &mut rng);
-            if pred == label { correct[p_idx] += 1; }
+            if pred == label {
+                correct[p_idx] += 1;
+            }
         }
     }
-    correct.into_iter()
+    correct
+        .into_iter()
         .map(|c| c as f32 / n as f32 * 100.0)
         .collect()
 }
@@ -232,11 +244,8 @@ fn main() {
     println!("  QUANTUM DECISION POLICIES ON M10 (MNIST test, 3 seeds)");
     println!("================================================================");
 
-    let test_ds = MnistDataset::load(
-        "data/t10k-images-idx3-ubyte",
-        "data/t10k-labels-idx1-ubyte",
-    )
-    .expect("Failed to load MNIST test set");
+    let test_ds = MnistDataset::load("data/t10k-images-idx3-ubyte", "data/t10k-labels-idx1-ubyte")
+        .expect("Failed to load MNIST test set");
     println!("Loaded test set: {} samples", test_ds.labels.len());
 
     let policies = [
@@ -252,7 +261,7 @@ fn main() {
     let mut elapsed_total = 0.0f32;
 
     for &seed in SEEDS {
-        let mlp_path  = format!("checkpoints/m10_seed{}.mlp",   seed);
+        let mlp_path = format!("checkpoints/m10_seed{}.mlp", seed);
         let rate_path = format!("checkpoints/m10_seed{}.rates", seed);
         let mlp = MlpWeights::load(&mlp_path)
             .unwrap_or_else(|e| panic!("Failed to load {mlp_path}: {e}"));
@@ -280,21 +289,30 @@ fn main() {
     }
 
     println!("\n================================================================");
-    println!("  SUMMARY — mean ± std across {} seeds (eval {:.1}s)", SEEDS.len(), elapsed_total);
+    println!(
+        "  SUMMARY — mean ± std across {} seeds (eval {:.1}s)",
+        SEEDS.len(),
+        elapsed_total
+    );
     println!("================================================================");
-    println!("{:<18} {:>10} {:>10} {:>10} {:>14}", "Policy",
-             format!("Seed{}", SEEDS[0]),
-             format!("Seed{}", SEEDS[1]),
-             format!("Seed{}", SEEDS[2]),
-             "Mean ± Std");
+    println!(
+        "{:<18} {:>10} {:>10} {:>10} {:>14}",
+        "Policy",
+        format!("Seed{}", SEEDS[0]),
+        format!("Seed{}", SEEDS[1]),
+        format!("Seed{}", SEEDS[2]),
+        "Mean ± Std"
+    );
     println!("{:-<72}", "");
     for (p_idx, policy) in policies.iter().enumerate() {
         let accs: Vec<f32> = per_seed.iter().map(|v| v[p_idx]).collect();
         let mean: f32 = accs.iter().sum::<f32>() / accs.len() as f32;
-        let var:  f32 = accs.iter().map(|&a| (a - mean).powi(2)).sum::<f32>() / accs.len() as f32;
+        let var: f32 = accs.iter().map(|&a| (a - mean).powi(2)).sum::<f32>() / accs.len() as f32;
         let std = var.sqrt();
         print!("{:<18}", policy.name());
-        for &a in &accs { print!(" {:>9.2}%", a); }
+        for &a in &accs {
+            print!(" {:>9.2}%", a);
+        }
         println!(" {:>9.2}% ± {:.2}pp", mean, std);
     }
 

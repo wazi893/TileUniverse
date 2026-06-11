@@ -16,11 +16,11 @@
 use crate::synth::aig::Aig;
 use crate::synth::mapping::evaluate_aig;
 use crate::synth::placement::{
-    place_mapped_netlist, GatePlacement, PinSide, PlaceConfig, PlacedNetlist, PlacementError,
-    PlacementRegion,
+    GatePlacement, PinSide, PlaceConfig, PlacedNetlist, PlacementError, PlacementRegion,
+    place_mapped_netlist,
 };
-use crate::synth::routing::{route_placed_netlist, RouteConfig};
-use crate::synth::timing::{analyze_timing, TimingConstraint};
+use crate::synth::routing::{RouteConfig, route_placed_netlist};
+use crate::synth::timing::{TimingConstraint, analyze_timing};
 use crate::tiles::tile_meta::TileType;
 
 use super::circuit::Circuit;
@@ -218,7 +218,10 @@ impl<'c> PlacementEnv<'c> {
         let mut net_crit: Vec<f64> = Vec::new();
         for (net_id, gates) in touch.into_iter().enumerate() {
             if gates.len() >= 2 {
-                net_crit.push(net_criticality(report.slack(net_id as u32), report.worst_slack));
+                net_crit.push(net_criticality(
+                    report.slack(net_id as u32),
+                    report.worst_slack,
+                ));
                 hyperedges.push(gates);
             }
         }
@@ -276,7 +279,8 @@ impl<'c> PlacementEnv<'c> {
 
     /// Reset to the deterministic row-major baseline placement.
     pub fn reset(&mut self) {
-        self.slot_of_gate.copy_from_slice(&self.baseline_slot_of_gate);
+        self.slot_of_gate
+            .copy_from_slice(&self.baseline_slot_of_gate);
         for s in self.gate_of_slot.iter_mut() {
             *s = None;
         }
@@ -525,7 +529,11 @@ pub fn diagnose_physical(
 /// This is the strongest legality gate — it proves a *re-placed* circuit still
 /// computes correctly on the fabric, honoring the physical-authority standard.
 /// See [`diagnose_physical`] for the specific failure cause.
-pub fn verify_physical(circuit: &Circuit, placed: &PlacedNetlist, route_config: &RouteConfig) -> bool {
+pub fn verify_physical(
+    circuit: &Circuit,
+    placed: &PlacedNetlist,
+    route_config: &RouteConfig,
+) -> bool {
     matches!(
         diagnose_physical(circuit, placed, route_config),
         PhysicalDiagnosis::Correct

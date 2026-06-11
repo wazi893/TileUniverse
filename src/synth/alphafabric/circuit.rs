@@ -2,7 +2,7 @@
 
 use crate::synth::aig::Aig;
 use crate::synth::cell_lib::CellLibrary;
-use crate::synth::mapping::{map_to_library, verify_equivalence, MapConfig, MappedNetlist};
+use crate::synth::mapping::{MapConfig, MappedNetlist, map_to_library, verify_equivalence};
 use crate::synth::materialize_inversions;
 
 /// A combinational circuit ready to be placed.

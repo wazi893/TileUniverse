@@ -590,7 +590,10 @@ impl Parser {
         if init.len() > len {
             return err(
                 self.line(),
-                format!("initializer has {} elements but array length is {len}", init.len()),
+                format!(
+                    "initializer has {} elements but array length is {len}",
+                    init.len()
+                ),
             );
         }
         Ok(GlobalArray { name, len, init })
@@ -609,7 +612,9 @@ impl Parser {
                 other => {
                     return err(
                         self.line(),
-                        format!("expected '(' (function) or '[' (global) after '{name}', found {other:?}"),
+                        format!(
+                            "expected '(' (function) or '[' (global) after '{name}', found {other:?}"
+                        ),
                     );
                 }
             }

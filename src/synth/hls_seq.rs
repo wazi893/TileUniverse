@@ -57,10 +57,10 @@
 use std::collections::HashMap;
 
 use crate::synth::aig::{Aig, AigLit};
-use crate::synth::bridge::{compile_aig_to_export, BridgeConfig};
+use crate::synth::bridge::{BridgeConfig, compile_aig_to_export};
 use crate::synth::cell_lib::CellLibrary;
-use crate::synth::export::{evaluate_exported, SynthExport};
-use crate::synth::hls::{check_width, HlsConfig, HlsError, Lowering};
+use crate::synth::export::{SynthExport, evaluate_exported};
+use crate::synth::hls::{HlsConfig, HlsError, Lowering, check_width};
 use crate::tile_cpu::v2_compiler::{CmpOp, Cond, Expr, Func, Stmt};
 
 // ===========================================================================
@@ -922,8 +922,10 @@ mod tests {
             for args in *arg_sets {
                 // Target 1: the CPU. Wrap the function in a main() with literal args.
                 let call_args: Vec<String> = args.iter().map(|a| a.to_string()).collect();
-                let full_src =
-                    format!("{src}\nint main() {{ return {name}({}); }}", call_args.join(", "));
+                let full_src = format!(
+                    "{src}\nint main() {{ return {name}({}); }}",
+                    call_args.join(", ")
+                );
                 let words = compile_source(&full_src).expect("compile_source");
                 let mut iss = V2Iss::from_program_with_mmio(&words);
                 iss.enable_wide_pc();
@@ -951,10 +953,7 @@ mod tests {
 
     #[test]
     fn seq_rejects_unsupported() {
-        let func = func_of(
-            "int f(int n) { int s = g(n); return s; }",
-            "f",
-        );
+        let func = func_of("int f(int n) { int s = g(n); return s; }", "f");
         assert!(matches!(
             build_seq_aig(&func, &HlsConfig { width: 4 }),
             Err(HlsError::Unsupported(_))

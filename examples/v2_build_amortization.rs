@@ -31,7 +31,7 @@ use std::time::{Duration, Instant};
 
 use engine::simulation::Simulation;
 use engine::tile_cpu::hash_v2_final_state;
-use engine::tile_cpu::v2_compiler_bench::{V2CompiledBenchCase, V2_COMPILED_BENCHMARKS};
+use engine::tile_cpu::v2_compiler_bench::{V2_COMPILED_BENCHMARKS, V2CompiledBenchCase};
 use engine::tile_cpu::v2_mmio::V2MmioHandle;
 use engine::tile_cpu::v2_mmio_devices::V2MmioCombinedDevice;
 use engine::tile_cpu::v2_parser::compile_source;
@@ -105,7 +105,10 @@ fn main() -> Result<(), Box<dyn Error>> {
         total_cycles += cycles;
 
         // ORACLE: a cloned topology must compute byte-identically to a fresh build.
-        assert_eq!(hash, golden, "lane {lane} golden hash diverged from fresh build");
+        assert_eq!(
+            hash, golden,
+            "lane {lane} golden hash diverged from fresh build"
+        );
         assert_eq!(r0, case.expected_r0, "lane {lane} R0 wrong");
     }
 
@@ -118,14 +121,27 @@ fn main() -> Result<(), Box<dyn Error>> {
     let baseline_wall = LANES as f64 * per_build + step_total.as_secs_f64();
     let amortized_wall = per_build + clone_total.as_secs_f64() + step_total.as_secs_f64();
 
-    println!("program: {} ({} words), {LANES} lanes, all identical\n", case.name, program.len());
-    println!("  topology build (1×):     {:>9.1} ms   ← paid ONCE when amortized", per_build * 1000.0);
-    println!("  clone per lane:          {:>9.1} ms   ← the amortized cost", per_clone * 1000.0);
+    println!(
+        "program: {} ({} words), {LANES} lanes, all identical\n",
+        case.name,
+        program.len()
+    );
+    println!(
+        "  topology build (1×):     {:>9.1} ms   ← paid ONCE when amortized",
+        per_build * 1000.0
+    );
+    println!(
+        "  clone per lane:          {:>9.1} ms   ← the amortized cost",
+        per_clone * 1000.0
+    );
     println!("  step per lane:           {:>9.1} ms", per_step * 1000.0);
     println!();
     println!("  baseline wall ({LANES} builds): {:>9.2} s", baseline_wall);
     println!("  amortized wall (1 build): {:>9.2} s", amortized_wall);
-    println!("  speedup:                 {:>9.2}×", baseline_wall / amortized_wall);
+    println!(
+        "  speedup:                 {:>9.2}×",
+        baseline_wall / amortized_wall
+    );
     println!();
     println!(
         "  throughput (with build):  baseline {:>10.1}  →  amortized {:>10.1}  CPU-cycles/sec",

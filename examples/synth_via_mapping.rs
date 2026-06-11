@@ -5,13 +5,13 @@
 
 use engine::synth::aig::Aig;
 use engine::synth::benchmark::{
-    build_16bit_adder, build_4bit_adder, build_8bit_adder, build_8bit_eq_comparator,
+    build_4bit_adder, build_8bit_adder, build_8bit_eq_comparator, build_16bit_adder,
     build_decoder4to16, build_priority_encoder8,
 };
 use engine::synth::cuts::enumerate_cuts_with_limit;
-use engine::synth::mapping::{map_to_library, verify_equivalence, MapConfig};
-use engine::synth::timing::{analyze_timing, TimingConstraint};
-use engine::synth::{cell_library_with_vias, CellLibrary};
+use engine::synth::mapping::{MapConfig, map_to_library, verify_equivalence};
+use engine::synth::timing::{TimingConstraint, analyze_timing};
+use engine::synth::{CellLibrary, cell_library_with_vias};
 use std::collections::BTreeMap;
 
 fn maj3_aig() -> Aig {

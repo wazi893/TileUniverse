@@ -18,7 +18,7 @@ use std::error::Error;
 
 use engine::simulation::Simulation;
 use engine::synth::bridge::{compile_and_inject, evaluate_block};
-use engine::synth::{synthesize_func, CellLibrary, HlsConfig};
+use engine::synth::{CellLibrary, HlsConfig, synthesize_func};
 use engine::tile_cpu::v2_parser::parse_program;
 
 fn main() -> Result<(), Box<dyn Error>> {

@@ -569,7 +569,11 @@ mod ghz {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             let bits = self.n_qubits.bits();
             if bits > 1000 {
-                write!(f, "|GHZ_(~10^{:.0})>", bits as f64 * std::f64::consts::LOG10_2)
+                write!(
+                    f,
+                    "|GHZ_(~10^{:.0})>",
+                    bits as f64 * std::f64::consts::LOG10_2
+                )
             } else if bits > 100 {
                 write!(f, "|GHZ_(2^{})>", bits)
             } else {
@@ -1924,34 +1928,38 @@ mod symbolic {
                 return SimplifiedBinomial::One;
             }
             if let SymbolicNumber::Big(k) = &self.k
-                && k == &num_bigint::BigUint::from(0u32) {
-                    return SimplifiedBinomial::One;
-                }
+                && k == &num_bigint::BigUint::from(0u32)
+            {
+                return SimplifiedBinomial::One;
+            }
 
             if self.n.structurally_equal(&self.k) {
                 return SimplifiedBinomial::One;
             }
 
             if matches!(&self.n, SymbolicNumber::Infinity)
-                && !matches!(&self.k, SymbolicNumber::Infinity) {
-                    return SimplifiedBinomial::Infinite;
-                }
+                && !matches!(&self.k, SymbolicNumber::Infinity)
+            {
+                return SimplifiedBinomial::Infinite;
+            }
 
             if let SymbolicNumber::Literal(1) = &self.k {
                 return SimplifiedBinomial::N(self.n.clone());
             }
             if let SymbolicNumber::Big(k) = &self.k
-                && k == &num_bigint::BigUint::from(1u32) {
-                    return SimplifiedBinomial::N(self.n.clone());
-                }
+                && k == &num_bigint::BigUint::from(1u32)
+            {
+                return SimplifiedBinomial::N(self.n.clone());
+            }
 
             if let SymbolicNumber::Literal(2) = &self.k {
                 return SimplifiedBinomial::NChoose2(self.n.clone());
             }
             if let SymbolicNumber::Big(k) = &self.k
-                && k == &num_bigint::BigUint::from(2u32) {
-                    return SimplifiedBinomial::NChoose2(self.n.clone());
-                }
+                && k == &num_bigint::BigUint::from(2u32)
+            {
+                return SimplifiedBinomial::NChoose2(self.n.clone());
+            }
 
             if let (SymbolicNumber::Literal(n), SymbolicNumber::Literal(k)) = (&self.n, &self.k) {
                 if k > n {
@@ -2478,9 +2486,10 @@ mod symbolic {
                 return None;
             }
             if let SymbolicNumber::Big(k) = &self.k_excitations
-                && k == &num_bigint::BigUint::from(0u32) {
-                    return None;
-                }
+                && k == &num_bigint::BigUint::from(0u32)
+            {
+                return None;
+            }
 
             let new_k = SymbolicNumber::Sub {
                 minuend: Box::new(self.k_excitations.clone()),
@@ -2531,9 +2540,10 @@ mod symbolic {
                 return true;
             }
             if let SymbolicNumber::Big(k) = &self.k_excitations
-                && k == &num_bigint::BigUint::from(0u32) {
-                    return true;
-                }
+                && k == &num_bigint::BigUint::from(0u32)
+            {
+                return true;
+            }
             self.n_qubits.structurally_equal(&self.k_excitations)
         }
 

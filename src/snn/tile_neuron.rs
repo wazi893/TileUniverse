@@ -134,7 +134,7 @@ impl TileNeuron {
 mod tests {
     use super::*;
     use crate::synth::cell_library_with_vias;
-    use crate::synth::mapping::{map_to_library, verify_equivalence, MapConfig};
+    use crate::synth::mapping::{MapConfig, map_to_library, verify_equivalence};
 
     fn all_inputs(k: u8) -> impl Iterator<Item = Vec<bool>> {
         (0u32..(1u32 << k)).map(move |m| (0..k).map(|i| (m >> i) & 1 != 0).collect())

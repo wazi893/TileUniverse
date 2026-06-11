@@ -2246,10 +2246,7 @@ impl TileCpuV2 {
         target_wvia: &std::cell::RefCell<Vec<(usize, u8, u64)>>,
         // Sprint 384: when Some, also build the cascade frontier table
         // (S339 pattern) for these live ops against the full clock scope_mask.
-        target_frontier: Option<(
-            &Simulation,
-            &std::cell::RefCell<(Vec<u32>, Vec<u32>)>,
-        )>,
+        target_frontier: Option<(&Simulation, &std::cell::RefCell<(Vec<u32>, Vec<u32>)>)>,
     ) {
         let sched = match &self.clock_schedule {
             Some(s) => s,
@@ -4438,8 +4435,7 @@ impl TileCpuV2 {
             // Sprint 325: Dual-profile auto-warmup — separate for flag-writing
             // and non-flag cycles. Each profile warmups independently (5 cycles).
             let is_flags = writes_flags || !self.physical_flag_writeback.get();
-            let (live_ops_ref, live_wvia_ref, counts_ref, warmup_cell, frontier_ref) = if is_flags
-            {
+            let (live_ops_ref, live_wvia_ref, counts_ref, warmup_cell, frontier_ref) = if is_flags {
                 (
                     &self.live_clock_ops_flags,
                     &self.live_clock_wvia_flags,

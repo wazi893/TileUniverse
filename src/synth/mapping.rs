@@ -15,7 +15,7 @@ use super::aig::Aig;
 #[cfg(test)]
 use super::aig::AigLit;
 use super::cell_lib::{CellLibrary, tt_is_const0, tt_is_const1, tt_negate};
-use super::cuts::{enumerate_cuts_with_limit, Cut};
+use super::cuts::{Cut, enumerate_cuts_with_limit};
 
 // ---------------------------------------------------------------------------
 // MappedNetlist

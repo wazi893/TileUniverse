@@ -22,9 +22,9 @@ use crate::physics::logic_coupling::{
 };
 use crate::tile::Tile;
 use crate::tile_meta::TileType;
-use crate::tilemap::{HEIGHT, Tilemap, WIDTH};
 #[cfg(test)]
 use crate::tilemap::TILE_COUNT;
+use crate::tilemap::{HEIGHT, Tilemap, WIDTH};
 // use crate::net::net_summary::{GlobalSummary, SummaryReport};
 
 #[derive(Debug, Clone, Copy)]

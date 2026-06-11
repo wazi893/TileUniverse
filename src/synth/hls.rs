@@ -39,10 +39,10 @@
 use std::collections::HashMap;
 
 use crate::synth::aig::{Aig, AigLit};
-use crate::synth::bridge::{compile_aig_to_export, BridgeConfig};
+use crate::synth::bridge::{BridgeConfig, compile_aig_to_export};
 use crate::synth::cell_lib::CellLibrary;
-use crate::synth::timing::{analyze_timing, TimingConstraint};
-use crate::synth::{materialize_inversions, synthesize, SynthConfig};
+use crate::synth::timing::{TimingConstraint, analyze_timing};
+use crate::synth::{SynthConfig, materialize_inversions, synthesize};
 use crate::tile_cpu::v2_compiler::{ArithOp, Expr, Func, Stmt};
 
 /// Configuration for behavioral synthesis.
@@ -298,11 +298,7 @@ impl Lowering<'_> {
 /// Evaluates a combinational `Expr` over the given integer environment with
 /// `width`-bit wraparound arithmetic. Returns the same value the synthesized AIG
 /// (and the resulting tiles) must produce.
-pub fn eval_expr_ref(
-    expr: &Expr,
-    env: &HashMap<String, u64>,
-    width: u32,
-) -> Result<u64, HlsError> {
+pub fn eval_expr_ref(expr: &Expr, env: &HashMap<String, u64>, width: u32) -> Result<u64, HlsError> {
     if width == 0 || width > 64 {
         return Err(HlsError::BadWidth(width));
     }
@@ -314,10 +310,11 @@ pub fn eval_expr_ref(
     fn go(e: &Expr, env: &HashMap<String, u64>, mask: u64) -> Result<u64, HlsError> {
         Ok(match e {
             Expr::Int(c) => (*c as u64) & mask,
-            Expr::Var(name) => *env
-                .get(name)
-                .ok_or_else(|| HlsError::UnknownVar(name.clone()))?
-                & mask,
+            Expr::Var(name) => {
+                *env.get(name)
+                    .ok_or_else(|| HlsError::UnknownVar(name.clone()))?
+                    & mask
+            }
             Expr::Bin(op, a, b) => {
                 let x = go(a, env, mask)?;
                 let y = go(b, env, mask)?;
@@ -331,7 +328,9 @@ pub fn eval_expr_ref(
                 };
                 r & mask
             }
-            Expr::Call(..) => return Err(HlsError::Unsupported("function call (needs sequencing)")),
+            Expr::Call(..) => {
+                return Err(HlsError::Unsupported("function call (needs sequencing)"));
+            }
             Expr::Index(..) => return Err(HlsError::Unsupported("array index (needs memory)")),
         })
     }
@@ -397,10 +396,20 @@ impl std::fmt::Display for HlsReport {
         write!(
             f,
             "HLS {}-bit: {} ANDs depth {} -> {} cells, critical path {:.0}",
-            self.width, self.aig_and_nodes, self.aig_depth, self.mapped_cells, self.critical_path_delay,
+            self.width,
+            self.aig_and_nodes,
+            self.aig_depth,
+            self.mapped_cells,
+            self.critical_path_delay,
         )?;
         match &self.placed {
-            Some(p) => write!(f, ", placed {}x{} ({} tiles)", p.width, p.height, p.area_tiles()),
+            Some(p) => write!(
+                f,
+                ", placed {}x{} ({} tiles)",
+                p.width,
+                p.height,
+                p.area_tiles()
+            ),
             None => write!(f, ", not placeable at current routing capacity"),
         }
     }
@@ -434,15 +443,25 @@ pub fn report_aig(aig: &Aig, width: u32) -> Result<HlsReport, HlsError> {
     // Escalating capacity, same spirit as validate_synth_pipeline_adaptive.
     let configs = [
         BridgeConfig::default(),
-        BridgeConfig { halo: 6, max_z: 3, ..BridgeConfig::default() },
-        BridgeConfig { halo: 8, max_z: 3, ..BridgeConfig::default() },
+        BridgeConfig {
+            halo: 6,
+            max_z: 3,
+            ..BridgeConfig::default()
+        },
+        BridgeConfig {
+            halo: 8,
+            max_z: 3,
+            ..BridgeConfig::default()
+        },
     ];
     let placed = configs.iter().find_map(|cfg| {
-        compile_aig_to_export(aig, &lib, cfg).ok().map(|export| PlacedFootprint {
-            width: export.sim.width(),
-            height: export.sim.height(),
-            layers: export.sim.num_layers(),
-        })
+        compile_aig_to_export(aig, &lib, cfg)
+            .ok()
+            .map(|export| PlacedFootprint {
+                width: export.sim.width(),
+                height: export.sim.height(),
+                layers: export.sim.num_layers(),
+            })
     });
 
     Ok(HlsReport {
@@ -463,10 +482,10 @@ pub fn report_aig(aig: &Aig, width: u32) -> Result<HlsReport, HlsError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::simulation::Simulation;
     use crate::synth::bridge::{compile_and_inject, evaluate_block};
     use crate::synth::cell_lib::CellLibrary;
     use crate::synth::mapping::evaluate_aig;
-    use crate::simulation::Simulation;
 
     fn var(name: &str) -> Box<Expr> {
         Box::new(Expr::Var(name.to_string()))
@@ -511,8 +530,7 @@ mod tests {
                 vals.push((name, rem % span));
                 rem /= span;
             }
-            let env: HashMap<String, u64> =
-                vals.iter().map(|&(n, v)| (n.to_string(), v)).collect();
+            let env: HashMap<String, u64> = vals.iter().map(|&(n, v)| (n.to_string(), v)).collect();
             let expected = eval_expr_ref(expr, &env, width).expect("ref eval");
 
             let inputs = aig_inputs(&vals, w);
@@ -589,10 +607,7 @@ mod tests {
             name: "f".to_string(),
             params: vec!["a".to_string(), "b".to_string(), "c".to_string()],
             body: vec![
-                Stmt::Let(
-                    "t".to_string(),
-                    *bin(ArithOp::Add, var("a"), var("b")),
-                ),
+                Stmt::Let("t".to_string(), *bin(ArithOp::Add, var("a"), var("b"))),
                 Stmt::Return(*bin(ArithOp::Mul, var("t"), var("c"))),
             ],
         };
@@ -695,7 +710,8 @@ mod tests {
             var("c"),
         );
         let width = 4u32;
-        let aig = synthesize_expr(&expr, &["a", "b", "c"], &HlsConfig { width }).expect("synthesis");
+        let aig =
+            synthesize_expr(&expr, &["a", "b", "c"], &HlsConfig { width }).expect("synthesis");
         let report = report_aig(&aig, width).expect("report");
 
         assert_eq!(report.width, width);
@@ -712,8 +728,10 @@ mod tests {
 
         // The report path must not perturb the function: spot-check vs reference.
         for (a, b, c) in [(0u64, 0, 0), (3, 5, 7), (15, 15, 15), (9, 2, 4)] {
-            let env: HashMap<String, u64> =
-                [("a", a), ("b", b), ("c", c)].iter().map(|&(n, v)| (n.to_string(), v)).collect();
+            let env: HashMap<String, u64> = [("a", a), ("b", b), ("c", c)]
+                .iter()
+                .map(|&(n, v)| (n.to_string(), v))
+                .collect();
             let expected = eval_expr_ref(&expr, &env, width).expect("ref");
             let inputs = aig_inputs(&[("a", a), ("b", b), ("c", c)], width as usize);
             let actual = bits_to_u64(&evaluate_aig(&aig, &inputs));
@@ -734,8 +752,14 @@ mod tests {
             let aig = synthesize_expr(&expr, &["a", "b"], &HlsConfig { width: 8 }).unwrap();
             report_aig(&aig, 8).expect("8-bit report")
         };
-        assert!(r8.aig_and_nodes > r4.aig_and_nodes, "wider adder has more gates");
-        assert!(r8.mapped_cells > r4.mapped_cells, "wider adder maps to more cells");
+        assert!(
+            r8.aig_and_nodes > r4.aig_and_nodes,
+            "wider adder has more gates"
+        );
+        assert!(
+            r8.mapped_cells > r4.mapped_cells,
+            "wider adder maps to more cells"
+        );
         assert!(
             r8.critical_path_delay > r4.critical_path_delay,
             "ripple carry: wider adder has a longer critical path ({} vs {})",
