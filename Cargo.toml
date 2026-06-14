@@ -202,6 +202,14 @@ required-features = ["quantum_jit"]
 
 # GPU examples require cuda feature
 [[example]]
+name = "life_gpu_check"
+required-features = ["cuda"]
+
+[[example]]
+name = "cellular_player_export"
+required-features = ["cuda"]
+
+[[example]]
 name = "w_state_gpu_max"
 required-features = ["cuda"]
 

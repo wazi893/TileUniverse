@@ -11,6 +11,10 @@ pub mod component;
 pub mod config;
 #[cfg(feature = "cuda")]
 pub mod cuda_tiles;
+#[cfg(feature = "cuda")]
+pub mod cuda_life;
+#[cfg(feature = "cuda")]
+pub mod cellular_player;
 pub mod debug_macros;
 pub mod demo;
 pub mod distributed;
