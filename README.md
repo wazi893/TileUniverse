@@ -5,12 +5,12 @@
 <h1 align="center">TileUniverse</h1>
 
 <p align="center">
-  <strong>High-Performance Quantum & Cellular Simulation Engine</strong>
+  <strong>A logic fabric where a CPU, a C compiler, and a learned placement AI all run on simulated gates — verified bit-exact.</strong>
 </p>
 
 <p align="center">
-  <a href="#performance">15.8 TCOPS</a> •
-  <a href="#features">Features</a> •
+  <a href="#what-is-this">What it is</a> •
+  <a href="#tileuniverse-in-numbers">Numbers</a> •
   <a href="#quick-start">Quick Start</a> •
   <a href="#architecture">Architecture</a> •
   <a href="#citation">Cite</a>
@@ -25,14 +25,18 @@
 
 ---
 
-## Overview
+<!-- TODO(visibility): add a ~10s demo GIF here — the tile CPU compiling & running a program, or an AlphaFabric before/after placement. This single asset is the biggest 30-second-landing upgrade. Drop it in python/assets/ and uncomment the line below. -->
+<!-- <p align="center"><img src="python/assets/demo.gif" alt="TileUniverse demo" width="720"></p> -->
 
-TileUniverse is a high-performance simulation engine written in Rust with Python bindings. It provides two substrates for massively parallel computation:
+## What is this?
 
-- **Quantum Substrate**: 15.8 TCOPS on RTX 5090, 2.5 TCOPS on RTX 4070 (CUDA Tensor Cores)
-- **Cellular Substrate**: 200B logic evals/sec on RTX 5090, 40B on RTX 4070
+TileUniverse is a from-scratch, GPU-accelerated simulation engine in Rust. Three things make it worth a look:
 
-The engine achieves these numbers through optimized CUDA kernels, gate fusion, algebraic optimization, and depth-batched execution on consumer GPUs.
+- 🖥️ **A CPU built out of simulated logic gates** — plus a C-like compiler that targets it. Programs run **bit-identical** on a software reference and the physical tile fabric, across **3,000+ differential tests**. (A Brainfuck interpreter runs on it.)
+- 🤖 **A learned circuit-placement AI** (AlphaChip-style) that **generalizes to unseen circuits one-shot**, with every layout proven correct by a hardware oracle.
+- ⚡ **Petascale GPU throughput** — **115 trillion** packed tile-evaluations/sec and **15.8 TCOPS** quantum on an RTX 5090, with cross-backend parity to **1e-6**.
+
+The through-line: **if it computes, it computes in real tiles — and it's verified.**
 
 ---
 
@@ -83,6 +87,22 @@ Verified benchmarks (January 2026):
 ---
 
 ## Features
+
+### A CPU & Compiler, in Tiles
+
+The flagship: a working processor whose datapath *is* simulated logic.
+
+- A **32-bit CPU** whose fetch / decode / execute / ALU / write-back run as **physical tile circuits**, not an interpreter shortcut.
+- A **C-like compiler toolchain** (lexer → recursive-descent parser → register allocation → codegen) that targets its ISA.
+- Source compiles and runs **bit-identical** on a software ISA reference *and* the physical fabric — a **Brainfuck interpreter**, recursion, and arrays all execute on the simulated CPU, enforced by golden-hash differential testing.
+
+### Learned Physical Design (AlphaFabric)
+
+An AlphaChip-style learned placement system lays out logic circuits on the fabric:
+
+- A policy trained on small circuits **generalizes one-shot to unseen circuit widths** at ~60% of the naive baseline's wirelength — zero per-instance search.
+- Beats a strong **simulated-annealing baseline** by 21–44% on wirelength.
+- **Correctness oracle**: a layout is legal only if the placed-and-routed circuit still computes the same function (golden-hash + reference-vs-tile differential), making the learned reward un-hackable.
 
 ### Multi-Backend Execution
 
@@ -149,7 +169,7 @@ print(result.summary())
 ```bash
 # Clone repository
 git clone https://github.com/wazi893/TileUniverse.git
-cd TileUniverse/engine
+cd TileUniverse
 
 # Build with CUDA support
 cargo build --release --features cuda,perf-bench
@@ -259,8 +279,7 @@ TileUniverse/
 │   └── logic-fabric-core/  # Core primitives (quantum, CUDA, fusion)
 ├── python/                 # Python bindings (PyO3 + maturin)
 ├── examples/               # Benchmarks and demos
-├── tests/                  # Integration tests
-└── User notes/SPRINTS/     # Development history (39 sprints)
+└── tests/                  # Integration tests
 ```
 
 ---
@@ -275,7 +294,7 @@ If TileUniverse contributes to your research, please cite:
   author    = {Aziz, Waheed},
   year      = {2024},
   url       = {https://github.com/wazi893/TileUniverse},
-  note      = {2.5T amplitude ops/sec on consumer GPU hardware}
+  note      = {15.8 TCOPS quantum and 115T packed tile-evals/sec on consumer GPU hardware}
 }
 ```
 
