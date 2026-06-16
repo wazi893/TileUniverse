@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TileUniverse — Live Demos</title>
+    <meta name="description" content="Five interactive, self-contained demos of the TileUniverse engine. Real output, no dependencies.">
+    <meta property="og:title" content="TileUniverse — Live Demos">
+    <meta property="og:description" content="Watch a tile-CPU execute, Game of Life at trillions of cells/sec, a surface-code decoder, a learned chip placer, and a spiking neural network.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root{
+            --midnight-black:#0d0f11; --slate-gray:#1b1e22; --soft-white:#eaeaea;
+            --muted-gray:#888; --quantum-cyan:#00e4ff; --deep-cyan:#0099aa;
+        }
+        *{ margin:0; padding:0; box-sizing:border-box; }
+        html{ scroll-behavior:smooth; }
+        body{ font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+            background:var(--midnight-black); color:var(--soft-white); line-height:1.6; }
+        nav{ position:sticky; top:0; z-index:100; background:rgba(13,15,17,0.95); backdrop-filter:blur(10px);
+            border-bottom:1px solid rgba(0,228,255,0.1); padding:1rem 2rem; }
+        nav .container{ max-width:1200px; margin:0 auto; display:flex; justify-content:space-between; align-items:center; }
+        .logo{ display:flex; align-items:center; gap:.75rem; text-decoration:none; color:var(--soft-white); font-weight:600; font-size:1.2rem; }
+        .logo-icon{ width:30px; height:30px; display:grid; grid-template-columns:repeat(4,1fr); gap:2px; }
+        .logo-icon span{ background:linear-gradient(135deg,var(--quantum-cyan),var(--deep-cyan)); border-radius:2px; }
+        .logo-icon span:nth-child(4),.logo-icon span:nth-child(6),.logo-icon span:nth-child(9),.logo-icon span:nth-child(12){ background:transparent; border:1px solid var(--quantum-cyan); }
+        nav a.back{ color:var(--muted-gray); text-decoration:none; font-size:.9rem; transition:color .2s; }
+        nav a.back:hover{ color:var(--quantum-cyan); }
+
+        header.hero{ max-width:900px; margin:0 auto; padding:5rem 2rem 2rem; text-align:center; }
+        header.hero h1{ font-size:clamp(2.2rem,5vw,3.4rem); font-weight:700; line-height:1.1; margin-bottom:1rem; }
+        header.hero h1 span{ background:linear-gradient(135deg,var(--quantum-cyan),var(--deep-cyan)); -webkit-background-clip:text; background-clip:text; -webkit-text-fill-color:transparent; }
+        header.hero p{ color:var(--muted-gray); font-size:1.15rem; max-width:640px; margin:0 auto; }
+        header.hero .note{ font-size:.9rem; color:#5a6166; margin-top:1rem; font-family:'JetBrains Mono',monospace; }
+
+        .grid{ max-width:1200px; margin:2rem auto 4rem; padding:0 2rem;
+            display:grid; grid-template-columns:repeat(auto-fit,minmax(340px,1fr)); gap:1.75rem; }
+        .card{ background:var(--slate-gray); border-radius:14px; overflow:hidden; border:1px solid rgba(255,255,255,0.06);
+            transition:transform .2s, border-color .2s, box-shadow .2s; display:flex; flex-direction:column; text-decoration:none; color:inherit; }
+        .card:hover{ transform:translateY(-5px); border-color:rgba(0,228,255,0.4); box-shadow:0 14px 40px rgba(0,228,255,0.12); }
+        .card .thumb{ position:relative; aspect-ratio:16/9; overflow:hidden; background:#06070d; border-bottom:1px solid rgba(255,255,255,0.05); }
+        .card .thumb img{ width:100%; height:100%; object-fit:cover; object-position:left center; display:block; transition:transform .3s; }
+        .card:hover .thumb img{ transform:scale(1.04); }
+        .card .tag{ position:absolute; top:10px; left:10px; font-family:'JetBrains Mono',monospace; font-size:.68rem;
+            color:var(--quantum-cyan); background:rgba(0,20,24,0.8); border:1px solid rgba(0,228,255,0.25); padding:.2rem .55rem; border-radius:20px; }
+        .card .body{ padding:1.4rem 1.5rem 1.6rem; flex:1; display:flex; flex-direction:column; }
+        .card h3{ font-size:1.2rem; font-weight:600; margin-bottom:.2rem; }
+        .card .sub{ color:var(--quantum-cyan); font-size:.82rem; font-weight:500; margin-bottom:.7rem; }
+        .card p{ color:var(--muted-gray); font-size:.92rem; flex:1; }
+        .card .launch{ margin-top:1.1rem; display:inline-flex; align-items:center; gap:.4rem; color:var(--quantum-cyan);
+            font-weight:600; font-size:.92rem; }
+        .card .launch .arrow{ transition:transform .2s; }
+        .card:hover .launch .arrow{ transform:translateX(4px); }
+
+        footer{ background:var(--slate-gray); border-top:1px solid rgba(255,255,255,0.05); padding:2.5rem 2rem; text-align:center; }
+        footer p{ color:var(--muted-gray); font-size:.9rem; }
+        footer a{ color:var(--quantum-cyan); text-decoration:none; }
+        footer a:hover{ text-decoration:underline; }
+    </style>
+</head>
+<body>
+    <nav>
+        <div class="container">
+            <a href="../index.html" class="logo">
+                <div class="logo-icon"><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
+                TileUniverse
+            </a>
+            <a href="../index.html" class="back">← Back to overview</a>
+        </div>
+    </nav>
+
+    <header class="hero">
+        <h1>Five things you can <span>watch run</span></h1>
+        <p>Each demo is a single self-contained page — real engine output, no install, no dependencies. Open one and press <strong>space</strong>.</p>
+        <p class="note">rust · cpu &amp; cuda · every frame is real computed output</p>
+    </header>
+
+    <main class="grid">
+        <a class="card" href="cellular.html">
+            <div class="thumb"><span class="tag">CUDA · RTX 5090</span><img src="thumbs/cellular.png" alt="Game of Life"></div>
+            <div class="body">
+                <h3>Cellular at Scale</h3>
+                <div class="sub">Conway's Life on the packed GPU fabric</div>
+                <p>The same 64-cells-per-word packing the engine uses for logic, running Conway's Game of Life at <strong>~9 trillion cell-updates/sec</strong> on an RTX 5090 — measured, and verified bit-identical to a CPU reference.</p>
+                <span class="launch">Launch demo <span class="arrow">→</span></span>
+            </div>
+        </a>
+
+        <a class="card" href="tilecpu.html">
+            <div class="thumb"><span class="tag">Rust · tile fabric</span><img src="thumbs/tilecpu.png" alt="Tile CPU"></div>
+            <div class="body">
+                <h3>A CPU made of tiles</h3>
+                <div class="sub">Live processor execution</div>
+                <p>A working processor built entirely from cellular-automaton logic tiles, executing a real program. Every glowing tile is a real signal propagating in the fabric — synced to the disassembly and register file.</p>
+                <span class="launch">Launch demo <span class="arrow">→</span></span>
+            </div>
+        </a>
+
+        <a class="card" href="qec.html">
+            <div class="thumb"><span class="tag">Rust · QEC</span><img src="thumbs/qec.png" alt="Surface code decoder"></div>
+            <div class="body">
+                <h3>Surface-Code Decoder</h3>
+                <div class="sub">Quantum error correction, live</div>
+                <p>A distance-<em>d</em> surface code under depolarising noise: stabilizer measurements light up <strong>defects</strong>, a minimum-weight matching decoder pairs them, and the correction clears the syndrome — with the threshold story plotted shot by shot.</p>
+                <span class="launch">Launch demo <span class="arrow">→</span></span>
+            </div>
+        </a>
+
+        <a class="card" href="alphafabric.html">
+            <div class="thumb"><span class="tag">Rust · learned EDA</span><img src="thumbs/alphafabric.png" alt="AlphaFabric placement"></div>
+            <div class="body">
+                <h3>AlphaFabric</h3>
+                <div class="sub">An AI lays out a chip</div>
+                <p>A learned placement policy and simulated annealing optimizing a circuit floorplan. Watch the net "rats nest" cool from long red wires to short cyan ones as wirelength drops <strong>~55%</strong>.</p>
+                <span class="launch">Launch demo <span class="arrow">→</span></span>
+            </div>
+        </a>
+
+        <a class="card" href="snn.html">
+            <div class="thumb"><span class="tag">Rust · neuromorphic</span><img src="thumbs/snn.png" alt="Spiking neural network"></div>
+            <div class="body">
+                <h3>Spiking Neural Network</h3>
+                <div class="sub">Neurons firing in real time</div>
+                <p>A layered leaky-integrate-and-fire network: membrane potentials charge, neurons flash as they <strong>spike</strong>, and the cascade ripples layer to layer — with the classic spike raster underneath.</p>
+                <span class="launch">Launch demo <span class="arrow">→</span></span>
+            </div>
+        </a>
+    </main>
+
+    <footer>
+        <p>
+            Every demo is real computed output from the TileUniverse engine.<br>
+            <a href="../index.html">Overview</a> ·
+            <a href="../docs/whitepaper.html">Whitepaper</a>
+        </p>
+    </footer>
+</body>
+</html>
