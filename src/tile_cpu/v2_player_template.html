@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TileCPU · V2 — Live Execution Player</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg:#0a0a0f; --panel:#12121a; --panel2:#161620; --line:#2a2a3a;
+    --txt:#c8c8d0; --dim:#6c6c80; --accent:#8a8aff; --accent2:#aab0ff;
+    --good:#46d08a; --warn:#e0b24a; --hot:#78e6ff;
+    --route:#3a6ad0; --mem:#36c074; --alu:#e05a48; --ctrl:#e0a838; --const:#7a7a8a; --other:#9a9aac;
+  }
+  html, body { height:100%; }
+  body {
+    background:var(--bg); color:var(--txt);
+    font-family:'Consolas','SF Mono','Fira Code',ui-monospace,monospace;
+    overflow:hidden; display:flex; flex-direction:column; height:100vh;
+    -webkit-font-smoothing:antialiased;
+  }
+
+  /* ── Header / transport ───────────────────────────────────────── */
+  header {
+    display:flex; align-items:center; gap:14px; padding:9px 16px;
+    background:linear-gradient(180deg,#15151f,#101018);
+    border-bottom:1px solid var(--line); flex-shrink:0; z-index:10;
+  }
+  .brand { display:flex; align-items:baseline; gap:8px; margin-right:6px; }
+  .brand .logo { font-size:15px; font-weight:700; letter-spacing:.5px; color:#ececf4; }
+  .brand .logo .accent { color:var(--accent2); }
+  .brand .sub { font-size:10px; color:var(--dim); letter-spacing:1px; text-transform:uppercase; }
+  .sep { width:1px; height:26px; background:var(--line); }
+
+  select, button { font-family:inherit; }
+  select {
+    background:#1a1a26; color:var(--accent2); border:1px solid #34344a;
+    border-radius:6px; padding:5px 9px; font-size:12px; cursor:pointer; outline:none;
+  }
+  select:hover { border-color:#4a4a6a; }
+
+  .transport { display:flex; align-items:center; gap:6px; }
+  .tbtn {
+    width:34px; height:30px; display:flex; align-items:center; justify-content:center;
+    background:#1a1a26; border:1px solid #34344a; border-radius:6px;
+    color:var(--accent2); font-size:13px; cursor:pointer; transition:all .12s; user-select:none;
+  }
+  .tbtn:hover { border-color:#5a5a82; background:#20203070; color:#fff; }
+  .tbtn.play { width:42px; background:#23234a; border-color:#4a4a8a; }
+  .tbtn.play:hover { background:#2c2c5e; }
+
+  .scrub-wrap { flex:1; display:flex; align-items:center; gap:10px; min-width:120px; }
+  input[type=range] {
+    -webkit-appearance:none; appearance:none; height:4px; border-radius:3px;
+    background:#2a2a3c; outline:none; cursor:pointer;
+  }
+  input[type=range].scrub { flex:1; }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance:none; width:14px; height:14px; border-radius:50%;
+    background:var(--accent2); border:2px solid #0a0a0f; box-shadow:0 0 8px var(--accent);
+  }
+  input[type=range]::-moz-range-thumb {
+    width:14px; height:14px; border-radius:50%; background:var(--accent2);
+    border:2px solid #0a0a0f; box-shadow:0 0 8px var(--accent);
+  }
+  .speed { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--dim); }
+  .speed input { width:78px; }
+  .stepcount { font-size:12px; color:var(--accent2); min-width:108px; text-align:right; white-space:nowrap; }
+  .stepcount b { color:#fff; }
+
+  /* ── Stage ────────────────────────────────────────────────────── */
+  #stage { flex:1; display:flex; overflow:hidden; position:relative; }
+  #canvas-wrap { flex:1; position:relative; overflow:hidden; }
+  canvas { display:block; cursor:grab; }
+  canvas:active { cursor:grabbing; }
+
+  .overlay { position:absolute; pointer-events:none; }
+  #hud { left:14px; top:12px; font-size:11px; line-height:1.7; }
+  #hud .hud-layer { color:#fff; font-weight:600; font-size:12px; }
+  #hud .hud-stat { color:var(--dim); }
+  #hud .hud-stat b { color:var(--hot); }
+
+  #layer-bar { right:14px; top:12px; display:flex; gap:5px; pointer-events:auto; }
+  .lbtn {
+    padding:4px 9px; border:1px solid #34344a; border-radius:5px; background:#16161f;
+    color:var(--dim); font-size:11px; cursor:pointer; transition:all .12s; user-select:none;
+  }
+  .lbtn:hover { color:#bbb; border-color:#4a4a66; }
+  .lbtn.active { color:var(--accent2); border-color:var(--accent); background:#1c1c34; }
+
+  #legend { left:14px; bottom:12px; display:flex; flex-direction:column; gap:3px; font-size:10px; }
+  #legend .li { display:flex; align-items:center; gap:6px; color:var(--dim); }
+  #legend .sw { width:10px; height:10px; border-radius:2px; }
+
+  #hint { right:14px; bottom:12px; font-size:10px; color:#44445a; text-align:right; line-height:1.6; }
+
+  #tooltip {
+    position:absolute; pointer-events:none; display:none; z-index:50;
+    background:#181826; border:1px solid #44446a; border-radius:6px;
+    padding:6px 9px; font-size:11px; line-height:1.5; box-shadow:0 4px 16px rgba(0,0,0,.6);
+  }
+  #tooltip .tt-t { color:var(--accent2); font-weight:600; }
+  #tooltip .tt-c { color:var(--dim); }
+
+  /* ── Inspector panel ──────────────────────────────────────────── */
+  #panel {
+    width:312px; flex-shrink:0; background:var(--panel); border-left:1px solid var(--line);
+    display:flex; flex-direction:column; overflow-y:auto;
+  }
+  .sec { padding:11px 14px; border-bottom:1px solid #1e1e2c; }
+  .sec h2 {
+    font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:1.4px;
+    margin-bottom:8px; font-weight:600;
+  }
+
+  .ins {
+    background:#0e0e16; border:1px solid #2c2c40; border-radius:7px; padding:10px 12px;
+  }
+  .ins .ins-asm { font-size:16px; color:#fff; font-weight:600; letter-spacing:.3px; }
+  .ins .ins-meta { display:flex; gap:14px; margin-top:7px; font-size:11px; }
+  .ins .ins-meta .k { color:var(--dim); }
+  .ins .ins-meta .v { color:var(--accent2); }
+  .flags { display:flex; gap:6px; margin-top:8px; }
+  .flag {
+    font-size:10px; padding:2px 7px; border-radius:4px; border:1px solid #34344a;
+    color:#55556a; letter-spacing:.5px;
+  }
+  .flag.on { color:#0a0a0f; background:var(--warn); border-color:var(--warn); font-weight:700; }
+
+  /* disassembly */
+  #disasm { font-size:11.5px; max-height:188px; overflow-y:auto; }
+  .drow {
+    display:flex; gap:8px; padding:2px 6px; border-radius:4px; cursor:pointer;
+    white-space:pre; color:#9595aa;
+  }
+  .drow:hover { background:#1c1c2a; }
+  .drow .pc { color:#4a4a60; width:30px; flex-shrink:0; text-align:right; }
+  .drow.cur { background:#23234a; color:#fff; }
+  .drow.cur .pc { color:var(--accent2); }
+  .drow.cur::before { content:'▶'; position:absolute; margin-left:-13px; color:var(--accent2); font-size:9px; }
+
+  /* registers */
+  #regs { display:grid; grid-template-columns:1fr 1fr; gap:4px 12px; font-size:11.5px; }
+  .reg { display:flex; justify-content:space-between; padding:1px 4px; border-radius:3px; }
+  .reg .rn { color:var(--dim); }
+  .reg .rv { color:#bfbfd2; }
+  .reg.nz .rv { color:#fff; }
+  .reg.wr { background:#1f3326; }
+  .reg.wr .rv { color:var(--good); font-weight:700; }
+  .reg.wr .rn { color:var(--good); }
+
+  /* memory / mmio */
+  .delta { font-size:11.5px; display:flex; flex-direction:column; gap:3px; }
+  .delta .row { display:flex; gap:8px; }
+  .delta .tag { font-size:9px; padding:1px 5px; border-radius:3px; flex-shrink:0; align-self:center; }
+  .delta .tag.ram { background:#143a2a; color:var(--mem); }
+  .delta .tag.mw { background:#3a2a14; color:var(--warn); }
+  .delta .tag.mr { background:#1a2a3a; color:#5aa8d8; }
+  .delta .da { color:var(--dim); }
+  .delta .dv { color:#dcdce6; }
+  .delta .none { color:#3a3a4c; font-style:italic; }
+
+  /* console */
+  #console {
+    background:#06060a; border:1px solid #242436; border-radius:6px; padding:9px 11px;
+    min-height:38px; font-size:15px; letter-spacing:1px; color:var(--hot);
+    word-break:break-all; box-shadow:inset 0 0 18px #0cf2; min-height:42px;
+  }
+  #console .caret { animation:blink 1s steps(1) infinite; color:var(--accent2); }
+  @keyframes blink { 50% { opacity:0; } }
+  #console.empty { color:#33334a; font-style:italic; font-size:11px; letter-spacing:0; box-shadow:none; }
+
+  .scanline { color:var(--dim); font-size:10.5px; margin-top:5px; }
+  .scanline b { color:var(--accent2); }
+
+  ::-webkit-scrollbar { width:8px; height:8px; }
+  ::-webkit-scrollbar-thumb { background:#2a2a3c; border-radius:4px; }
+  ::-webkit-scrollbar-track { background:transparent; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">
+    <span class="logo">Tile<span class="accent">CPU</span></span>
+    <span class="sub">live execution</span>
+  </div>
+  <div class="sep"></div>
+  <select id="demo-select" title="Choose a program"></select>
+  <div class="sep"></div>
+  <div class="transport">
+    <div class="tbtn" id="btn-first" title="Restart (Home)">⏮</div>
+    <div class="tbtn" id="btn-back" title="Step back (←)">◀</div>
+    <div class="tbtn play" id="btn-play" title="Play / Pause (Space)">▶</div>
+    <div class="tbtn" id="btn-fwd" title="Step forward (→)">▶▶</div>
+  </div>
+  <div class="scrub-wrap">
+    <input type="range" class="scrub" id="scrub" min="0" max="1" value="0" step="1">
+  </div>
+  <div class="speed" title="Playback speed">
+    <span>spd</span><input type="range" id="speed" min="1" max="20" value="6" step="1">
+  </div>
+  <div class="stepcount" id="stepcount">step <b>0</b>/0 · cyc 0</div>
+</header>
+
+<div id="stage">
+  <div id="canvas-wrap">
+    <canvas id="cv"></canvas>
+    <div class="overlay" id="hud">
+      <div class="hud-layer" id="hud-layer">L0 · Execution</div>
+      <div class="hud-stat">active <b id="hud-active">0</b> tiles</div>
+      <div class="hud-stat">flow <b id="hud-flow">0</b> edges</div>
+    </div>
+    <div class="overlay" id="layer-bar"></div>
+    <div class="overlay" id="legend"></div>
+    <div class="overlay" id="hint">scroll: zoom · drag: pan · space: play<br>← → step · click instruction to seek</div>
+    <div id="tooltip"><div class="tt-t"></div><div class="tt-c"></div></div>
+  </div>
+
+  <aside id="panel">
+    <div class="sec">
+      <h2>Instruction</h2>
+      <div class="ins">
+        <div class="ins-asm" id="ins-asm">—</div>
+        <div class="ins-meta">
+          <span><span class="k">pc</span> <span class="v" id="ins-pc">0</span></span>
+          <span><span class="k">cycle</span> <span class="v" id="ins-cy">0</span></span>
+        </div>
+        <div class="flags">
+          <span class="flag" id="flag-z">Z</span>
+          <span class="flag" id="flag-c">C</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="sec">
+      <h2>Program</h2>
+      <div id="disasm"></div>
+    </div>
+
+    <div class="sec">
+      <h2>Register file</h2>
+      <div id="regs"></div>
+    </div>
+
+    <div class="sec">
+      <h2>Memory / MMIO this step</h2>
+      <div class="delta" id="delta"></div>
+    </div>
+
+    <div class="sec" id="console-sec">
+      <h2>Console (MMIO 57)</h2>
+      <div id="console" class="empty">— no output —</div>
+      <div class="scanline">every glowing tile is a <b>real signal</b> in the tile fabric</div>
+    </div>
+  </aside>
+</div>
+
+<script>
+"use strict";
+// Injected at export time. Standalone (null) shows an empty shell.
+const BUNDLE = /*__TILECPU_PLAYER_BUNDLE__*/null;
+
+// ── DOM refs ──────────────────────────────────────────────────────
+const $ = id => document.getElementById(id);
+const cv = $('cv'), ctx = cv.getContext('2d');
+const wrap = $('canvas-wrap');
+const tooltip = $('tooltip');
+
+const CAT = [
+  { name:'Routing / via', css:getCss('--route') },
+  { name:'Register / RAM', css:getCss('--mem') },
+  { name:'ALU', css:getCss('--alu') },
+  { name:'Control / mux', css:getCss('--ctrl') },
+  { name:'Const', css:getCss('--const') },
+  { name:'Other', css:getCss('--other') },
+];
+function getCss(v){ return getComputedStyle(document.documentElement).getPropertyValue(v).trim(); }
+
+// ── State ─────────────────────────────────────────────────────────
+let prog = null;          // current program
+let W=128, H=128, L=4;    // grid dims
+let structByLayer = [];   // [layer] -> [{x,y,cat}]
+let actByLayer = [];      // [step][layer] -> [{x,y}]  (lazy)
+let bbox = null;          // {minX,minY,maxX,maxY} of placed tiles (for fit)
+let step = 0, playing = false, timer = null;
+let layer = 0;            // -1 = all layers (2x2)
+let zoom = 1, panX = 0, panY = 0;
+let dpr = Math.max(1, window.devicePixelRatio || 1);
+const TRAIL = 5;          // decaying activity trail length
+let hoverTile = null;
+
+// ── Coord packing (matches the Rust exporter) ─────────────────────
+function unpack(p){ const x = p % W; const t = (p - x) / W; const y = t % H; const z = (t - y) / H; return {x,y,z}; }
+
+// ── Boot ──────────────────────────────────────────────────────────
+function boot(){
+  buildLegend();
+  buildLayerBar();
+  if (!BUNDLE){ emptyState(); return; }
+  W = BUNDLE.meta.w; H = BUNDLE.meta.h; L = BUNDLE.meta.layers;
+  // demo dropdown
+  const sel = $('demo-select');
+  BUNDLE.programs.forEach((p,i)=>{ const o=document.createElement('option'); o.value=i; o.textContent=p.name; sel.appendChild(o); });
+  sel.addEventListener('change', ()=> loadProgram(sel.value|0));
+
+  // optional deep-link: ?demo=&step=&layer=&play=1
+  const q = new URLSearchParams(location.search);
+  const di = q.has('demo') ? clamp(+q.get('demo')||0, 0, BUNDLE.programs.length-1) : (BUNDLE.default|0);
+  sel.value = di;
+  wireControls();
+  resize();
+  loadProgram(di);
+  if (q.has('layer')) setLayer(clamp(+q.get('layer'), -1, 3));
+  if (q.has('step')) goTo(+q.get('step')||0);
+  if (q.get('play')==='1') setPlaying(true);
+}
+function clamp(v,lo,hi){ return Math.max(lo, Math.min(hi, v)); }
+
+function emptyState(){
+  resize();
+  ctx.fillStyle = getCss('--dim'); ctx.font='13px Consolas, monospace'; ctx.textAlign='center';
+  ctx.fillText('No trace bundle embedded — run the exporter to generate a populated player.', cv.clientWidth/2, cv.clientHeight/2);
+}
+
+function loadProgram(idx){
+  prog = BUNDLE.programs[idx];
+  // group shared structure tiles by layer once
+  structByLayer = Array.from({length:L}, ()=>[]);
+  let minX=1e9,minY=1e9,maxX=-1e9,maxY=-1e9;
+  for (const [p,c] of BUNDLE.structure){ const {x,y,z}=unpack(p); if (z<L){ structByLayer[z].push({x,y,cat:c});
+    if(x<minX)minX=x; if(y<minY)minY=y; if(x>maxX)maxX=x; if(y>maxY)maxY=y; } }
+  bbox = maxX<0 ? {minX:0,minY:0,maxX:W-1,maxY:H-1} : {minX,minY,maxX,maxY};
+  // pre-split each step's active tiles by layer
+  actByLayer = prog.steps.map(s=>{
+    const byL = Array.from({length:L}, ()=>[]);
+    for (const p of s.act){ const {x,y,z}=unpack(p); if (z<L) byL[z].push({x,y}); }
+    return byL;
+  });
+  buildDisasm();
+  buildRegs();
+  step = 0;
+  $('scrub').max = Math.max(0, prog.steps.length-1);
+  $('console-sec').style.display = programHasConsole() ? '' : 'none';
+  fitView();
+  goTo(0);
+}
+
+function programHasConsole(){
+  return prog.steps.some(s => s.mmioW && s.mmioW.some(e=>e[0]===57));
+}
+
+// ── Static panel scaffolding ──────────────────────────────────────
+function buildDisasm(){
+  const host = $('disasm'); host.innerHTML='';
+  prog.disasm.forEach((txt,pc)=>{
+    const d=document.createElement('div'); d.className='drow'; d.dataset.pc=pc;
+    d.style.position='relative';
+    d.innerHTML = `<span class="pc">${pc}</span><span>${esc(txt)}</span>`;
+    d.addEventListener('click', ()=>{ const t=firstStepAtPc(pc); if (t>=0) goTo(t); });
+    host.appendChild(d);
+  });
+}
+function firstStepAtPc(pc){ for(let i=0;i<prog.steps.length;i++) if(prog.steps[i].pc===pc) return i; return -1; }
+
+function buildRegs(){
+  const host=$('regs'); host.innerHTML='';
+  for(let r=0;r<16;r++){
+    const d=document.createElement('div'); d.className='reg'; d.id='reg'+r;
+    d.innerHTML=`<span class="rn">R${r}</span><span class="rv">0</span>`;
+    host.appendChild(d);
+  }
+}
+
+function buildLegend(){
+  const host=$('legend'); host.innerHTML='';
+  CAT.forEach(c=>{ const d=document.createElement('div'); d.className='li';
+    d.innerHTML=`<span class="sw" style="background:${c.css}"></span>${c.name}`; host.appendChild(d); });
+  const g=document.createElement('div'); g.className='li';
+  g.innerHTML=`<span class="sw" style="background:${getCss('--hot')};box-shadow:0 0 6px ${getCss('--hot')}"></span>active signal`;
+  host.appendChild(g);
+}
+
+const LAYER_NAMES = ['L0 · Execution','L1 · Routing','L2 · Synth','L3 · Immediates'];
+function buildLayerBar(){
+  const host=$('layer-bar'); host.innerHTML='';
+  const mk=(lab,val)=>{ const b=document.createElement('div'); b.className='lbtn'+(val===layer?' active':'');
+    b.textContent=lab; b.dataset.layer=val; b.addEventListener('click',()=>setLayer(val)); host.appendChild(b); };
+  for(let z=0;z<4;z++) mk('L'+z, z);
+  mk('ALL', -1);
+}
+function setLayer(z){ layer=z; document.querySelectorAll('.lbtn').forEach(b=>b.classList.toggle('active', (b.dataset.layer|0)===z || b.dataset.layer===String(z)));
+  $('hud-layer').textContent = z===-1 ? 'ALL layers' : LAYER_NAMES[z]; fitView(); draw(); }
+
+// ── View fit / transforms ─────────────────────────────────────────
+// World space lays layers out as a horizontal strip when "ALL"; otherwise single layer at origin.
+function layerOffset(z){ return layer===-1 ? z*(W+8) : 0; }
+function fitView(){
+  const b = bbox || {minX:0,minY:0,maxX:W-1,maxY:H-1};
+  const pad = 3;
+  const x0 = b.minX - pad, y0 = b.minY - pad;
+  const wdt = (layer===-1 ? layerOffset(L-1) + b.maxX : b.maxX) + pad - x0;
+  const hgt = b.maxY + pad - y0;
+  const cw = cv.clientWidth||1, ch = cv.clientHeight||1;
+  zoom = Math.min(cw/wdt, ch/hgt) * 0.97;
+  panX = (cw - wdt*zoom)/2 - x0*zoom;
+  panY = (ch - hgt*zoom)/2 - y0*zoom;
+}
+function w2s(wx,wy){ return { x:wx*zoom+panX, y:wy*zoom+panY }; }
+function s2w(sx,sy){ return { x:(sx-panX)/zoom, y:(sy-panY)/zoom }; }
+
+// ── Rendering ─────────────────────────────────────────────────────
+function draw(){
+  const cw=cv.clientWidth, ch=cv.clientHeight;
+  ctx.clearRect(0,0,cw,ch);
+  ctx.fillStyle = getCss('--bg'); ctx.fillRect(0,0,cw,ch);
+
+  const layers = layer===-1 ? [0,1,2,3] : [layer];
+  const ts = zoom; // tile size in px
+
+  // 1) static floorplan (dim)
+  ctx.globalCompositeOperation='source-over';
+  for (const z of layers){
+    const ox = layerOffset(z);
+    // layer frame
+    const o=w2s(ox,0), e=w2s(ox+W,H);
+    ctx.fillStyle='#0c0c14'; ctx.fillRect(o.x,o.y,e.x-o.x,e.y-o.y);
+    ctx.strokeStyle='#1a1a2a'; ctx.lineWidth=1; ctx.strokeRect(o.x,o.y,e.x-o.x,e.y-o.y);
+    if (layer===-1){ ctx.fillStyle='#33334a'; ctx.font='10px Consolas,monospace'; ctx.textAlign='left';
+      ctx.fillText('L'+z, o.x+3, o.y+12); }
+    const tiles = structByLayer[z];
+    for (const t of tiles){
+      const s=w2s(ox+t.x, t.y);
+      ctx.fillStyle = catFill(t.cat);
+      ctx.fillRect(s.x, s.y, ts+0.6, ts+0.6);
+    }
+  }
+
+  // 2) activity trail (additive glow): a white-hot leading edge fading to a
+  //    cool-blue wake, so live signals read distinctly from static routing.
+  ctx.globalCompositeOperation='lighter';
+  for (let k=TRAIL-1;k>=0;k--){
+    const si = step-k; if (si<0) continue;
+    const a = 1 - k/TRAIL;
+    const newest = (k===0);
+    const alpha = newest ? 0.78 : (0.05 + 0.26*a*a);
+    const col = newest ? '190,244,255' : '64,176,255';
+    for (const z of layers){
+      const ox=layerOffset(z);
+      const act = actByLayer[si][z];
+      if (newest && zoom>2){
+        // soft cyan halo under the leading edge for a bloom feel
+        ctx.fillStyle = 'rgba(80,220,255,0.16)';
+        for (const t of act){ const s=w2s(ox+t.x, t.y); ctx.fillRect(s.x-ts*0.45, s.y-ts*0.45, ts*1.9, ts*1.9); }
+      }
+      ctx.fillStyle = `rgba(${col},${alpha.toFixed(3)})`;
+      for (const t of act){
+        const s=w2s(ox+t.x, t.y);
+        ctx.fillRect(s.x, s.y, ts+0.6, ts+0.6);
+      }
+    }
+  }
+
+  // 3) flow edges for current step
+  const fs = prog.steps[step].flow;
+  if (fs && fs.length){
+    ctx.lineWidth = Math.max(0.6, zoom*0.16);
+    ctx.strokeStyle = 'rgba(120,235,255,0.5)';
+    ctx.beginPath();
+    for (const [pf,pt] of fs){
+      const a=unpack(pf), b=unpack(pt);
+      if (layer!==-1 && (a.z!==layer || b.z!==layer)) continue;
+      const sa=w2s(layerOffset(a.z)+a.x+0.5, a.y+0.5);
+      const sb=w2s(layerOffset(b.z)+b.x+0.5, b.y+0.5);
+      ctx.moveTo(sa.x,sa.y); ctx.lineTo(sb.x,sb.y);
+    }
+    ctx.stroke();
+  }
+  ctx.globalCompositeOperation='source-over';
+
+  // hover highlight
+  if (hoverTile){
+    const s=w2s(layerOffset(hoverTile.z)+hoverTile.x, hoverTile.y);
+    ctx.strokeStyle='#ffffffcc'; ctx.lineWidth=1.5; ctx.strokeRect(s.x, s.y, ts, ts);
+  }
+}
+
+let _catCache = {};
+function catFill(c){
+  if (_catCache[c]) return _catCache[c];
+  const hex = CAT[c] ? CAT[c].css : CAT[5].css;
+  const {r,g,b} = hexRgb(hex);
+  // dim floorplan
+  const v = `rgba(${r},${g},${b},0.22)`;
+  _catCache[c]=v; return v;
+}
+function hexRgb(h){ h=h.replace('#',''); if(h.length===3) h=h.split('').map(c=>c+c).join('');
+  return { r:parseInt(h.slice(0,2),16), g:parseInt(h.slice(2,4),16), b:parseInt(h.slice(4,6),16) }; }
+
+// ── Panel sync ────────────────────────────────────────────────────
+function syncPanel(){
+  const s = prog.steps[step];
+  $('ins-asm').textContent = s.asm || prog.disasm[s.pc] || '—';
+  $('ins-pc').textContent = s.pc;
+  $('ins-cy').textContent = s.cy;
+  $('flag-z').classList.toggle('on', !!s.z);
+  $('flag-c').classList.toggle('on', !!s.c);
+
+  // disasm current line
+  document.querySelectorAll('.drow').forEach(d=>d.classList.toggle('cur', (d.dataset.pc|0)===s.pc));
+  const cur = document.querySelector('.drow.cur'); if (cur) cur.scrollIntoView({block:'nearest'});
+
+  // accumulate register file up to & including this step
+  const regs = new Array(16).fill(0n);
+  const wroteThis = new Set();
+  for (let i=0;i<=step;i++){ for (const [r,v] of prog.steps[i].regs){ regs[r]=BigInt(v); if(i===step) wroteThis.add(r); } }
+  for (let r=0;r<16;r++){
+    const el=$('reg'+r); const v=regs[r];
+    el.querySelector('.rv').textContent = v.toString();
+    el.classList.toggle('nz', v!==0n);
+    el.classList.toggle('wr', wroteThis.has(r));
+  }
+
+  // memory / mmio deltas this step
+  const host=$('delta'); host.innerHTML='';
+  const add=(tag,cls,a,v)=>{ const row=document.createElement('div'); row.className='row';
+    row.innerHTML=`<span class="tag ${cls}">${tag}</span><span class="da">[${a}]</span><span class="dv">= ${v}</span>`; host.appendChild(row); };
+  let any=false;
+  for(const [a,v] of (s.ram||[])){ add('RAM','ram',a,v); any=true; }
+  for(const [a,v] of (s.mmioW||[])){ add('MMIO◀','mw',a,v); any=true; }
+  for(const [a,v] of (s.mmioR||[])){ add('MMIO▶','mr',a,v); any=true; }
+  if(!any){ const d=document.createElement('div'); d.className='none'; d.textContent='no state writes'; host.appendChild(d); }
+
+  // console (accumulate mmio writes to addr 57)
+  if (programHasConsole()){
+    let out=''; for(let i=0;i<=step;i++){ for(const [a,v] of (prog.steps[i].mmioW||[])){ if(a===57){ const code=Number(v)&0xff; if(code>=32&&code<127) out+=String.fromCharCode(code); else if(code===10) out+='\n'; } } }
+    const c=$('console');
+    if (out.length){ c.classList.remove('empty'); c.innerHTML = esc(out) + '<span class="caret">▍</span>'; }
+    else { c.classList.add('empty'); c.textContent='— no output yet —'; }
+  }
+
+  // hud
+  $('hud-active').textContent = s.act.length;
+  $('hud-flow').textContent = (s.flow||[]).length;
+  $('stepcount').innerHTML = `step <b>${step}</b>/${prog.steps.length-1} · cyc ${s.cy}`;
+  $('scrub').value = step;
+}
+
+// ── Transport ─────────────────────────────────────────────────────
+function goTo(i){ step = Math.max(0, Math.min(prog.steps.length-1, i)); syncPanel(); draw(); }
+function stepFwd(){ if(step>=prog.steps.length-1){ goTo(0); } else goTo(step+1); }
+function stepBack(){ goTo(step-1); }
+function setPlaying(on){
+  playing=on; $('btn-play').textContent = on ? '❚❚' : '▶';
+  if (timer){ clearInterval(timer); timer=null; }
+  if (on){
+    const sps = +$('speed').value; // steps per second
+    timer = setInterval(()=>{
+      goTo(step >= prog.steps.length-1 ? 0 : step+1);
+    }, Math.round(1000/sps));
+  }
+}
+function togglePlay(){ setPlaying(!playing); }
+
+function wireControls(){
+  $('btn-play').addEventListener('click', togglePlay);
+  $('btn-fwd').addEventListener('click', ()=>{ setPlaying(false); stepFwd(); });
+  $('btn-back').addEventListener('click', ()=>{ setPlaying(false); stepBack(); });
+  $('btn-first').addEventListener('click', ()=>{ setPlaying(false); goTo(0); });
+  $('scrub').addEventListener('input', e=>{ setPlaying(false); goTo(+e.target.value); });
+  $('speed').addEventListener('input', ()=>{ if(playing){ setPlaying(false); setPlaying(true); } });
+
+  window.addEventListener('keydown', e=>{
+    if (e.target.tagName==='SELECT'||e.target.tagName==='INPUT') return;
+    if (e.code==='Space'){ e.preventDefault(); togglePlay(); }
+    else if (e.code==='ArrowRight'){ setPlaying(false); stepFwd(); }
+    else if (e.code==='ArrowLeft'){ setPlaying(false); stepBack(); }
+    else if (e.code==='Home'){ setPlaying(false); goTo(0); }
+    else if (e.code>='Digit0' && e.code<='Digit4'){ const n=+e.code.slice(5); setLayer(n===0?-1:n-1); }
+  });
+
+  // pan / zoom
+  let drag=false, lx=0, ly=0;
+  cv.addEventListener('mousedown', e=>{ drag=true; lx=e.clientX; ly=e.clientY; });
+  window.addEventListener('mouseup', ()=> drag=false);
+  cv.addEventListener('mousemove', e=>{
+    if (drag){ panX+=e.clientX-lx; panY+=e.clientY-ly; lx=e.clientX; ly=e.clientY; draw(); return; }
+    updateHover(e);
+  });
+  cv.addEventListener('mouseleave', ()=>{ hoverTile=null; tooltip.style.display='none'; draw(); });
+  cv.addEventListener('wheel', e=>{
+    e.preventDefault();
+    const r=cv.getBoundingClientRect(); const mx=e.clientX-r.left, my=e.clientY-r.top;
+    const wpt=s2w(mx,my); const f = e.deltaY<0 ? 1.12 : 1/1.12;
+    zoom = Math.max(0.25, Math.min(40, zoom*f));
+    panX = mx - wpt.x*zoom; panY = my - wpt.y*zoom; draw();
+  }, {passive:false});
+}
+
+function updateHover(e){
+  const r=cv.getBoundingClientRect(); const mx=e.clientX-r.left, my=e.clientY-r.top;
+  const wpt=s2w(mx,my);
+  let z = layer, wx=wpt.x, wy=wpt.y;
+  if (layer===-1){ z = Math.floor(wpt.x/(W+8)); wx = wpt.x - z*(W+8); }
+  const tx=Math.floor(wx), ty=Math.floor(wy);
+  if (z>=0 && z<L && tx>=0 && tx<W && ty>=0 && ty<H){
+    hoverTile={x:tx,y:ty,z};
+    tooltip.style.display='block';
+    tooltip.querySelector('.tt-t').textContent=`tile (${tx}, ${ty})  z=${z}`;
+    const isAct = actByLayer[step][z].some(t=>t.x===tx&&t.y===ty);
+    tooltip.querySelector('.tt-c').textContent = isAct ? 'active this step' : 'idle';
+    let lxp=e.clientX-r.left+14, lyp=e.clientY-r.top+14;
+    tooltip.style.left=lxp+'px'; tooltip.style.top=lyp+'px';
+  } else { hoverTile=null; tooltip.style.display='none'; }
+  draw();
+}
+
+// ── Resize ────────────────────────────────────────────────────────
+function resize(){
+  dpr=Math.max(1, window.devicePixelRatio||1);
+  const w=wrap.clientWidth, h=wrap.clientHeight;
+  cv.width=w*dpr; cv.height=h*dpr; cv.style.width=w+'px'; cv.style.height=h+'px';
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  if (prog){ draw(); }
+}
+window.addEventListener('resize', ()=>{ resize(); });
+
+function esc(s){ return String(s).replace(/[&<>]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+boot();
+</script>
+</body>
+</html>

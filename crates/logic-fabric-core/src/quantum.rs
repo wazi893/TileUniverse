@@ -1244,6 +1244,15 @@ pub fn is_avx512f_available() -> bool {
     }
 }
 
+/// Apply a Hadamard gate to `target` with an AVX2 kernel.
+///
+/// # Safety
+///
+/// The CPU must support AVX2 (`#[target_feature(enable = "avx2")]`): call only
+/// when `is_x86_feature_detected!("avx2")` is true, otherwise the AVX2
+/// instructions are undefined behavior. `target` must be a valid qubit index
+/// for `state` (`1 << target < state.len`) so the strides stay in bounds of
+/// `state.real`/`state.imag`.
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[target_feature(enable = "avx2")]
 #[allow(unsafe_op_in_unsafe_fn)]
@@ -1302,6 +1311,14 @@ pub unsafe fn apply_h_avx2(state: &mut QState, target: u8) -> GateOutcome {
     GateOutcome::None
 }
 
+/// Apply a Pauli-X gate to `target` with an AVX2 kernel.
+///
+/// # Safety
+///
+/// The CPU must support AVX2 (`#[target_feature(enable = "avx2")]`): call only
+/// when `is_x86_feature_detected!("avx2")` is true, otherwise the AVX2
+/// instructions are undefined behavior. `target` must be a valid qubit index
+/// for `state` (`1 << target < state.len`).
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[target_feature(enable = "avx2")]
 #[allow(unsafe_op_in_unsafe_fn)]
@@ -1341,6 +1358,14 @@ pub unsafe fn apply_x_avx2(state: &mut QState, target: u8) -> GateOutcome {
     GateOutcome::None
 }
 
+/// Apply a phase rotation of `theta` to `target` with an AVX2 kernel.
+///
+/// # Safety
+///
+/// The CPU must support AVX2 (`#[target_feature(enable = "avx2")]`): call only
+/// when `is_x86_feature_detected!("avx2")` is true, otherwise the AVX2
+/// instructions are undefined behavior. `target` must be a valid qubit index
+/// for `state` (`1 << target < state.len`).
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[target_feature(enable = "avx2")]
 #[allow(unsafe_op_in_unsafe_fn)]
@@ -1386,6 +1411,15 @@ pub unsafe fn apply_phase_avx2(state: &mut QState, target: u8, theta: f32) -> Ga
     GateOutcome::None
 }
 
+/// Apply a CNOT gate (`control` -> `target`) with an AVX2 kernel.
+///
+/// # Safety
+///
+/// The CPU must support AVX2 (`#[target_feature(enable = "avx2")]`): call only
+/// when `is_x86_feature_detected!("avx2")` is true, otherwise the AVX2
+/// instructions are undefined behavior. `control` and `target` must be
+/// distinct, valid qubit indices for `state` (`1 << control < state.len` and
+/// `1 << target < state.len`).
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 #[target_feature(enable = "avx2")]
 #[allow(unsafe_op_in_unsafe_fn)]

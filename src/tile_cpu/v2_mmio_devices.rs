@@ -23,6 +23,20 @@ pub const MMIO_DATASET_CMD: u8 = 41;
 pub const MMIO_DATASET_DATA: u8 = 42;
 pub const MMIO_DATASET_STATUS: u8 = 43;
 
+// --- HLS accelerator (addresses 41-43, Sprint 388) ---
+// The 23-address MMIO window is fully assigned, so the accelerator OVERLAYS the
+// optional dataset device's slots: both are optional sub-devices of
+// `V2MmioCombinedDevice` and are mutually exclusive (the constructors enforce one or
+// the other). In the default combined device neither is present and 41-43 fall
+// through to the ref pack, which ignores them — these are the only genuinely free
+// addresses in practice. Indexed-operand protocol to stay frugal with the window:
+// write an operand index to ARG_SELECT, its value to ARG_DATA (full 64-bit ST;
+// the device latches operand[index]); a read of RESULT evaluates the synthesized
+// tile datapath on the latched operands and returns the answer.
+pub const MMIO_ACCEL_ARG_SELECT: u8 = 41;
+pub const MMIO_ACCEL_ARG_DATA: u8 = 42;
+pub const MMIO_ACCEL_RESULT: u8 = 43;
+
 // --- Quantum bridge (addresses 44-47, Sprint 157) ---
 pub const MMIO_QUANTUM_CMD: u8 = 44;
 pub const MMIO_QUANTUM_QUBIT: u8 = 45;
@@ -2070,7 +2084,8 @@ const COMBINED_SNAPSHOT_VERSION: u8 = 2;
 /// Combined MMIO device: dispatches across all sub-devices by address range.
 ///
 /// Address map:
-/// - 41-43: dataset (optional)
+/// - 41-43: HLS accelerator (optional, Sprint 388) / dataset (optional) — mutually
+///   exclusive sub-devices sharing the same slots (see `MMIO_ACCEL_ARG_SELECT`)
 /// - 44-47: quantum bridge
 /// - 48-49: display
 /// - 50-53: math coprocessor
@@ -2084,6 +2099,10 @@ pub struct V2MmioCombinedDevice {
     pub snn: V2MmioSnnBridgeDevice,
     pub quantum: V2MmioQuantumDevice,
     pub dataset: Option<V2MmioDatasetDevice>,
+    /// Sprint 388: optional HLS accelerator (tile datapath behind MMIO 41-43).
+    /// Mutually exclusive with `dataset` (same address slots). Not included in
+    /// snapshot/restore — replay bundles for accel programs are deferred.
+    pub accel: Option<crate::tile_cpu::v2_hls_accel::V2MmioHlsAccelDevice>,
 }
 
 impl V2MmioCombinedDevice {
@@ -2095,6 +2114,7 @@ impl V2MmioCombinedDevice {
             snn: V2MmioSnnBridgeDevice::small(),
             quantum: V2MmioQuantumDevice::new(rng_seed.wrapping_add(157)),
             dataset: None,
+            accel: None,
         }
     }
 
@@ -2107,6 +2127,7 @@ impl V2MmioCombinedDevice {
             snn,
             quantum: V2MmioQuantumDevice::new(rng_seed.wrapping_add(157)),
             dataset: None,
+            accel: None,
         }
     }
 
@@ -2119,6 +2140,7 @@ impl V2MmioCombinedDevice {
             snn: V2MmioSnnBridgeDevice::small(),
             quantum: V2MmioQuantumDevice::new(rng_seed.wrapping_add(157)),
             dataset: Some(dataset),
+            accel: None,
         }
     }
 
@@ -2135,6 +2157,25 @@ impl V2MmioCombinedDevice {
             snn,
             quantum: V2MmioQuantumDevice::new(rng_seed.wrapping_add(157)),
             dataset: Some(dataset),
+            accel: None,
+        }
+    }
+
+    /// Sprint 388: create with an HLS accelerator (tile datapath behind MMIO 41-43).
+    /// The accelerator occupies the dataset device's address slots, so this
+    /// configuration has no dataset device.
+    pub fn with_accel(
+        rng_seed: u64,
+        accel: crate::tile_cpu::v2_hls_accel::V2MmioHlsAccelDevice,
+    ) -> Self {
+        Self {
+            ref_pack: V2MmioRefDevicePack::new(rng_seed),
+            display: V2MmioDisplayDevice::new(),
+            math: V2MmioMathDevice::new(),
+            snn: V2MmioSnnBridgeDevice::small(),
+            quantum: V2MmioQuantumDevice::new(rng_seed.wrapping_add(157)),
+            dataset: None,
+            accel: Some(accel),
         }
     }
 }
@@ -2142,6 +2183,9 @@ impl V2MmioCombinedDevice {
 impl V2MmioDevice for V2MmioCombinedDevice {
     fn read(&self, addr: u8) -> u64 {
         match addr {
+            MMIO_ACCEL_ARG_SELECT..=MMIO_ACCEL_RESULT if self.accel.is_some() => {
+                self.accel.as_ref().unwrap().read(addr)
+            }
             MMIO_DATASET_CMD..=MMIO_DATASET_STATUS if self.dataset.is_some() => {
                 self.dataset.as_ref().unwrap().read(addr)
             }
@@ -2155,6 +2199,9 @@ impl V2MmioDevice for V2MmioCombinedDevice {
 
     fn write(&self, addr: u8, value: u64) {
         match addr {
+            MMIO_ACCEL_ARG_SELECT..=MMIO_ACCEL_RESULT if self.accel.is_some() => {
+                self.accel.as_ref().unwrap().write(addr, value)
+            }
             MMIO_DATASET_CMD..=MMIO_DATASET_STATUS if self.dataset.is_some() => {
                 self.dataset.as_ref().unwrap().write(addr, value)
             }

@@ -19134,7 +19134,7 @@ fn test_v2_s268_compact_eval_parity() {
 
     let snapshot: Vec<u64> = scope_tiles
         .iter()
-        .map(|&idx| sim.tilemap.tiles[idx].logic.load(Ordering::Relaxed))
+        .map(|&idx| sim.tilemap.value(idx))
         .collect();
 
     // Seed: mark all pipeline tiles dirty.
@@ -19146,14 +19146,12 @@ fn test_v2_s268_compact_eval_parity() {
     let _ = sim.propagate_levelized(&cpu.pipeline_eval_order);
     let levelized_values: Vec<u64> = scope_tiles
         .iter()
-        .map(|&idx| sim.tilemap.tiles[idx].logic.load(Ordering::Relaxed))
+        .map(|&idx| sim.tilemap.value(idx))
         .collect();
 
     // Restore snapshot, mark dirty again.
     for (i, &idx) in scope_tiles.iter().enumerate() {
-        sim.tilemap.tiles[idx]
-            .logic
-            .store(snapshot[i], Ordering::Relaxed);
+        sim.tilemap.set_value(idx, snapshot[i]);
         sim.dirty.mark_dirty(idx);
     }
 
@@ -19161,7 +19159,7 @@ fn test_v2_s268_compact_eval_parity() {
     let _ = sim.propagate_compact(&cpu.pipeline_compact_ops, &cpu.pipeline_compact_wvia);
     let compact_values: Vec<u64> = scope_tiles
         .iter()
-        .map(|&idx| sim.tilemap.tiles[idx].logic.load(Ordering::Relaxed))
+        .map(|&idx| sim.tilemap.value(idx))
         .collect();
 
     // Compare.
@@ -19550,7 +19548,7 @@ fn test_v2_s281_branch_dirty_residue_parity() {
     let tile_snap: Vec<(usize, u64)> = cpu
         .branch_eval_order
         .iter()
-        .map(|&idx| (idx, sim.tilemap.tiles[idx].logic.load(Ordering::Relaxed)))
+        .map(|&idx| (idx, sim.tilemap.value(idx)))
         .collect();
     let _dirty_snap: Vec<u64> = sim.dirty.segments.iter().map(|c| c.get()).collect();
 
@@ -19567,13 +19565,13 @@ fn test_v2_s281_branch_dirty_residue_parity() {
     let ref_values: Vec<u64> = cpu
         .branch_eval_order
         .iter()
-        .map(|&idx| sim.tilemap.tiles[idx].logic.load(Ordering::Relaxed))
+        .map(|&idx| sim.tilemap.value(idx))
         .collect();
     let ref_dirty: Vec<u64> = sim.dirty.segments.iter().map(|c| c.get()).collect();
 
     // --- Restore state ---
     for &(idx, val) in &tile_snap {
-        sim.tilemap.tiles[idx].logic.store(val, Ordering::Relaxed);
+        sim.tilemap.set_value(idx, val);
     }
     for (i, c) in sim.dirty.segments.iter().enumerate() {
         c.set(dirty_seeded[i]);
@@ -19584,7 +19582,7 @@ fn test_v2_s281_branch_dirty_residue_parity() {
     let sched_values: Vec<u64> = cpu
         .branch_eval_order
         .iter()
-        .map(|&idx| sim.tilemap.tiles[idx].logic.load(Ordering::Relaxed))
+        .map(|&idx| sim.tilemap.value(idx))
         .collect();
     let sched_dirty: Vec<u64> = sim.dirty.segments.iter().map(|c| c.get()).collect();
 
@@ -19694,9 +19692,7 @@ fn test_v2_s281_clock_cascade_parity() {
     // --- Snapshot ---
     // Save ALL tile values (clock scope is large, ~7k tiles) + dirty + clock state.
     let tile_count = sim.tilemap.tiles.len();
-    let tile_snap: Vec<u64> = (0..tile_count)
-        .map(|idx| sim.tilemap.tiles[idx].logic.load(Ordering::Relaxed))
-        .collect();
+    let tile_snap: Vec<u64> = (0..tile_count).map(|idx| sim.tilemap.value(idx)).collect();
     let dirty_snap: Vec<u64> = sim.dirty.segments.iter().map(|c| c.get()).collect();
     let clock_prev = sim.prev_clock;
     let clock_cur = sim.global_clock;
@@ -19713,14 +19709,12 @@ fn test_v2_s281_clock_cascade_parity() {
     let compare_indices: Vec<usize> = schedule.ops.iter().map(|op| op.idx as usize).collect();
     let ref_values: Vec<u64> = compare_indices
         .iter()
-        .map(|&idx| sim.tilemap.tiles[idx].logic.load(Ordering::Relaxed))
+        .map(|&idx| sim.tilemap.value(idx))
         .collect();
 
     // --- Restore ---
     for idx in 0..tile_count {
-        sim.tilemap.tiles[idx]
-            .logic
-            .store(tile_snap[idx], Ordering::Relaxed);
+        sim.tilemap.set_value(idx, tile_snap[idx]);
     }
     for (i, c) in sim.dirty.segments.iter().enumerate() {
         c.set(dirty_snap[i]);
@@ -19733,7 +19727,7 @@ fn test_v2_s281_clock_cascade_parity() {
     let sched_stats = sim.tick_clock_edge_scheduled(&cpu.clock_scope_mask, clock_cache, schedule);
     let sched_values: Vec<u64> = compare_indices
         .iter()
-        .map(|&idx| sim.tilemap.tiles[idx].logic.load(Ordering::Relaxed))
+        .map(|&idx| sim.tilemap.value(idx))
         .collect();
 
     // --- Compare ---
@@ -19824,7 +19818,7 @@ fn test_v2_s282_branch_multicycle_dirty_parity() {
         let tile_snap: Vec<(usize, u64)> = cpu
             .branch_eval_order
             .iter()
-            .map(|&idx| (idx, sim.tilemap.tiles[idx].logic.load(Ordering::Relaxed)))
+            .map(|&idx| (idx, sim.tilemap.value(idx)))
             .collect();
         let dirty_seeded: Vec<u64> = sim.dirty.segments.iter().map(|c| c.get()).collect();
 
@@ -19834,7 +19828,7 @@ fn test_v2_s282_branch_multicycle_dirty_parity() {
 
         // Restore.
         for &(idx, val) in &tile_snap {
-            sim.tilemap.tiles[idx].logic.store(val, Ordering::Relaxed);
+            sim.tilemap.set_value(idx, val);
         }
         for (i, c) in sim.dirty.segments.iter().enumerate() {
             c.set(dirty_seeded[i]);
@@ -19846,7 +19840,7 @@ fn test_v2_s282_branch_multicycle_dirty_parity() {
 
         // Restore for next cycle (use compact_dirty's result as authoritative).
         for &(idx, val) in &tile_snap {
-            sim.tilemap.tiles[idx].logic.store(val, Ordering::Relaxed);
+            sim.tilemap.set_value(idx, val);
         }
         for (i, c) in sim.dirty.segments.iter().enumerate() {
             c.set(dirty_seeded[i]);
@@ -20000,7 +19994,7 @@ fn test_v2_s284_jit_cone_parity() {
         .collect();
     let snap: Vec<u64> = cone_tiles
         .iter()
-        .map(|&idx| sim.tilemap.tiles[idx].logic.load(Ordering::Relaxed))
+        .map(|&idx| sim.tilemap.value(idx))
         .collect();
     let dirty_snap: Vec<u64> = sim.dirty.segments.iter().map(|c| c.get()).collect();
 
@@ -20008,14 +20002,12 @@ fn test_v2_s284_jit_cone_parity() {
     let (jd, je, js) = sim.propagate_jit_cone(jit);
     let jit_vals: Vec<u64> = cone_tiles
         .iter()
-        .map(|&idx| sim.tilemap.tiles[idx].logic.load(Ordering::Relaxed))
+        .map(|&idx| sim.tilemap.value(idx))
         .collect();
 
     // Restore.
     for (i, &idx) in cone_tiles.iter().enumerate() {
-        sim.tilemap.tiles[idx]
-            .logic
-            .store(snap[i], Ordering::Relaxed);
+        sim.tilemap.set_value(idx, snap[i]);
     }
     for (i, c) in sim.dirty.segments.iter().enumerate() {
         c.set(dirty_snap[i]);
@@ -20029,7 +20021,7 @@ fn test_v2_s284_jit_cone_parity() {
     );
     let interp_vals: Vec<u64> = cone_tiles
         .iter()
-        .map(|&idx| sim.tilemap.tiles[idx].logic.load(Ordering::Relaxed))
+        .map(|&idx| sim.tilemap.value(idx))
         .collect();
 
     // Compare.
@@ -23769,6 +23761,7 @@ fn test_v2_s313_settle_reason_histogram() {
 /// Runs each benchmark twice: once with blockskip (default), once with no-dirty.
 /// Reports Stage F and total cycle time for each.
 #[test]
+#[ignore = "slow (>100s tile sim); run via: cargo nextest run --profile nightly --run-ignored all"]
 fn test_v2_s312_no_dirty_settle_profile() {
     use std::time::Instant;
 
@@ -23966,6 +23959,7 @@ fn test_v2_s309_segment_sharing_stats() {
 /// Sprint 308: Block-level clean-skip A/B profile.
 /// Compares blockskip (default) vs monolithic compact_dirty on all benchmarks.
 #[test]
+#[ignore = "slow (>100s tile sim); run via: cargo nextest run --profile nightly --run-ignored all"]
 fn test_v2_s308_blockskip_profile() {
     use std::time::Instant;
 
@@ -26223,6 +26217,7 @@ fn test_v2_s326_pruned_clock_timing() {
 /// Sprint 322: Pruned live-clock A/B profile.
 /// Warmup profiling → build live clock ops → A/B compare across benchmarks.
 #[test]
+#[ignore = "slow (>100s tile sim); run via: cargo nextest run --profile nightly --run-ignored all"]
 fn test_v2_s322_pruned_clock_profile() {
     use std::time::Instant;
 
@@ -26543,19 +26538,11 @@ fn test_v2_s320_dead_op_measurement() {
         // Snapshot initial values.
         let mut settle_prev: Vec<u64> = settle_ops
             .iter()
-            .map(|op| {
-                sim.tilemap.tiles[op.idx as usize]
-                    .logic
-                    .load(Ordering::Relaxed)
-            })
+            .map(|op| sim.tilemap.value(op.idx as usize))
             .collect();
         let mut clock_prev: Vec<u64> = clock_ops
             .iter()
-            .map(|op| {
-                sim.tilemap.tiles[op.idx as usize]
-                    .logic
-                    .load(Ordering::Relaxed)
-            })
+            .map(|op| sim.tilemap.value(op.idx as usize))
             .collect();
 
         let mut settle_switches = vec![0u32; n_settle];
@@ -26572,9 +26559,7 @@ fn test_v2_s320_dead_op_measurement() {
 
             // Check settle ops.
             for (i, op) in settle_ops.iter().enumerate() {
-                let val = sim.tilemap.tiles[op.idx as usize]
-                    .logic
-                    .load(Ordering::Relaxed);
+                let val = sim.tilemap.value(op.idx as usize);
                 if val != settle_prev[i] {
                     settle_switches[i] += 1;
                 }
@@ -26583,9 +26568,7 @@ fn test_v2_s320_dead_op_measurement() {
 
             // Check clock ops.
             for (i, op) in clock_ops.iter().enumerate() {
-                let val = sim.tilemap.tiles[op.idx as usize]
-                    .logic
-                    .load(Ordering::Relaxed);
+                let val = sim.tilemap.value(op.idx as usize);
                 if val != clock_prev[i] {
                     clock_switches[i] += 1;
                 }
@@ -26705,6 +26688,7 @@ fn test_v2_s320_dead_op_measurement() {
 /// Compares segment-cached blockskip (default) vs monolithic compact_dirty
 /// (block maps cleared) across all 10 golden benchmarks.
 #[test]
+#[ignore = "slow (>100s tile sim); run via: cargo nextest run --profile nightly --run-ignored all"]
 fn test_v2_s319_cached_blockskip_profile() {
     use std::time::Instant;
 

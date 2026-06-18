@@ -112,7 +112,8 @@ pub fn export_default_cellular_player(rt: &CudaRuntime, path: impl AsRef<Path>) 
                 .map_err(|e| logic_fabric_core::cuda::CudaError::InvalidConfig(e.to_string()))?;
         }
     }
-    write(path, html).map_err(|e| logic_fabric_core::cuda::CudaError::InvalidConfig(e.to_string()))?;
+    write(path, html)
+        .map_err(|e| logic_fabric_core::cuda::CudaError::InvalidConfig(e.to_string()))?;
     Ok(())
 }
 

@@ -2,6 +2,9 @@
 
 #[cfg(feature = "perf-bench")]
 use std::sync::atomic::AtomicBool;
+// Sprint 386: tile values are Cell-based now; Ordering remains for the
+// feature-gated quantum/JIT counters only.
+#[allow(unused_imports)]
 use std::sync::atomic::Ordering;
 
 use crate::bus::{BusArbitration, BusConnection, BusDef, BusDirection, BusState};
@@ -20,7 +23,6 @@ use crate::physics::logic_coupling::{
     apply_charge_bias_to_mux, apply_charge_bias_to_zero, apply_physics_coupling,
     calculate_charge_bias, is_charge_bias_affected,
 };
-use crate::tile::Tile;
 use crate::tile_meta::TileType;
 #[cfg(test)]
 use crate::tilemap::TILE_COUNT;
@@ -701,20 +703,14 @@ impl Simulation {
 
     /// Get logic value at (x, y, z) on specified layer
     pub fn get_logic_at_3d(&self, x: usize, y: usize, z: usize) -> u64 {
-        if let Some(t) = self.tilemap.get_tile_3d(x, y, z) {
-            t.logic.load(Ordering::Relaxed)
-        } else {
-            0
-        }
+        self.tilemap.value_at_3d(x, y, z).unwrap_or(0)
     }
 
     /// Set logic value at (x, y, z) on specified layer
     pub fn set_logic_value_3d(&self, x: usize, y: usize, z: usize, value: u64) -> bool {
         if let Some(idx) = self.tilemap.index_3d(x, y, z) {
             if idx < self.tilemap.tiles.len() {
-                self.tilemap.tiles[idx]
-                    .logic
-                    .store(value, Ordering::Relaxed);
+                self.tilemap.set_value(idx, value);
                 return true;
             }
         }
@@ -865,9 +861,7 @@ impl Simulation {
                 self.set_tile(gx, gy, tile_type);
                 if let Some(val) = initial_logic {
                     let tile_idx = gy * self.tilemap.width + gx;
-                    self.tilemap.tiles[tile_idx]
-                        .logic
-                        .store(val, std::sync::atomic::Ordering::Relaxed);
+                    self.tilemap.set_value(tile_idx, val);
                 }
             }
         }
@@ -921,11 +915,7 @@ impl Simulation {
             let inputs: Vec<u64> = comp
                 .input_port_indices
                 .iter()
-                .map(|&idx| {
-                    self.tilemap.tiles[idx]
-                        .logic
-                        .load(std::sync::atomic::Ordering::Relaxed)
-                })
+                .map(|&idx| self.tilemap.value(idx))
                 .collect();
 
             // Call the behavioral function
@@ -1074,14 +1064,10 @@ impl Simulation {
                 }
 
                 let bus_val = bus_state.data[conn.word_offset].get();
-                let current = self.tilemap.tiles[conn.tile_idx]
-                    .logic
-                    .load(Ordering::Relaxed);
+                let current = self.tilemap.value(conn.tile_idx);
 
                 if bus_val != current {
-                    self.tilemap.tiles[conn.tile_idx]
-                        .logic
-                        .store(bus_val, Ordering::Relaxed);
+                    self.tilemap.set_value(conn.tile_idx, bus_val);
                     // Mark neighbors dirty so they pick up the new value
                     let n = &self.neighbors4[conn.tile_idx];
                     for &ni in n.iter() {
@@ -1273,11 +1259,7 @@ impl Simulation {
         for y in y0..y0 + height {
             let mut row = Vec::with_capacity(width);
             for x in x0..x0 + width {
-                let val = self
-                    .tilemap
-                    .get_tile(x, y)
-                    .map(|t| t.logic.load(Ordering::Relaxed))
-                    .unwrap_or(0);
+                let val = self.tilemap.value_at(x, y).unwrap_or(0);
                 row.push(val);
             }
             out.push(row);
@@ -1319,17 +1301,13 @@ impl Simulation {
     }
 
     pub fn get_logic_at(&self, x: usize, y: usize) -> u64 {
-        if let Some(t) = self.tilemap.get_tile(x, y) {
-            t.logic.load(Ordering::Relaxed)
-        } else {
-            0
-        }
+        self.tilemap.value_at(x, y).unwrap_or(0)
     }
 
     /// Get logic value by tile index (for fast access in tile_cpu)
     pub fn get_logic_value_by_idx(&self, idx: usize) -> u64 {
         if idx < self.tilemap.tiles.len() {
-            self.tilemap.tiles[idx].logic.load(Ordering::Relaxed)
+            self.tilemap.value(idx)
         } else {
             0
         }
@@ -1338,9 +1316,7 @@ impl Simulation {
     /// Set logic value by tile index (for fast access in tile_cpu)
     pub fn set_logic_value_by_idx(&self, idx: usize, value: u64) {
         if idx < self.tilemap.tiles.len() {
-            self.tilemap.tiles[idx]
-                .logic
-                .store(value, Ordering::Relaxed);
+            self.tilemap.set_value(idx, value);
         }
     }
 
@@ -1349,11 +1325,9 @@ impl Simulation {
     #[inline]
     pub fn set_value_and_mark_if_changed(&self, idx: usize, value: u64) -> bool {
         if idx < self.tilemap.tiles.len() {
-            let current = self.tilemap.tiles[idx].logic.load(Ordering::Relaxed);
+            let current = self.tilemap.value(idx);
             if current != value {
-                self.tilemap.tiles[idx]
-                    .logic
-                    .store(value, Ordering::Relaxed);
+                self.tilemap.set_value(idx, value);
                 self.dirty.mark_dirty(idx);
                 return true;
             }
@@ -1370,19 +1344,12 @@ impl Simulation {
 
     #[cfg(test)]
     pub fn write_logic(&self, x: usize, y: usize, value: u64) {
-        if let Some(t) = self.tilemap.get_tile(x, y) {
-            t.logic.store(value, Ordering::Relaxed);
-        }
+        self.tilemap.set_value_at(x, y, value);
     }
 
     // Public, safe logic writer for CLI use. Returns false if OOB.
     pub fn set_logic_value(&self, x: usize, y: usize, value: u64) -> bool {
-        if let Some(t) = self.tilemap.get_tile(x, y) {
-            t.logic.store(value, Ordering::Relaxed);
-            true
-        } else {
-            false
-        }
+        self.tilemap.set_value_at(x, y, value)
     }
 
     // Draw a wire path between two points.
@@ -1639,8 +1606,8 @@ impl Simulation {
         }
 
         // Mark all tiles with non-zero values as dirty for initial propagation
-        for (idx, tile) in self.tilemap.tiles.iter().enumerate() {
-            if tile.logic.load(std::sync::atomic::Ordering::Relaxed) != 0 {
+        for idx in 0..self.tilemap.tile_count() {
+            if self.tilemap.value(idx) != 0 {
                 self.dirty.mark_dirty(idx);
             }
         }
@@ -2347,8 +2314,47 @@ pub const COP_WIRE_H: u8 = 23;
 pub const COP_WIRE_V: u8 = 24;
 pub const COP_RAM: u8 = 25;
 pub const COP_GENERIC: u8 = 26; // fallback: call eval_tile
+/// ThresholdVia as a first-class compact op (GPU-bridge foundation, 2026-06-13).
+/// `output = if popcount(4 in-plane neighbors != 0) >= tile_threshold[idx] { source } else { 0 }`.
+/// The cross-layer source is stored in `in0`; the 4 in-plane inputs are read from
+/// `neighbors4[idx]` and the threshold from `tile_threshold[idx]` at eval time
+/// (a 5-input op that does not fit the 3 CompactOp input slots). Previously these
+/// tiles fell through to COP_CONST and were silently frozen on the compact path.
+pub const COP_THRESHOLD_VIA: u8 = 27;
 
 impl Simulation {
+    /// Evaluate a ThresholdVia gate on the compact path (COP_THRESHOLD_VIA).
+    ///
+    /// Mirrors the `eval_tile` ThresholdVia semantics exactly: count the in-plane
+    /// 4-neighbors (left/right/up/down) whose value is non-zero; if that count
+    /// meets the per-tile threshold, pass the cross-layer `source` through, else 0.
+    /// `source` is the already-loaded value of the via's cross-layer source tile
+    /// (op.in0), so out-of-bounds sources (in0 == u32::MAX ⇒ source == 0) yield 0,
+    /// matching eval_tile's boundary behavior. `neighbors4[idx]` carries exactly the
+    /// same per-layer boundary guards (u32::MAX at the grid edge) as eval_tile uses.
+    #[inline]
+    fn threshold_via_gate(&self, idx: usize, source: u64) -> u64 {
+        let n = self.neighbors4[idx];
+        let mut active: u8 = 0;
+        if n[0] != u32::MAX && self.tilemap.value(n[0] as usize) != 0 {
+            active += 1;
+        }
+        if n[1] != u32::MAX && self.tilemap.value(n[1] as usize) != 0 {
+            active += 1;
+        }
+        if n[2] != u32::MAX && self.tilemap.value(n[2] as usize) != 0 {
+            active += 1;
+        }
+        if n[3] != u32::MAX && self.tilemap.value(n[3] as usize) != 0 {
+            active += 1;
+        }
+        if active >= self.tile_threshold[idx] {
+            source
+        } else {
+            0
+        }
+    }
+
     /// Sprint 267: Build compact op array from eval_order.
     /// Each tile is pre-decoded into a CompactOp with resolved input indices.
     pub fn build_compact_ops(
@@ -2497,6 +2503,26 @@ impl Simulation {
                     (COP_WVIA, source, u32::MAX, u32::MAX)
                 }
 
+                // Threshold Via tiles (Sprint 183): popcount of the 4 in-plane
+                // neighbors >= threshold gates the cross-layer source. Source goes
+                // in in0; the 4 neighbor inputs and the threshold are read at eval
+                // time from neighbors4[idx] / tile_threshold[idx] (5 inputs do not
+                // fit the 3 CompactOp slots — see threshold_via_gate / COP_THRESHOLD_VIA).
+                TileType::ThresholdViaUp | TileType::ThresholdViaDown => {
+                    let source = if tt == TileType::ThresholdViaUp {
+                        if idx + layer_size < tile_count {
+                            (idx + layer_size) as u32
+                        } else {
+                            u32::MAX
+                        }
+                    } else if idx >= layer_size {
+                        (idx - layer_size) as u32
+                    } else {
+                        u32::MAX
+                    };
+                    (COP_THRESHOLD_VIA, source, u32::MAX, u32::MAX)
+                }
+
                 // Fallback: treat as const (will be evaluated by generic path)
                 _ => (COP_CONST, u32::MAX, u32::MAX, u32::MAX),
             };
@@ -2527,8 +2553,10 @@ impl Simulation {
         let buf_cap = jit.op_count;
         let mut changed_buf: Vec<u32> = vec![0u32; buf_cap];
 
-        // Get raw pointer to tiles array.
-        let tiles_ptr = self.tilemap.tiles.as_mut_ptr() as *mut u8;
+        // Get raw pointer to the SoA value array (Sprint 385 relocation).
+        // Sprint 386: the JIT walks the single-value array; jit_values_ptr
+        // asserts we are not in lane mode (the fabric disables JIT).
+        let tiles_ptr = self.tilemap.jit_values_ptr();
         let changed_ptr = changed_buf.as_mut_ptr();
 
         // Call JIT function.
@@ -2563,7 +2591,7 @@ impl Simulation {
         let buf_cap = jit.op_count;
         let mut changed_buf = std::mem::take(&mut self.dirty_batch_buf);
         changed_buf.resize(buf_cap, 0);
-        let tiles_ptr = self.tilemap.tiles.as_mut_ptr() as *mut u8;
+        let tiles_ptr = self.tilemap.jit_values_ptr();
         let changed_ptr = changed_buf.as_mut_ptr();
 
         // Sprint 338: Single-pass.
@@ -2642,7 +2670,7 @@ impl Simulation {
         let buf_cap = jit.op_count;
         let mut changed_buf = std::mem::take(&mut self.dirty_batch_buf);
         changed_buf.resize(buf_cap, 0);
-        let tiles_ptr = self.tilemap.tiles.as_mut_ptr() as *mut u8;
+        let tiles_ptr = self.tilemap.jit_values_ptr();
         let changed_ptr = changed_buf.as_mut_ptr();
 
         let mut total_evaluated: u32 = 0;
@@ -2806,7 +2834,6 @@ impl Simulation {
     /// if re-evaluated right now. Does NOT modify any tile values.
     /// A return of 0 proves single-pass convergence for the cone.
     pub fn count_cone_residual_changes(&self, ops: &[CompactOp]) -> u32 {
-        use std::sync::atomic::Ordering;
         let mut residual = 0u32;
         for op in ops {
             if op.op == COP_CONST {
@@ -2817,13 +2844,13 @@ impl Simulation {
                 if i == u32::MAX {
                     0
                 } else {
-                    self.tilemap.tiles[i as usize].logic.load(Ordering::Relaxed)
+                    self.tilemap.value(i as usize)
                 }
             };
             let v0 = ld(op.in0);
             let v1 = ld(op.in1);
             let v2 = ld(op.in2);
-            let current = self.tilemap.tiles[idx].logic.load(Ordering::Relaxed);
+            let current = self.tilemap.value(idx);
             let result = match op.op {
                 COP_WIRE_R | COP_VIA => v0,
                 COP_WIRE_L => v1,
@@ -2879,7 +2906,6 @@ impl Simulation {
         wvia_params: &[(usize, u8, u64)],
         cone_set: &[u64],
     ) -> (u32, u32, u32) {
-        use std::sync::atomic::Ordering;
         let mut total_switched = 0u32;
         let mut wvia_idx = 0usize;
 
@@ -2897,13 +2923,13 @@ impl Simulation {
                 if i == u32::MAX {
                     0
                 } else {
-                    self.tilemap.tiles[i as usize].logic.load(Ordering::Relaxed)
+                    self.tilemap.value(i as usize)
                 }
             };
             let v0 = ld(op.in0);
             let v1 = ld(op.in1);
             let v2 = ld(op.in2);
-            let current = self.tilemap.tiles[idx].logic.load(Ordering::Relaxed);
+            let current = self.tilemap.value(idx);
 
             let result = match op.op {
                 COP_WIRE_R | COP_VIA => v0,
@@ -2970,6 +2996,7 @@ impl Simulation {
                         current
                     }
                 }
+                COP_THRESHOLD_VIA => self.threshold_via_gate(idx, v0),
                 _ => {
                     if is_wvia && op.op != COP_WVIA {
                         wvia_idx += 1;
@@ -2979,9 +3006,7 @@ impl Simulation {
             };
 
             if result != current {
-                self.tilemap.tiles[idx]
-                    .logic
-                    .store(result, Ordering::Relaxed);
+                self.tilemap.set_value(idx, result);
                 total_switched += 1;
 
                 // Only mark dirty tiles OUTSIDE the cone (frontier propagation).
@@ -3018,7 +3043,6 @@ impl Simulation {
         frontier_offsets: &[u32],
         frontier_targets: &[u32],
     ) -> (u32, u32, u32) {
-        use std::sync::atomic::Ordering;
         let mut total_switched = 0u32;
         let mut wvia_idx = 0usize;
 
@@ -3036,13 +3060,13 @@ impl Simulation {
                 if i == u32::MAX {
                     0
                 } else {
-                    self.tilemap.tiles[i as usize].logic.load(Ordering::Relaxed)
+                    self.tilemap.value(i as usize)
                 }
             };
             let v0 = ld(op.in0);
             let v1 = ld(op.in1);
             let v2 = ld(op.in2);
-            let current = self.tilemap.tiles[idx].logic.load(Ordering::Relaxed);
+            let current = self.tilemap.value(idx);
 
             let result = match op.op {
                 COP_WIRE_R | COP_VIA => v0,
@@ -3109,6 +3133,7 @@ impl Simulation {
                         current
                     }
                 }
+                COP_THRESHOLD_VIA => self.threshold_via_gate(idx, v0),
                 _ => {
                     if is_wvia && op.op != COP_WVIA {
                         wvia_idx += 1;
@@ -3118,9 +3143,7 @@ impl Simulation {
             };
 
             if result != current {
-                self.tilemap.tiles[idx]
-                    .logic
-                    .store(result, Ordering::Relaxed);
+                self.tilemap.set_value(idx, result);
                 total_switched += 1;
 
                 // Frontier marks from the precomputed table (slot-indexed).
@@ -3147,7 +3170,6 @@ impl Simulation {
         cone_set: &[u64],
         switch_counts: &mut [u32],
     ) -> (u32, u32, u32) {
-        use std::sync::atomic::Ordering;
         let mut total_switched = 0u32;
         let mut wvia_idx = 0usize;
 
@@ -3165,13 +3187,13 @@ impl Simulation {
                 if i == u32::MAX {
                     0
                 } else {
-                    self.tilemap.tiles[i as usize].logic.load(Ordering::Relaxed)
+                    self.tilemap.value(i as usize)
                 }
             };
             let v0 = ld(op.in0);
             let v1 = ld(op.in1);
             let v2 = ld(op.in2);
-            let current = self.tilemap.tiles[idx].logic.load(Ordering::Relaxed);
+            let current = self.tilemap.value(idx);
 
             let result = match op.op {
                 COP_WIRE_R | COP_VIA => v0,
@@ -3238,6 +3260,7 @@ impl Simulation {
                         current
                     }
                 }
+                COP_THRESHOLD_VIA => self.threshold_via_gate(idx, v0),
                 _ => {
                     if is_wvia && op.op != COP_WVIA {
                         wvia_idx += 1;
@@ -3247,9 +3270,7 @@ impl Simulation {
             };
 
             if result != current {
-                self.tilemap.tiles[idx]
-                    .logic
-                    .store(result, Ordering::Relaxed);
+                self.tilemap.set_value(idx, result);
                 total_switched += 1;
                 switch_counts[slot] += 1;
 
@@ -3341,35 +3362,29 @@ impl Simulation {
         ops: &[CompactOp],
         wvia_params: &[(usize, u8, u64)],
     ) -> (u32, u32, u32) {
-        let tiles = &self.tilemap.tiles;
         let mut total_switched: u32 = 0;
         let mut wvia_idx = 0usize;
         // Sprint 268: Track changed tiles for dirty propagation.
         let mut changed_indices: Vec<u32> = Vec::new();
 
-        #[inline(always)]
-        fn ld(tiles: &[crate::tile::Tile], i: u32) -> u64 {
+        // Sprint 386: route through the value accessor (lane-mode aware),
+        // matching the sibling compact-eval functions.
+        let ld = |i: u32| -> u64 {
             if i == u32::MAX {
                 0
             } else {
-                unsafe {
-                    tiles
-                        .get_unchecked(i as usize)
-                        .logic
-                        .load(Ordering::Relaxed)
-                }
+                self.tilemap.value(i as usize)
             }
-        }
+        };
 
         for op in ops {
             if op.op == COP_CONST {
                 continue;
             }
-            let v0 = ld(tiles, op.in0);
-            let v1 = ld(tiles, op.in1);
-            let v2 = ld(tiles, op.in2);
-            let tile = unsafe { tiles.get_unchecked(op.idx as usize) };
-            let current = tile.logic.load(Ordering::Relaxed);
+            let v0 = ld(op.in0);
+            let v1 = ld(op.in1);
+            let v2 = ld(op.in2);
+            let current = self.tilemap.value(op.idx as usize);
 
             let result = match op.op {
                 COP_WIRE_R | COP_VIA => v0,
@@ -3378,7 +3393,7 @@ impl Simulation {
                 COP_WIRE_U => v2,
                 COP_WIRE_H | COP_OR => v0 | v1,
                 COP_WIRE_V => v1 | v2, // v1=DOWN, v2=UP
-                COP_WIRE => v0 | v1 | v2 | ld(tiles, self.neighbors4[op.idx as usize][3]),
+                COP_WIRE => v0 | v1 | v2 | ld(self.neighbors4[op.idx as usize][3]),
                 COP_AND => v0 & v1,
                 COP_XOR => v0 ^ v1,
                 COP_MUX => {
@@ -3436,6 +3451,7 @@ impl Simulation {
                         current
                     }
                 }
+                COP_THRESHOLD_VIA => self.threshold_via_gate(op.idx as usize, v0),
                 COP_GENERIC => {
                     // Handled in second pass below to avoid borrow conflict.
                     continue;
@@ -3444,7 +3460,7 @@ impl Simulation {
             };
 
             if result != current {
-                tile.logic.store(result, Ordering::Relaxed);
+                self.tilemap.set_value(op.idx as usize, result);
                 total_switched += 1;
                 changed_indices.push(op.idx);
             }
@@ -3581,14 +3597,14 @@ impl Simulation {
                     if i == u32::MAX {
                         0
                     } else {
-                        self.tilemap.tiles[i as usize].logic.load(Ordering::Relaxed)
+                        self.tilemap.value(i as usize)
                     }
                 };
 
                 let v0 = ld(op.in0);
                 let v1 = ld(op.in1);
                 let v2 = ld(op.in2);
-                let current = self.tilemap.tiles[idx].logic.load(Ordering::Relaxed);
+                let current = self.tilemap.value(idx);
 
                 let result = match op.op {
                     COP_WIRE_R | COP_VIA => v0,
@@ -3654,13 +3670,12 @@ impl Simulation {
                             current
                         }
                     }
+                    COP_THRESHOLD_VIA => self.threshold_via_gate(idx, v0),
                     _ => continue,
                 };
 
                 if result != current {
-                    self.tilemap.tiles[idx]
-                        .logic
-                        .store(result, Ordering::Relaxed);
+                    self.tilemap.set_value(idx, result);
                     any_changed = true;
                     total_switched += 1;
                     // Flush cache before dirty_dependents (writes to arbitrary segments).
@@ -3827,13 +3842,13 @@ impl Simulation {
                     if i == u32::MAX {
                         0
                     } else {
-                        self.tilemap.tiles[i as usize].logic.load(Ordering::Relaxed)
+                        self.tilemap.value(i as usize)
                     }
                 };
                 let v0 = ld(op.in0);
                 let v1 = ld(op.in1);
                 let v2 = ld(op.in2);
-                let current = self.tilemap.tiles[idx].logic.load(Ordering::Relaxed);
+                let current = self.tilemap.value(idx);
 
                 let result = match op.op {
                     COP_WIRE_R | COP_VIA => v0,
@@ -3899,13 +3914,12 @@ impl Simulation {
                             current
                         }
                     }
+                    COP_THRESHOLD_VIA => self.threshold_via_gate(idx, v0),
                     _ => continue,
                 };
 
                 if result != current {
-                    self.tilemap.tiles[idx]
-                        .logic
-                        .store(result, Ordering::Relaxed);
+                    self.tilemap.set_value(idx, result);
                     if is_backbone {
                         backbone_changed = true;
                     } else {
@@ -3959,11 +3973,7 @@ impl Simulation {
         buf.clear();
         buf.reserve(indices.len());
         for &idx in indices {
-            buf.push(
-                self.tilemap.tiles[idx as usize]
-                    .logic
-                    .load(Ordering::Relaxed),
-            );
+            buf.push(self.tilemap.value(idx as usize));
         }
     }
 
@@ -3971,11 +3981,7 @@ impl Simulation {
     pub fn snapshot_tiles(&self, indices: &[u32]) -> Vec<u64> {
         let mut out = Vec::with_capacity(indices.len());
         for &idx in indices {
-            out.push(
-                self.tilemap.tiles[idx as usize]
-                    .logic
-                    .load(Ordering::Relaxed),
-            );
+            out.push(self.tilemap.value(idx as usize));
         }
         out
     }
@@ -3997,11 +4003,9 @@ impl Simulation {
         for (i, &idx32) in output_indices.iter().enumerate() {
             let idx = idx32 as usize;
             let new_val = snapshot[i];
-            let cur_val = self.tilemap.tiles[idx].logic.load(Ordering::Relaxed);
+            let cur_val = self.tilemap.value(idx);
             if new_val != cur_val {
-                self.tilemap.tiles[idx]
-                    .logic
-                    .store(new_val, Ordering::Relaxed);
+                self.tilemap.set_value(idx, new_val);
                 changed += 1;
                 let nc = self.neighbors4[idx];
                 let tt = self.tile_type_at(idx);
@@ -4110,7 +4114,6 @@ impl Simulation {
         switch_counts: &mut [u32],
         buckets: &mut [u64; 5],
     ) -> (u32, u32, u32) {
-        use std::sync::atomic::Ordering;
         let num_ops = ops.len();
         if num_ops == 0 {
             return (0, 0, 0);
@@ -4260,14 +4263,14 @@ impl Simulation {
                         if i == u32::MAX {
                             0
                         } else {
-                            self.tilemap.tiles[i as usize].logic.load(Ordering::Relaxed)
+                            self.tilemap.value(i as usize)
                         }
                     };
 
                     let v0 = ld(op.in0);
                     let v1 = ld(op.in1);
                     let v2 = ld(op.in2);
-                    let current = self.tilemap.tiles[idx].logic.load(Ordering::Relaxed);
+                    let current = self.tilemap.value(idx);
 
                     let result = match op.op {
                         COP_WIRE_R | COP_VIA => v0,
@@ -4337,9 +4340,7 @@ impl Simulation {
                     };
 
                     if result != current {
-                        self.tilemap.tiles[idx]
-                            .logic
-                            .store(result, Ordering::Relaxed);
+                        self.tilemap.set_value(idx, result);
                         any_changed = true;
                         total_switched += 1;
                         if let Some(c) = switch_counts.get_mut(slot) {
@@ -4403,7 +4404,6 @@ impl Simulation {
         idx_to_slot: &[u32],
         wvia_slot_map: &[u32],
     ) -> (u32, u32, u32) {
-        use std::sync::atomic::Ordering;
         let num_ops = ops.len();
         if num_ops == 0 {
             return (0, 0, 0);
@@ -4622,14 +4622,14 @@ impl Simulation {
                         if i == u32::MAX {
                             0
                         } else {
-                            self.tilemap.tiles[i as usize].logic.load(Ordering::Relaxed)
+                            self.tilemap.value(i as usize)
                         }
                     };
 
                     let v0 = ld(op.in0);
                     let v1 = ld(op.in1);
                     let v2 = ld(op.in2);
-                    let current = self.tilemap.tiles[idx].logic.load(Ordering::Relaxed);
+                    let current = self.tilemap.value(idx);
 
                     let result = match op.op {
                         COP_WIRE_R | COP_VIA => v0,
@@ -4703,9 +4703,7 @@ impl Simulation {
                     };
 
                     if result != current {
-                        self.tilemap.tiles[idx]
-                            .logic
-                            .store(result, Ordering::Relaxed);
+                        self.tilemap.set_value(idx, result);
                         any_changed = true;
                         total_switched += 1;
                         propagate_change!(idx, word_idx, word);
@@ -4754,7 +4752,6 @@ impl Simulation {
         fwd_deps_data: &[u32],
         fwd_deps_offsets: &[u32],
     ) -> (u32, u32, u32) {
-        use std::sync::atomic::Ordering;
         let mut total_evaluated: u32 = 0;
         let mut total_switched: u32 = 0;
         let mut wvia_idx = 0usize;
@@ -4871,13 +4868,13 @@ impl Simulation {
                 if i == u32::MAX {
                     0
                 } else {
-                    self.tilemap.tiles[i as usize].logic.load(Ordering::Relaxed)
+                    self.tilemap.value(i as usize)
                 }
             };
             let v0 = ld(op.in0);
             let v1 = ld(op.in1);
             let v2 = ld(op.in2);
-            let current = self.tilemap.tiles[idx].logic.load(Ordering::Relaxed);
+            let current = self.tilemap.value(idx);
 
             let result = match op.op {
                 COP_WIRE_R | COP_VIA => v0,
@@ -4945,6 +4942,7 @@ impl Simulation {
                         current
                     }
                 }
+                COP_THRESHOLD_VIA => self.threshold_via_gate(idx, v0),
                 _ => {
                     if is_wvia && op.op != COP_WVIA {
                         wvia_idx += 1;
@@ -4954,9 +4952,7 @@ impl Simulation {
             };
 
             if result != current {
-                self.tilemap.tiles[idx]
-                    .logic
-                    .store(result, Ordering::Relaxed);
+                self.tilemap.set_value(idx, result);
                 total_switched += 1;
 
                 // Forward in-scope deps (downstream only).
@@ -5234,7 +5230,6 @@ impl Simulation {
         initial_dirty: &[usize],
         terminal: bool,
     ) -> (u32, u32, u32) {
-        use std::sync::atomic::Ordering;
         let ops = &schedule.ops;
         let num_slots = ops.len();
         if num_slots == 0 {
@@ -5443,14 +5438,14 @@ impl Simulation {
                         if i == u32::MAX {
                             0
                         } else {
-                            self.tilemap.tiles[i as usize].logic.load(Ordering::Relaxed)
+                            self.tilemap.value(i as usize)
                         }
                     };
 
                     let v0 = ld(op.in0);
                     let v1 = ld(op.in1);
                     let v2 = ld(op.in2);
-                    let current = self.tilemap.tiles[idx].logic.load(Ordering::Relaxed);
+                    let current = self.tilemap.value(idx);
 
                     let result = match op.op {
                         COP_WIRE_R | COP_VIA => v0,
@@ -5520,9 +5515,7 @@ impl Simulation {
                     };
 
                     if result != current {
-                        self.tilemap.tiles[idx]
-                            .logic
-                            .store(result, Ordering::Relaxed);
+                        self.tilemap.set_value(idx, result);
                         any_changed = true;
                         total_switched += 1;
                         enqueue_deps!(slot, word_idx, word);
@@ -5590,7 +5583,6 @@ impl Simulation {
         initial_dirty: &[usize],
         terminal: bool,
     ) -> (u32, u32, u32, u64, u64, u32) {
-        use std::sync::atomic::Ordering;
         let ops = &schedule.ops;
         let num_slots = ops.len();
         if num_slots == 0 {
@@ -5771,13 +5763,13 @@ impl Simulation {
                         if i == u32::MAX {
                             0
                         } else {
-                            self.tilemap.tiles[i as usize].logic.load(Ordering::Relaxed)
+                            self.tilemap.value(i as usize)
                         }
                     };
                     let v0 = ld(op.in0);
                     let v1 = ld(op.in1);
                     let v2 = ld(op.in2);
-                    let current = self.tilemap.tiles[idx].logic.load(Ordering::Relaxed);
+                    let current = self.tilemap.value(idx);
 
                     let result = match op.op {
                         COP_WIRE_R | COP_VIA => v0,
@@ -5851,9 +5843,7 @@ impl Simulation {
                     };
 
                     if result != current {
-                        self.tilemap.tiles[idx]
-                            .logic
-                            .store(result, Ordering::Relaxed);
+                        self.tilemap.set_value(idx, result);
                         any_changed = true;
                         total_switched += 1;
                         enqueue_deps!(slot, word_idx, word);
@@ -7086,7 +7076,7 @@ impl Simulation {
     #[inline(always)]
     fn clock_tile_input_changed(&self, idx: usize) -> bool {
         let tt = self.tile_type_at(idx);
-        let current = self.tilemap.tiles[idx].logic.load(Ordering::Relaxed);
+        let current = self.tilemap.value(idx);
         match tt {
             // Register64: captures LEFT on rising edge. Skip if left == current.
             TileType::Register64 => self.load_logic_idx(self.neighbors4[idx][0]) != current,
@@ -7150,14 +7140,13 @@ impl Simulation {
             _ => return (self.eval_tile(idx), 0), // fallback: not a uni wire
         };
 
-        let tile = &self.tilemap.tiles[idx];
-        let current = tile.logic.load(Ordering::Relaxed);
+        let current = self.tilemap.value(idx);
         if new_out == current {
             return (false, 0);
         }
 
         // Head changed — store, record, mark lateral dirty.
-        tile.logic.store(new_out, Ordering::Relaxed);
+        self.tilemap.set_value(idx, new_out);
         if self.record_change_info {
             let neighbors = [
                 if n[0] == u32::MAX {
@@ -7230,14 +7219,13 @@ impl Simulation {
 
         for i in 0..tail_len {
             let member_idx = self.wire_chains[chain_id].tail_members[i] as usize;
-            let tile = &self.tilemap.tiles[member_idx];
-            let current = tile.logic.load(Ordering::Relaxed);
+            let current = self.tilemap.value(member_idx);
 
             if current == value {
                 break; // Quiescence — all downstream also unchanged
             }
 
-            tile.logic.store(value, Ordering::Relaxed);
+            self.tilemap.set_value(member_idx, value);
             last_changed_idx = Some(member_idx);
             switched += 1;
 
@@ -7615,18 +7603,14 @@ impl Simulation {
         }
 
         // Get the PC value (current address)
-        let pc_value = self.tilemap.tiles[pc_tile_idx]
-            .logic
-            .load(Ordering::Relaxed);
+        let pc_value = self.tilemap.value(pc_tile_idx);
 
         // Read the instruction from memory (the PC points to the instruction)
         // In this tile-based CPU, the instruction is typically in a RAM tile
         // For this check, we examine the down neighbor which often holds the fetched instruction
         let n = &self.neighbors4[pc_tile_idx];
         let instruction = if n[3] != u32::MAX {
-            self.tilemap.tiles[n[3] as usize]
-                .logic
-                .load(Ordering::Relaxed)
+            self.tilemap.value(n[3] as usize)
         } else {
             // No down neighbor, check if PC itself contains the instruction encoding
             pc_value
@@ -8207,7 +8191,7 @@ impl Simulation {
                 let layer_size = self.tilemap.layer_size;
                 let target = idx + layer_size;
                 if target < self.tilemap.tiles.len() {
-                    self.tilemap.tiles[target].logic.load(Ordering::Relaxed)
+                    self.tilemap.value(target)
                 } else {
                     0
                 }
@@ -8215,9 +8199,7 @@ impl Simulation {
             TileType::ViaDown => {
                 let layer_size = self.tilemap.layer_size;
                 if idx >= layer_size {
-                    self.tilemap.tiles[idx - layer_size]
-                        .logic
-                        .load(Ordering::Relaxed)
+                    self.tilemap.value(idx - layer_size)
                 } else {
                     0
                 }
@@ -8227,7 +8209,7 @@ impl Simulation {
                 let layer_size = self.tilemap.layer_size;
                 let target = idx + layer_size;
                 if target < self.tilemap.tiles.len() {
-                    let source = self.tilemap.tiles[target].logic.load(Ordering::Relaxed);
+                    let source = self.tilemap.value(target);
                     (source >> self.tile_shift[idx]) & self.tile_mask[idx]
                 } else {
                     0
@@ -8236,9 +8218,7 @@ impl Simulation {
             TileType::WeightedViaDown => {
                 let layer_size = self.tilemap.layer_size;
                 if idx >= layer_size {
-                    let source = self.tilemap.tiles[idx - layer_size]
-                        .logic
-                        .load(Ordering::Relaxed);
+                    let source = self.tilemap.value(idx - layer_size);
                     (source >> self.tile_shift[idx]) & self.tile_mask[idx]
                 } else {
                     0
@@ -8252,24 +8232,22 @@ impl Simulation {
                 if target >= self.tilemap.tiles.len() {
                     0
                 } else {
-                    let source = self.tilemap.tiles[target].logic.load(Ordering::Relaxed);
+                    let source = self.tilemap.value(target);
                     let threshold = self.tile_threshold[idx];
                     let w = self.tilemap.width;
                     let x = idx % w;
                     let y = (idx / w) % self.tilemap.height;
                     let mut active: u8 = 0;
-                    if x > 0 && self.tilemap.tiles[idx - 1].logic.load(Ordering::Relaxed) != 0 {
+                    if x > 0 && self.tilemap.value(idx - 1) != 0 {
                         active += 1;
                     }
-                    if x < w - 1 && self.tilemap.tiles[idx + 1].logic.load(Ordering::Relaxed) != 0 {
+                    if x < w - 1 && self.tilemap.value(idx + 1) != 0 {
                         active += 1;
                     }
-                    if y > 0 && self.tilemap.tiles[idx - w].logic.load(Ordering::Relaxed) != 0 {
+                    if y > 0 && self.tilemap.value(idx - w) != 0 {
                         active += 1;
                     }
-                    if y < self.tilemap.height - 1
-                        && self.tilemap.tiles[idx + w].logic.load(Ordering::Relaxed) != 0
-                    {
+                    if y < self.tilemap.height - 1 && self.tilemap.value(idx + w) != 0 {
                         active += 1;
                     }
                     if active >= threshold { source } else { 0 }
@@ -8280,26 +8258,22 @@ impl Simulation {
                 if idx < layer_size {
                     0
                 } else {
-                    let source = self.tilemap.tiles[idx - layer_size]
-                        .logic
-                        .load(Ordering::Relaxed);
+                    let source = self.tilemap.value(idx - layer_size);
                     let threshold = self.tile_threshold[idx];
                     let w = self.tilemap.width;
                     let x = idx % w;
                     let y = (idx / w) % self.tilemap.height;
                     let mut active: u8 = 0;
-                    if x > 0 && self.tilemap.tiles[idx - 1].logic.load(Ordering::Relaxed) != 0 {
+                    if x > 0 && self.tilemap.value(idx - 1) != 0 {
                         active += 1;
                     }
-                    if x < w - 1 && self.tilemap.tiles[idx + 1].logic.load(Ordering::Relaxed) != 0 {
+                    if x < w - 1 && self.tilemap.value(idx + 1) != 0 {
                         active += 1;
                     }
-                    if y > 0 && self.tilemap.tiles[idx - w].logic.load(Ordering::Relaxed) != 0 {
+                    if y > 0 && self.tilemap.value(idx - w) != 0 {
                         active += 1;
                     }
-                    if y < self.tilemap.height - 1
-                        && self.tilemap.tiles[idx + w].logic.load(Ordering::Relaxed) != 0
-                    {
+                    if y < self.tilemap.height - 1 && self.tilemap.value(idx + w) != 0 {
                         active += 1;
                     }
                     if active >= threshold { source } else { 0 }
@@ -8381,11 +8355,10 @@ impl Simulation {
             if should_update {
                 // SPRINT 20.0: Update QDemo tile output immediately and mark dirty for propagation
                 let new_logic = self.encode_quantum_measurements(i);
-                let tile = &self.tilemap.tiles[tile_idx];
                 // NOTE: Ordering::Relaxed is safe for single-threaded execution.
                 // If tile evaluation is ever parallelized, use Ordering::Release here
                 // and Ordering::Acquire in compute_tile_output() loads.
-                tile.logic.store(new_logic, Ordering::Relaxed);
+                self.tilemap.set_value(tile_idx, new_logic);
                 self.dirty.mark_dirty(tile_idx);
             }
         }
@@ -8430,11 +8403,10 @@ impl Simulation {
             if should_update {
                 // SPRINT 20.0: Update QDemo tile output immediately and mark dirty for propagation
                 let new_logic = self.encode_quantum_measurements(i);
-                let tile = &self.tilemap.tiles[tile_idx];
                 // NOTE: Ordering::Relaxed is safe for single-threaded execution.
                 // If tile evaluation is ever parallelized, use Ordering::Release here
                 // and Ordering::Acquire in compute_tile_output() loads.
-                tile.logic.store(new_logic, Ordering::Relaxed);
+                self.tilemap.set_value(tile_idx, new_logic);
                 self.dirty.mark_dirty(tile_idx);
             }
             gates += 1;
@@ -8563,11 +8535,10 @@ impl Simulation {
             if should_update {
                 // SPRINT 20.0: Update QDemo tile output immediately and mark dirty for propagation
                 let new_logic = self.encode_quantum_measurements(i);
-                let tile = &self.tilemap.tiles[tile_idx];
                 // NOTE: Ordering::Relaxed is safe for single-threaded execution.
                 // If tile evaluation is ever parallelized, use Ordering::Release here
                 // and Ordering::Acquire in compute_tile_output() loads.
-                tile.logic.store(new_logic, Ordering::Relaxed);
+                self.tilemap.set_value(tile_idx, new_logic);
                 self.dirty.mark_dirty(tile_idx);
             }
             gates += 1;
@@ -8613,12 +8584,11 @@ impl Simulation {
         let right = self.load_logic_idx(n[1]);
         let up = self.load_logic_idx(n[2]);
         let down = self.load_logic_idx(n[3]);
-        let tile: &Tile = &self.tilemap.tiles[idx];
-        let current = tile.logic.load(Ordering::Relaxed);
+        let current = self.tilemap.value(idx);
         let tt = self.meta_fast[idx];
         let new_out = self.compute_tile_output_branchless(tt, left, right, up, down, current, idx);
         if new_out != current {
-            tile.logic.store(new_out, Ordering::Relaxed);
+            self.tilemap.set_value(idx, new_out);
             // Directional dirty: skip input direction for unidirectional wires.
             let nc = *n;
             self.dirty_dependents(&nc, idx, tt);
@@ -8649,12 +8619,11 @@ impl Simulation {
         let right = self.load_logic_idx_fast(n[1]);
         let up = self.load_logic_idx_fast(n[2]);
         let down = self.load_logic_idx_fast(n[3]);
-        let tile = unsafe { self.tilemap.tiles.get_unchecked(idx) };
-        let current = tile.logic.load(Ordering::Relaxed);
+        let current = unsafe { self.tilemap.value_unchecked(idx) };
         let tt = unsafe { *self.meta_fast.get_unchecked(idx) };
         let new_out = self.compute_tile_output_branchless(tt, left, right, up, down, current, idx);
         if new_out != current {
-            tile.logic.store(new_out, Ordering::Relaxed);
+            unsafe { self.tilemap.set_value_unchecked(idx, new_out) };
             // Directional dirty: skip input direction for unidirectional wires.
             self.dirty_dependents(&n, idx, tt);
             // Component input propagation: if this tile is a component
@@ -8681,13 +8650,7 @@ impl Simulation {
         } else {
             let idx = idx_u32 as usize;
             // Safety: caller ensures idx is in-bounds
-            unsafe {
-                self.tilemap
-                    .tiles
-                    .get_unchecked(idx)
-                    .logic
-                    .load(Ordering::Relaxed)
-            }
+            unsafe { self.tilemap.value_unchecked(idx) }
         }
     }
 
@@ -9046,7 +9009,7 @@ impl Simulation {
                 let layer_size = self.tilemap.layer_size;
                 let target = idx + layer_size;
                 if target < self.tilemap.tiles.len() {
-                    self.tilemap.tiles[target].logic.load(Ordering::Relaxed)
+                    self.tilemap.value(target)
                 } else {
                     0
                 }
@@ -9054,9 +9017,7 @@ impl Simulation {
             TileType::ViaDown => {
                 let layer_size = self.tilemap.layer_size;
                 if idx >= layer_size {
-                    self.tilemap.tiles[idx - layer_size]
-                        .logic
-                        .load(Ordering::Relaxed)
+                    self.tilemap.value(idx - layer_size)
                 } else {
                     0
                 }
@@ -9066,7 +9027,7 @@ impl Simulation {
                 let layer_size = self.tilemap.layer_size;
                 let target = idx + layer_size;
                 if target < self.tilemap.tiles.len() {
-                    let source = self.tilemap.tiles[target].logic.load(Ordering::Relaxed);
+                    let source = self.tilemap.value(target);
                     (source >> self.tile_shift[idx]) & self.tile_mask[idx]
                 } else {
                     0
@@ -9075,9 +9036,7 @@ impl Simulation {
             TileType::WeightedViaDown => {
                 let layer_size = self.tilemap.layer_size;
                 if idx >= layer_size {
-                    let source = self.tilemap.tiles[idx - layer_size]
-                        .logic
-                        .load(Ordering::Relaxed);
+                    let source = self.tilemap.value(idx - layer_size);
                     (source >> self.tile_shift[idx]) & self.tile_mask[idx]
                 } else {
                     0
@@ -9091,24 +9050,22 @@ impl Simulation {
                 if target >= self.tilemap.tiles.len() {
                     0
                 } else {
-                    let source = self.tilemap.tiles[target].logic.load(Ordering::Relaxed);
+                    let source = self.tilemap.value(target);
                     let threshold = self.tile_threshold[idx];
                     let w = self.tilemap.width;
                     let x = idx % w;
                     let y = (idx / w) % self.tilemap.height;
                     let mut active: u8 = 0;
-                    if x > 0 && self.tilemap.tiles[idx - 1].logic.load(Ordering::Relaxed) != 0 {
+                    if x > 0 && self.tilemap.value(idx - 1) != 0 {
                         active += 1;
                     }
-                    if x < w - 1 && self.tilemap.tiles[idx + 1].logic.load(Ordering::Relaxed) != 0 {
+                    if x < w - 1 && self.tilemap.value(idx + 1) != 0 {
                         active += 1;
                     }
-                    if y > 0 && self.tilemap.tiles[idx - w].logic.load(Ordering::Relaxed) != 0 {
+                    if y > 0 && self.tilemap.value(idx - w) != 0 {
                         active += 1;
                     }
-                    if y < self.tilemap.height - 1
-                        && self.tilemap.tiles[idx + w].logic.load(Ordering::Relaxed) != 0
-                    {
+                    if y < self.tilemap.height - 1 && self.tilemap.value(idx + w) != 0 {
                         active += 1;
                     }
                     if active >= threshold { source } else { 0 }
@@ -9119,26 +9076,22 @@ impl Simulation {
                 if idx < layer_size {
                     0
                 } else {
-                    let source = self.tilemap.tiles[idx - layer_size]
-                        .logic
-                        .load(Ordering::Relaxed);
+                    let source = self.tilemap.value(idx - layer_size);
                     let threshold = self.tile_threshold[idx];
                     let w = self.tilemap.width;
                     let x = idx % w;
                     let y = (idx / w) % self.tilemap.height;
                     let mut active: u8 = 0;
-                    if x > 0 && self.tilemap.tiles[idx - 1].logic.load(Ordering::Relaxed) != 0 {
+                    if x > 0 && self.tilemap.value(idx - 1) != 0 {
                         active += 1;
                     }
-                    if x < w - 1 && self.tilemap.tiles[idx + 1].logic.load(Ordering::Relaxed) != 0 {
+                    if x < w - 1 && self.tilemap.value(idx + 1) != 0 {
                         active += 1;
                     }
-                    if y > 0 && self.tilemap.tiles[idx - w].logic.load(Ordering::Relaxed) != 0 {
+                    if y > 0 && self.tilemap.value(idx - w) != 0 {
                         active += 1;
                     }
-                    if y < self.tilemap.height - 1
-                        && self.tilemap.tiles[idx + w].logic.load(Ordering::Relaxed) != 0
-                    {
+                    if y < self.tilemap.height - 1 && self.tilemap.value(idx + w) != 0 {
                         active += 1;
                     }
                     if active >= threshold { source } else { 0 }
@@ -9232,8 +9185,7 @@ impl Simulation {
         let down = self.load_logic_idx(n[3]);
 
         // Current output
-        let tile: &Tile = &self.tilemap.tiles[idx];
-        let current = tile.logic.load(Ordering::Relaxed);
+        let current = self.tilemap.value(idx);
 
         let new_out = self.compute_tile_output(tt, left, right, up, down, current, idx);
 
@@ -9252,7 +9204,7 @@ impl Simulation {
         );
 
         if new_out != current {
-            tile.logic.store(new_out, Ordering::Relaxed);
+            self.tilemap.set_value(idx, new_out);
             if self.record_change_info {
                 let neighbors = [
                     if n[0] == u32::MAX {
@@ -9326,10 +9278,9 @@ impl Simulation {
             _ => unreachable!(),
         };
 
-        let tile = &self.tilemap.tiles[idx];
-        let current = tile.logic.load(Ordering::Relaxed);
+        let current = self.tilemap.value(idx);
         if new_out != current {
-            tile.logic.store(new_out, Ordering::Relaxed);
+            self.tilemap.set_value(idx, new_out);
             if self.record_change_info {
                 let neighbors = [
                     if n[0] == u32::MAX {
@@ -9500,8 +9451,7 @@ impl Simulation {
         let down = self.load_logic_idx(n[3]);
 
         // Current output
-        let tile: &Tile = &self.tilemap.tiles[idx];
-        let current = tile.logic.load(Ordering::Relaxed);
+        let current = self.tilemap.value(idx);
         let tt = self.tile_type_at(idx);
 
         // Get physics values from snapshot
@@ -9547,7 +9497,7 @@ impl Simulation {
         );
 
         if new_out != current {
-            tile.logic.store(new_out, Ordering::Relaxed);
+            self.tilemap.set_value(idx, new_out);
             if self.record_change_info {
                 let neighbors = [
                     if n[0] == u32::MAX {
@@ -9683,9 +9633,7 @@ impl Simulation {
         if idx_u32 == u32::MAX {
             0
         } else {
-            self.tilemap.tiles[idx_u32 as usize]
-                .logic
-                .load(Ordering::Relaxed)
+            self.tilemap.value(idx_u32 as usize)
         }
     }
 
@@ -9720,13 +9668,12 @@ impl Simulation {
             let right = self.load_logic_idx(n[1]);
             let up = self.load_logic_idx(n[2]);
             let down = self.load_logic_idx(n[3]);
-            let tile: &Tile = &self.tilemap.tiles[idx];
-            let current = tile.logic.load(Ordering::Relaxed);
+            let current = self.tilemap.value(idx);
             let tt = self.tile_type_at(idx);
             let new_out = self.compute_tile_output(tt, left, right, up, down, current, idx);
             eval_count = eval_count.saturating_add(1);
             if new_out != current {
-                tile.logic.store(new_out, Ordering::Relaxed);
+                self.tilemap.set_value(idx, new_out);
                 change_count = change_count.saturating_add(1);
             }
         }
@@ -9747,13 +9694,12 @@ impl Simulation {
             let right = self.load_logic_idx(n[1]);
             let up = self.load_logic_idx(n[2]);
             let down = self.load_logic_idx(n[3]);
-            let tile: &Tile = &self.tilemap.tiles[idx];
-            let current = tile.logic.load(Ordering::Relaxed);
+            let current = self.tilemap.value(idx);
             let tt = self.tile_type_at(idx);
             let new_out = self.compute_tile_output(tt, left, right, up, down, current, idx);
             eval_count = eval_count.saturating_add(1);
             if new_out != current {
-                tile.logic.store(new_out, Ordering::Relaxed);
+                self.tilemap.set_value(idx, new_out);
                 change_count = change_count.saturating_add(1);
             }
         }
@@ -10141,7 +10087,7 @@ impl Simulation {
         for y in 0..h {
             for x in 0..w {
                 let idx = y * w + x;
-                let val = self.tilemap.tiles[idx].logic.load(Ordering::Relaxed);
+                let val = self.tilemap.value(idx);
                 if val == 0 {
                     continue;
                 }
@@ -10200,8 +10146,7 @@ impl Simulation {
         for y in 0..h {
             for x in 0..w {
                 let idx = y * w + x;
-                let tile = &self.tilemap.tiles[idx];
-                let val = tile.logic.load(Ordering::Relaxed);
+                let val = self.tilemap.value(idx);
                 if val == 0 {
                     continue;
                 }
@@ -10212,7 +10157,7 @@ impl Simulation {
                 let mut isolated = true;
                 for ni in neighbors.into_iter().flatten() {
                     if let Some(t) = self.tilemap.tiles.get(ni) {
-                        let nlogic = t.logic.load(Ordering::Relaxed);
+                        let nlogic = self.tilemap.value(ni);
                         if nlogic != 0 || !matches!(t.meta.tile_type, TileType::Wire) {
                             isolated = false;
                             break;
@@ -10437,9 +10382,14 @@ impl Clone for Simulation {
         );
         for (dst, src) in tilemap.tiles.iter_mut().zip(self.tilemap.tiles.iter()) {
             dst.meta = src.meta;
-            let v = src.logic.load(Ordering::Relaxed);
-            dst.logic.store(v, Ordering::Relaxed);
         }
+        // Sprint 386: clone is only supported in normal (stride-1) mode — the
+        // SIMT fabric clones per-lane CPUs, never a lane-mode sim.
+        assert!(
+            !self.tilemap.lane_mode_active(),
+            "Simulation::clone in lane mode is unsupported"
+        );
+        tilemap.copy_values_from(&self.tilemap);
 
         let dirty = DirtyBitset::new(self.tilemap.tile_count());
         for (dst, src) in dirty.segments.iter().zip(self.dirty.segments.iter()) {
@@ -10581,36 +10531,19 @@ mod tests {
     fn simulation_clone_copies_and_detaches_fields() {
         let mut sim = Simulation::new();
         sim.set_fields_for_test(1, 2, 3);
-        if let Some(t) = sim.tilemap.get_tile(0, 0) {
-            t.logic.store(0xABCD, Ordering::Relaxed);
-        }
+        sim.tilemap.set_value_at(0, 0, 0xABCD);
         let mut cloned = sim.clone();
         assert_eq!(cloned.get_logic_field_for_test(0, 0), 1);
         assert_eq!(cloned.get_power_field_for_test(0, 0), 2);
         assert_eq!(cloned.get_clock_field_for_test(0, 0), 3);
-        let cloned_tile_val = cloned
-            .tilemap
-            .get_tile(0, 0)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let cloned_tile_val = cloned.tilemap.value_at(0, 0).unwrap();
         assert_eq!(cloned_tile_val, 0xABCD);
 
         cloned.set_fields_for_test(9, 9, 9);
-        cloned
-            .tilemap
-            .get_tile(0, 0)
-            .unwrap()
-            .logic
-            .store(0xFFFF, Ordering::Relaxed);
+        cloned.tilemap.set_value_at(0, 0, 0xFFFF);
 
         assert_eq!(sim.get_logic_field_for_test(0, 0), 1);
-        let original_tile_val = sim
-            .tilemap
-            .get_tile(0, 0)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let original_tile_val = sim.tilemap.value_at(0, 0).unwrap();
         assert_eq!(original_tile_val, 0xABCD);
     }
 
@@ -10743,12 +10676,7 @@ mod tests {
         let dirty_before: Vec<u64> = sim.dirty.segments.iter().map(|w| w.get()).collect();
         let clock_before = (sim.global_clock, sim.prev_clock);
         let region_before = sim.region_at(1, 1);
-        let logic_before = sim
-            .tilemap
-            .get_tile(2, 2)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let logic_before = sim.tilemap.value_at(2, 2).unwrap();
 
         let _ = sim.check_fanout_bounds(4);
         let _ = sim.check_unclocked_registers();
@@ -10757,12 +10685,7 @@ mod tests {
         let dirty_after: Vec<u64> = sim.dirty.segments.iter().map(|w| w.get()).collect();
         let clock_after = (sim.global_clock, sim.prev_clock);
         let region_after = sim.region_at(1, 1);
-        let logic_after = sim
-            .tilemap
-            .get_tile(2, 2)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let logic_after = sim.tilemap.value_at(2, 2).unwrap();
 
         assert_eq!(dirty_before, dirty_after);
         assert_eq!(clock_before, clock_after);
@@ -10905,8 +10828,7 @@ mod tests {
         assert_eq!(q0, q1, "Bell state qubits should be correlated");
 
         // Verify quantum tile outputs measurement results to classical logic
-        let tile = sim.tilemap.get_tile(10, 10).unwrap();
-        let logic_value = tile.logic.load(Ordering::Relaxed);
+        let logic_value = sim.tilemap.value_at(10, 10).unwrap();
 
         // Bit encoding: bit N = qubit N measurement
         let bit0 = (logic_value & 1) != 0;
@@ -10944,8 +10866,7 @@ mod tests {
         sim.tick();
 
         // QDemo tile should output bit 0 = 1
-        let qdemo_tile = sim.tilemap.get_tile(10, 10).unwrap();
-        let qdemo_logic = qdemo_tile.logic.load(Ordering::Relaxed);
+        let qdemo_logic = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(
             qdemo_logic & 1,
             1,
@@ -10963,8 +10884,7 @@ mod tests {
         // Wire tile should propagate the signal - we need an evaluation pass
         // Since we marked it dirty, we just need to eval once
         sim.eval_at(11, 10);
-        let wire_tile = sim.tilemap.get_tile(11, 10).unwrap();
-        let wire_logic = wire_tile.logic.load(Ordering::Relaxed);
+        let wire_logic = sim.tilemap.value_at(11, 10).unwrap();
         assert_ne!(wire_logic, 0, "Wire should have received signal from QDemo");
     }
 
@@ -10983,8 +10903,7 @@ mod tests {
         sim.tick();
 
         // Without measurement, tile should output 0
-        let tile = sim.tilemap.get_tile(10, 10).unwrap();
-        let logic_value = tile.logic.load(Ordering::Relaxed);
+        let logic_value = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(logic_value, 0, "Unmeasured qubits should output 0");
     }
 
@@ -10999,18 +10918,10 @@ mod tests {
         sim.set_tile(10, 10, tile_type);
         // Left input at (9, 10)
         sim.set_tile(9, 10, TileType::Wire);
-        sim.tilemap
-            .get_tile(9, 10)
-            .unwrap()
-            .logic
-            .store(left_val, Ordering::Relaxed);
+        sim.tilemap.set_value_at(9, 10, left_val);
         // Right input at (11, 10)
         sim.set_tile(11, 10, TileType::Wire);
-        sim.tilemap
-            .get_tile(11, 10)
-            .unwrap()
-            .logic
-            .store(right_val, Ordering::Relaxed);
+        sim.tilemap.set_value_at(11, 10, right_val);
         sim.dirty.mark_dirty(10 * WIDTH + 10);
         sim
     }
@@ -11025,11 +10936,7 @@ mod tests {
         let mut sim = setup_arithmetic_test(tile_type, left_val, right_val);
         // Up input at (10, 9)
         sim.set_tile(10, 9, TileType::Wire);
-        sim.tilemap
-            .get_tile(10, 9)
-            .unwrap()
-            .logic
-            .store(up_val, Ordering::Relaxed);
+        sim.tilemap.set_value_at(10, 9, up_val);
         sim
     }
 
@@ -11037,12 +10944,7 @@ mod tests {
     fn test_add_tile() {
         let mut sim = setup_arithmetic_test(TileType::Add, 100, 50);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, 150, "Add: 100 + 50 = 150");
     }
 
@@ -11050,12 +10952,7 @@ mod tests {
     fn test_add_tile_wrapping() {
         let mut sim = setup_arithmetic_test(TileType::Add, u64::MAX, 1);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, 0, "Add: MAX + 1 should wrap to 0");
     }
 
@@ -11063,12 +10960,7 @@ mod tests {
     fn test_sub_tile() {
         let mut sim = setup_arithmetic_test(TileType::Sub, 100, 30);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, 70, "Sub: 100 - 30 = 70");
     }
 
@@ -11076,12 +10968,7 @@ mod tests {
     fn test_sub_tile_wrapping() {
         let mut sim = setup_arithmetic_test(TileType::Sub, 0, 1);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, u64::MAX, "Sub: 0 - 1 should wrap to MAX");
     }
 
@@ -11089,12 +10976,7 @@ mod tests {
     fn test_mul_tile() {
         let mut sim = setup_arithmetic_test(TileType::Mul, 7, 8);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, 56, "Mul: 7 * 8 = 56");
     }
 
@@ -11102,12 +10984,7 @@ mod tests {
     fn test_div_tile() {
         let mut sim = setup_arithmetic_test(TileType::Div, 100, 7);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, 14, "Div: 100 / 7 = 14");
     }
 
@@ -11115,12 +10992,7 @@ mod tests {
     fn test_div_tile_by_zero() {
         let mut sim = setup_arithmetic_test(TileType::Div, 100, 0);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, 0, "Div by zero should return 0");
     }
 
@@ -11128,12 +11000,7 @@ mod tests {
     fn test_mod_tile() {
         let mut sim = setup_arithmetic_test(TileType::Mod, 100, 7);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, 2, "Mod: 100 % 7 = 2");
     }
 
@@ -11141,12 +11008,7 @@ mod tests {
     fn test_mod_tile_by_zero() {
         let mut sim = setup_arithmetic_test(TileType::Mod, 100, 0);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, 0, "Mod by zero should return 0");
     }
 
@@ -11154,12 +11016,7 @@ mod tests {
     fn test_shl_tile() {
         let mut sim = setup_arithmetic_test(TileType::Shl, 1, 4);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, 16, "Shl: 1 << 4 = 16");
     }
 
@@ -11168,12 +11025,7 @@ mod tests {
         // Shift amount should be masked to 6 bits (& 63)
         let mut sim = setup_arithmetic_test(TileType::Shl, 1, 65); // 65 & 63 = 1
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, 2, "Shl: 1 << (65 & 63) = 1 << 1 = 2");
     }
 
@@ -11181,12 +11033,7 @@ mod tests {
     fn test_shr_tile() {
         let mut sim = setup_arithmetic_test(TileType::Shr, 64, 3);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, 8, "Shr: 64 >> 3 = 8");
     }
 
@@ -11194,12 +11041,7 @@ mod tests {
     fn test_lt_tile_true() {
         let mut sim = setup_arithmetic_test(TileType::Lt, 5, 10);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, u64::MAX, "Lt: 5 < 10 should return MAX");
     }
 
@@ -11207,12 +11049,7 @@ mod tests {
     fn test_lt_tile_false() {
         let mut sim = setup_arithmetic_test(TileType::Lt, 10, 5);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, 0, "Lt: 10 < 5 should return 0");
     }
 
@@ -11220,12 +11057,7 @@ mod tests {
     fn test_gt_tile() {
         let mut sim = setup_arithmetic_test(TileType::Gt, 10, 5);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, u64::MAX, "Gt: 10 > 5 should return MAX");
     }
 
@@ -11233,12 +11065,7 @@ mod tests {
     fn test_eq_tile_true() {
         let mut sim = setup_arithmetic_test(TileType::Eq, 42, 42);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, u64::MAX, "Eq: 42 == 42 should return MAX");
     }
 
@@ -11246,12 +11073,7 @@ mod tests {
     fn test_eq_tile_false() {
         let mut sim = setup_arithmetic_test(TileType::Eq, 42, 43);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, 0, "Eq: 42 == 43 should return 0");
     }
 
@@ -11259,12 +11081,7 @@ mod tests {
     fn test_neq_tile() {
         let mut sim = setup_arithmetic_test(TileType::Neq, 42, 43);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, u64::MAX, "Neq: 42 != 43 should return MAX");
     }
 
@@ -11272,12 +11089,7 @@ mod tests {
     fn test_lte_tile() {
         let mut sim = setup_arithmetic_test(TileType::Lte, 5, 5);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, u64::MAX, "Lte: 5 <= 5 should return MAX");
     }
 
@@ -11285,12 +11097,7 @@ mod tests {
     fn test_gte_tile() {
         let mut sim = setup_arithmetic_test(TileType::Gte, 10, 5);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, u64::MAX, "Gte: 10 >= 5 should return MAX");
     }
 
@@ -11298,12 +11105,7 @@ mod tests {
     fn test_mux_tile_select_left() {
         let mut sim = setup_with_up(TileType::Mux, 100, 200, 1); // up != 0, select left
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, 100, "Mux: up != 0 should select left");
     }
 
@@ -11311,12 +11113,7 @@ mod tests {
     fn test_mux_tile_select_right() {
         let mut sim = setup_with_up(TileType::Mux, 100, 200, 0); // up == 0, select right
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, 200, "Mux: up == 0 should select right");
     }
 
@@ -11324,12 +11121,7 @@ mod tests {
     fn test_zero_tile_true() {
         let mut sim = setup_arithmetic_test(TileType::Zero, 0, 999);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, u64::MAX, "Zero: left == 0 should return MAX");
     }
 
@@ -11337,12 +11129,7 @@ mod tests {
     fn test_zero_tile_false() {
         let mut sim = setup_arithmetic_test(TileType::Zero, 42, 999);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, 0, "Zero: left != 0 should return 0");
     }
 
@@ -11350,12 +11137,7 @@ mod tests {
     fn test_neg_tile() {
         let mut sim = setup_arithmetic_test(TileType::Neg, 5, 999);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         // Two's complement negation of 5: ~5 + 1 = 0xFFFFFFFFFFFFFFFA + 1 = 0xFFFFFFFFFFFFFFFB
         let expected = (!5u64).wrapping_add(1);
         assert_eq!(
@@ -11368,12 +11150,7 @@ mod tests {
     fn test_abs_tile_positive() {
         let mut sim = setup_arithmetic_test(TileType::Abs, 42, 999);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, 42, "Abs: positive number unchanged");
     }
 
@@ -11383,12 +11160,7 @@ mod tests {
         let neg_five = (!5u64).wrapping_add(1);
         let mut sim = setup_arithmetic_test(TileType::Abs, neg_five, 999);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, 5, "Abs: negative number should become positive");
     }
 
@@ -11396,12 +11168,7 @@ mod tests {
     fn test_ram_tile_write() {
         let mut sim = setup_with_up(TileType::Ram, 42, 0, 1); // up != 0, write
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, 42, "Ram: up != 0 should write left to output");
     }
 
@@ -11409,72 +11176,36 @@ mod tests {
     fn test_ram_tile_hold() {
         let mut sim = setup_with_up(TileType::Ram, 42, 0, 0); // up == 0, hold
         // Set current value
-        sim.tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .store(100, Ordering::Relaxed);
+        sim.tilemap.set_value_at(10, 10, 100);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, 100, "Ram: up == 0 should hold current value");
     }
 
     #[test]
     fn test_counter_tile_increment() {
         let mut sim = setup_with_up(TileType::Counter, 0, 0, 1); // up != 0, count
-        sim.tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .store(5, Ordering::Relaxed);
+        sim.tilemap.set_value_at(10, 10, 5);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, 6, "Counter: up != 0 should increment");
     }
 
     #[test]
     fn test_counter_tile_hold() {
         let mut sim = setup_with_up(TileType::Counter, 0, 0, 0); // up == 0, hold
-        sim.tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .store(5, Ordering::Relaxed);
+        sim.tilemap.set_value_at(10, 10, 5);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, 5, "Counter: up == 0 should hold");
     }
 
     #[test]
     fn test_const_tile() {
         let mut sim = setup_arithmetic_test(TileType::Const, 0, 0);
-        sim.tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .store(12345, Ordering::Relaxed);
+        sim.tilemap.set_value_at(10, 10, 12345);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(result, 12345, "Const: should always output current value");
     }
 
@@ -11489,32 +11220,16 @@ mod tests {
         sim.set_tile(10, 10, TileType::Cross);
         // Left input at (9, 10)
         sim.set_tile(9, 10, TileType::Wire);
-        sim.tilemap
-            .get_tile(9, 10)
-            .unwrap()
-            .logic
-            .store(left, Ordering::Relaxed);
+        sim.tilemap.set_value_at(9, 10, left);
         // Right input at (11, 10)
         sim.set_tile(11, 10, TileType::Wire);
-        sim.tilemap
-            .get_tile(11, 10)
-            .unwrap()
-            .logic
-            .store(right, Ordering::Relaxed);
+        sim.tilemap.set_value_at(11, 10, right);
         // Up input at (10, 9)
         sim.set_tile(10, 9, TileType::Wire);
-        sim.tilemap
-            .get_tile(10, 9)
-            .unwrap()
-            .logic
-            .store(up, Ordering::Relaxed);
+        sim.tilemap.set_value_at(10, 9, up);
         // Down input at (10, 11)
         sim.set_tile(10, 11, TileType::Wire);
-        sim.tilemap
-            .get_tile(10, 11)
-            .unwrap()
-            .logic
-            .store(down, Ordering::Relaxed);
+        sim.tilemap.set_value_at(10, 11, down);
         sim.dirty.mark_dirty(10 * WIDTH + 10);
         sim
     }
@@ -11526,12 +11241,7 @@ mod tests {
         let h_signal: u64 = 0x0000_0000_DEAD_BEEF; // Lower 32 bits
         let mut sim = setup_cross_test(h_signal, 0, 0, 0);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
 
         // Only lower 32 bits should have signal
         assert_eq!(
@@ -11552,12 +11262,7 @@ mod tests {
         let v_signal: u64 = 0xCAFE_BABE_0000_0000; // Upper 32 bits
         let mut sim = setup_cross_test(0, 0, v_signal, 0);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
 
         // Only upper 32 bits should have signal
         assert_eq!(
@@ -11579,12 +11284,7 @@ mod tests {
         let v_signal: u64 = 0xABCD_EF00_0000_0000;
         let mut sim = setup_cross_test(h_signal, 0, v_signal, 0);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
 
         assert_eq!(
             result,
@@ -11600,12 +11300,7 @@ mod tests {
         let right_signal: u64 = 0x0000_0000_0000_FF00;
         let mut sim = setup_cross_test(left_signal, right_signal, 0, 0);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
 
         assert_eq!(
             result,
@@ -11621,12 +11316,7 @@ mod tests {
         let down_signal: u64 = 0xFF00_0000_0000_0000;
         let mut sim = setup_cross_test(0, 0, up_signal, down_signal);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
 
         assert_eq!(
             result,
@@ -11641,38 +11331,17 @@ mod tests {
         sim.set_tile(10, 10, TileType::WireH);
         // Set all 4 neighbors
         sim.set_tile(9, 10, TileType::Wire);
-        sim.tilemap
-            .get_tile(9, 10)
-            .unwrap()
-            .logic
-            .store(0xAAAA, Ordering::Relaxed);
+        sim.tilemap.set_value_at(9, 10, 0xAAAA);
         sim.set_tile(11, 10, TileType::Wire);
-        sim.tilemap
-            .get_tile(11, 10)
-            .unwrap()
-            .logic
-            .store(0x5555, Ordering::Relaxed);
+        sim.tilemap.set_value_at(11, 10, 0x5555);
         sim.set_tile(10, 9, TileType::Wire);
-        sim.tilemap
-            .get_tile(10, 9)
-            .unwrap()
-            .logic
-            .store(0xFFFF_0000, Ordering::Relaxed); // Should be ignored
+        sim.tilemap.set_value_at(10, 9, 0xFFFF_0000); // Should be ignored
         sim.set_tile(10, 11, TileType::Wire);
-        sim.tilemap
-            .get_tile(10, 11)
-            .unwrap()
-            .logic
-            .store(0x0000_FFFF, Ordering::Relaxed); // Should be ignored
+        sim.tilemap.set_value_at(10, 11, 0x0000_FFFF); // Should be ignored
         sim.dirty.mark_dirty(10 * WIDTH + 10);
 
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
 
         assert_eq!(
             result,
@@ -11687,38 +11356,17 @@ mod tests {
         sim.set_tile(10, 10, TileType::WireV);
         // Set all 4 neighbors
         sim.set_tile(9, 10, TileType::Wire);
-        sim.tilemap
-            .get_tile(9, 10)
-            .unwrap()
-            .logic
-            .store(0xFFFF_0000, Ordering::Relaxed); // Should be ignored
+        sim.tilemap.set_value_at(9, 10, 0xFFFF_0000); // Should be ignored
         sim.set_tile(11, 10, TileType::Wire);
-        sim.tilemap
-            .get_tile(11, 10)
-            .unwrap()
-            .logic
-            .store(0x0000_FFFF, Ordering::Relaxed); // Should be ignored
+        sim.tilemap.set_value_at(11, 10, 0x0000_FFFF); // Should be ignored
         sim.set_tile(10, 9, TileType::Wire);
-        sim.tilemap
-            .get_tile(10, 9)
-            .unwrap()
-            .logic
-            .store(0xAAAA, Ordering::Relaxed);
+        sim.tilemap.set_value_at(10, 9, 0xAAAA);
         sim.set_tile(10, 11, TileType::Wire);
-        sim.tilemap
-            .get_tile(10, 11)
-            .unwrap()
-            .logic
-            .store(0x5555, Ordering::Relaxed);
+        sim.tilemap.set_value_at(10, 11, 0x5555);
         sim.dirty.mark_dirty(10 * WIDTH + 10);
 
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
 
         assert_eq!(
             result,
@@ -11737,12 +11385,7 @@ mod tests {
         let v_bus: u64 = 0x0001_0000_0000_0000; // Bit 48 set
         let mut sim = setup_cross_test(h_bus, 0, v_bus, 0);
         sim.eval_at(10, 10);
-        let result = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(10, 10).unwrap();
 
         // Extract the signals back
         let h_out = result & 0x0000_0000_FFFF_FFFF;
@@ -14801,9 +14444,7 @@ mod tests {
         sim.set_tile(1, 1, TileType::Register8);
         sim.assign_tile_to_domain_xy(1, 1, domain);
         // Write a value to the const tile
-        sim.tilemap.tiles[1 * 8 + 0]
-            .logic
-            .store(42, Ordering::Relaxed);
+        sim.tilemap.set_value(1 * 8 + 0, 42);
         // Step through ticks and check when register captures
         let mut captured_at = Vec::new();
         let mut prev_val = sim.get_logic_at(1, 1);
@@ -14830,9 +14471,7 @@ mod tests {
         sim.set_tile(0, 1, TileType::Const);
         sim.set_tile(1, 1, TileType::Register8);
         // No domain assignment
-        sim.tilemap.tiles[1 * 4 + 0]
-            .logic
-            .store(99, Ordering::Relaxed);
+        sim.tilemap.set_value(1 * 4 + 0, 99);
         sim.tick(); // rising edge
         sim.tick(); // falling edge
         sim.tick(); // rising edge - should capture
@@ -14853,9 +14492,7 @@ mod tests {
         sim.set_tile(0, 1, TileType::Const);
         sim.set_tile(1, 1, TileType::Synchronizer);
         sim.connect_synchronizer_xy(1, 1, domain);
-        sim.tilemap.tiles[1 * 8 + 0]
-            .logic
-            .store(77, Ordering::Relaxed);
+        sim.tilemap.set_value(1 * 8 + 0, 77);
         // Step through - should see 2-cycle latency
         sim.tick();
         sim.tick();
@@ -15802,6 +15439,64 @@ mod tests {
         let mut sim = Simulation::with_size_layered(width, height, 2);
         sim.rebuild_via_connections();
         sim
+    }
+
+    /// The compact-op path (COP_THRESHOLD_VIA) must reproduce the eval_tile
+    /// reference for a ThresholdVia across thresholds, all 16 in-plane neighbor
+    /// patterns, source values, and both via directions. Before this op existed,
+    /// threshold vias fell through to COP_CONST and were frozen on the compact path.
+    #[test]
+    fn test_threshold_via_compact_matches_eval_tile() {
+        let w = 8usize;
+        let layer_size = w * w; // height == w
+        let (cx, cy) = (3usize, 3usize);
+        let cell = cy * w + cx;
+        let npos = [(cx - 1, cy), (cx + 1, cy), (cx, cy - 1), (cx, cy + 1)];
+
+        for &(via_z, src_z, via_tt) in &[
+            (0usize, 1usize, TileType::ThresholdViaUp),
+            (1usize, 0usize, TileType::ThresholdViaDown),
+        ] {
+            let via_idx = via_z * layer_size + cell;
+            let src_idx = src_z * layer_size + cell;
+            for threshold in 1u8..=4 {
+                for &src in &[0u64, 0xCAFE_F00D_u64] {
+                    for combo in 0u32..16 {
+                        let mut sim = make_threshold_via_sim(w, w);
+
+                        sim.set_tile_3d(cx, cy, src_z, TileType::Const);
+                        sim.set_logic_value_by_idx(src_idx, src);
+
+                        sim.set_tile_3d(cx, cy, via_z, via_tt);
+                        sim.set_tile_threshold(via_idx, threshold);
+
+                        for (j, &(nx, ny)) in npos.iter().enumerate() {
+                            sim.set_tile_3d(nx, ny, via_z, TileType::Const);
+                            let nidx = via_z * layer_size + ny * w + nx;
+                            let val = if (combo >> j) & 1 != 0 { 1u64 } else { 0u64 };
+                            sim.set_logic_value_by_idx(nidx, val);
+                        }
+                        sim.rebuild_via_connections();
+
+                        // Reference: the authoritative eval_tile path.
+                        sim.eval_tile(via_idx);
+                        let expected = sim.get_logic_value_by_idx(via_idx);
+
+                        // Compact path: reset the via, build + run compact ops over
+                        // just the via (its inputs are static Const, already settled).
+                        sim.set_logic_value_by_idx(via_idx, 0);
+                        let (ops, wvia) = sim.build_compact_ops(&[via_idx]);
+                        sim.propagate_compact(&ops, &wvia);
+                        let got = sim.get_logic_value_by_idx(via_idx);
+
+                        assert_eq!(
+                            got, expected,
+                            "{via_tt:?} t={threshold} src={src:#x} combo={combo:04b}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     #[test]

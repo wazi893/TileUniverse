@@ -43,11 +43,7 @@ fn main() {
 
     // Add second input to And gate
     sim.set_tile(3, 1, TileType::Wire);
-    sim.tilemap
-        .get_tile_mut(3, 1)
-        .unwrap()
-        .logic
-        .store(u64::MAX, Ordering::Relaxed);
+    sim.tilemap.set_value_at(3, 1, u64::MAX);
 
     println!("Circuit: Clock -> Wire -> Wire -> AND -> Wire -> OR -> Wire -> Register");
     println!("Delays:    0       1       1       2       1      2       1        0");
@@ -102,16 +98,8 @@ fn main() {
     // Inputs for MUL and DIV
     sim2.set_tile(2, 1, TileType::Const);
     sim2.set_tile(4, 1, TileType::Const);
-    sim2.tilemap
-        .get_tile_mut(2, 1)
-        .unwrap()
-        .logic
-        .store(7, Ordering::Relaxed);
-    sim2.tilemap
-        .get_tile_mut(4, 1)
-        .unwrap()
-        .logic
-        .store(3, Ordering::Relaxed);
+    sim2.tilemap.set_value_at(2, 1, 7);
+    sim2.tilemap.set_value_at(4, 1, 3);
 
     println!("Circuit: Clock -> Wire -> MUL -> Wire -> DIV -> Wire -> Register");
     println!("Delays:    0       1       8       1      12       1        0");

@@ -2,8 +2,10 @@ use crate::simulation::Simulation;
 use crate::tile_cpu::v2_components::{
     EXT_OFFSET, EXT_RD_HI, EXT_REG_INDIRECT, EXT_RS_HI, EXT_WIDE_IMM, effective_reg,
 };
+use crate::tile_cpu::v2_hls_accel::eval_accel_func_ref;
 use crate::tile_cpu::v2_mmio_devices::{
-    DS_ERR_INVALID_CMD, DS_ERR_NO_SAMPLE, DS_ERR_OOB, DS_OK, MMIO_CONSOLE_COUNT, MMIO_CONSOLE_DATA,
+    DS_ERR_INVALID_CMD, DS_ERR_NO_SAMPLE, DS_ERR_OOB, DS_OK, MMIO_ACCEL_ARG_DATA,
+    MMIO_ACCEL_ARG_SELECT, MMIO_ACCEL_RESULT, MMIO_CONSOLE_COUNT, MMIO_CONSOLE_DATA,
     MMIO_DATASET_CMD, MMIO_DATASET_DATA, MMIO_DATASET_STATUS, MMIO_MAILBOX_IN, MMIO_MAILBOX_OUT,
     MMIO_MATH_A, MMIO_MATH_B, MMIO_MATH_CMD, MMIO_MATH_RESULT, MMIO_QUANTUM_CMD, MMIO_QUANTUM_DATA,
     MMIO_QUANTUM_PARAM, MMIO_QUANTUM_QUBIT, MMIO_RNG_DATA, MMIO_SNN_CMD, MMIO_SNN_DATA,
@@ -78,6 +80,18 @@ fn build_decoded(program: &[u32]) -> Vec<PreDecoded> {
     decoded
 }
 
+/// Sprint 388: ISS-side software model of the HLS accelerator MMIO device.
+struct IssAccelModel {
+    /// The accel-marked source function (the spec).
+    func: crate::tile_cpu::v2_compiler::Func,
+    /// Datapath bit width (operands/result masked at evaluation).
+    width: u32,
+    /// Latched operand index (raw, as written to ARG_SELECT).
+    select: u64,
+    /// Latched operand values, one per parameter.
+    operands: Vec<u64>,
+}
+
 pub struct V2Iss {
     // Sprint 363 (Gate B): expanded to 256 entries (was 128). The PC mask
     // (default 0x7F) gates how much is reachable — legacy programs stay 7-bit;
@@ -116,6 +130,11 @@ pub struct V2Iss {
     iss_mailbox_in_send: u64,  // mem_write(60) records here
     iss_mailbox_out_recv: u64, // mem_read(61) returns this
     iss_mailbox_out_send: u64, // mem_write(61) records here
+    // Sprint 388: ISS HLS-accelerator mirror — the SOFTWARE reference model of the
+    // physical device's tile datapath (operand latches + select register; RESULT
+    // reads evaluate `eval_accel_func_ref`). The ISS↔physical differential is then
+    // literally "software spec vs real tiles".
+    iss_accel: Option<IssAccelModel>,
     // Sprint 159: ISS dataset device mirror
     iss_dataset_samples: Vec<(u64, u64)>, // (features, label) pairs
     iss_dataset_cursor: Option<usize>,
@@ -182,6 +201,7 @@ impl V2Iss {
             iss_mailbox_in_send: 0,
             iss_mailbox_out_recv: 0,
             iss_mailbox_out_send: 0,
+            iss_accel: None,
             iss_dataset_samples: Vec::new(),
             iss_dataset_cursor: None,
             iss_dataset_data: 0,
@@ -208,6 +228,21 @@ impl V2Iss {
         let mut iss = Self::from_program(program);
         iss.iss_mmio_enabled = true;
         iss
+    }
+
+    /// Sprint 388: install the HLS-accelerator software mirror (and enable MMIO
+    /// interception). `func` is the accel-marked source function; `width` the
+    /// datapath bit width. Use when the hardware CPU's combined MMIO device was
+    /// built `with_accel(...)` so ISS↔physical differentials hold.
+    pub fn set_accel_model(&mut self, func: crate::tile_cpu::v2_compiler::Func, width: u32) {
+        let num_args = func.params.len();
+        self.iss_mmio_enabled = true;
+        self.iss_accel = Some(IssAccelModel {
+            func,
+            width,
+            select: 0,
+            operands: vec![0u64; num_args],
+        });
     }
 
     /// Sprint 159: Create ISS with MMIO + dataset mirror.
@@ -817,6 +852,23 @@ impl V2Iss {
     fn mem_read_mmio(&mut self, addr: usize) -> u64 {
         let a = (addr & 0x7F) as u8;
         let mmio_val = match a {
+            // Sprint 388: HLS accelerator (41-43, overlays the optional dataset slots;
+            // arms are guarded, accel wins when installed — mirrors the combined
+            // device's dispatch order).
+            x if x == MMIO_ACCEL_ARG_SELECT && self.iss_accel.is_some() => {
+                Some(self.iss_accel.as_ref().unwrap().select)
+            }
+            x if x == MMIO_ACCEL_ARG_DATA && self.iss_accel.is_some() => {
+                let m = self.iss_accel.as_ref().unwrap();
+                Some(m.operands.get(m.select as usize).copied().unwrap_or(0))
+            }
+            x if x == MMIO_ACCEL_RESULT && self.iss_accel.is_some() => {
+                let m = self.iss_accel.as_ref().unwrap();
+                // The software spec of the physical tile datapath. The function was
+                // validated combinational at compile time, so this cannot fail; 0 on
+                // error keeps the ISS total.
+                Some(eval_accel_func_ref(&m.func, &m.operands, m.width).unwrap_or(0))
+            }
             // Dataset (41-43)
             x if x == MMIO_DATASET_CMD && !self.iss_dataset_samples.is_empty() => Some(
                 ((self.iss_dataset_last_error as u64) << 8) | (self.iss_dataset_cmd_count & 0xFF),
@@ -890,6 +942,22 @@ impl V2Iss {
     fn mem_write_mmio(&mut self, addr: usize, value: u64) {
         let a = (addr & 0x7F) as u8;
         match a {
+            // Sprint 388: HLS accelerator (41-43) — see mem_read_mmio.
+            x if x == MMIO_ACCEL_ARG_SELECT && self.iss_accel.is_some() => {
+                self.iss_accel.as_mut().unwrap().select = value;
+                return;
+            }
+            x if x == MMIO_ACCEL_ARG_DATA && self.iss_accel.is_some() => {
+                let m = self.iss_accel.as_mut().unwrap();
+                let sel = m.select as usize;
+                if sel < m.operands.len() {
+                    m.operands[sel] = value;
+                }
+                return;
+            }
+            x if x == MMIO_ACCEL_RESULT && self.iss_accel.is_some() => {
+                return; // read-only
+            }
             // Dataset (41-43)
             x if x == MMIO_DATASET_CMD && !self.iss_dataset_samples.is_empty() => {
                 self.iss_dataset_execute_cmd(value);
@@ -3065,6 +3133,185 @@ mod tests {
             combined.ref_pack.console_string(),
             "12345",
             "the compiled loop must have printed 12345"
+        );
+    }
+
+    /// Sprint 388 (HW/SW co-design, Phases 1-2) — the flagship differential:
+    /// ONE SOURCE, ONE SoC. A source program marks `madd` as `accel`; the compiler
+    /// synthesizes it to a tile datapath behind MMIO and lowers its call sites to the
+    /// indexed-operand protocol. Assert: (a) the ISS (software accel spec) and the
+    /// physical tile CPU (real accel tiles) agree bit-exactly in lockstep, and (b)
+    /// both equal the SAME program with the `accel` marker removed (pure-CPU build).
+    #[test]
+    fn test_v2_soc_codesign_accel_differential() {
+        use crate::simulation::Simulation;
+        use crate::synth::hls::HlsConfig;
+        use crate::tile_cpu::v2_hls_accel::compile_source_with_accel;
+        use crate::tile_cpu::v2_mmio::V2MmioHandle;
+        use crate::tile_cpu::v2_mmio_devices::V2MmioCombinedDevice;
+        use crate::tile_cpu::v2_parser::compile_source;
+        use crate::tile_cpu::{V2Builder, V2SynthConfig};
+        use std::rc::Rc;
+
+        // Args/results fit the width-5 datapath (mask 31): madd(2,3,4)=10,
+        // madd(3,5,2)=17 → 27 — so the masked tile datapath and the unmasked 64-bit
+        // pure-CPU build agree. Width 5 (not the default 8) keeps the multiplier's
+        // place & route inside the test-time budget; the protocol and lowering are
+        // width-independent.
+        const ACCEL_SRC: &str = r#"
+            accel int madd(int a, int b, int c) { return a * b + c; }
+            int main() { return madd(2, 3, 4) + madd(3, 5, 2); }
+        "#;
+        const EXPECTED: u64 = 27;
+
+        // --- Accelerated build: program words + synthesized tile datapath. ---
+        let soc =
+            compile_source_with_accel(ACCEL_SRC, &HlsConfig { width: 5 }).expect("SoC compile");
+        let accel = soc.accel.expect("accel device must be synthesized");
+        let accel_func = accel.func().clone();
+        let accel_width = accel.width();
+
+        let combined = Rc::new(V2MmioCombinedDevice::with_accel(0xE, accel));
+        let mut sim = Simulation::with_size_layered(128, 640, 16);
+        let cpu = V2Builder::new()
+            .with_origin(0, 0)
+            .with_program(&soc.words)
+            .with_rom_size(128)
+            .with_ram_size(128)
+            .with_extended_pc()
+            .with_mmio(V2MmioHandle::from_rc(combined.clone()))
+            .with_synth_blocks(V2SynthConfig::max_authority())
+            .build(&mut sim);
+
+        let mut iss = V2Iss::from_program_with_mmio(&soc.words);
+        iss.enable_extended_pc();
+        iss.set_accel_model(accel_func, accel_width);
+
+        // (a) Lockstep differential: software accel spec (ISS) vs real accel tiles
+        // (physical device), full architectural state per retired instruction.
+        let res =
+            run_v2_differential_core(&mut iss, V2DiffConfig { max_ticks: 20_000 }, &cpu, &mut sim);
+        assert!(res.is_ok(), "SoC differential mismatch: {:?}", res.err());
+        assert!(cpu.is_halted(), "accelerated program must halt");
+        let accel_r0 = cpu.read_reg(&sim, 0);
+        assert_eq!(accel_r0, EXPECTED, "accelerated build result");
+        assert_eq!(iss.state().regs[0], EXPECTED, "ISS accel-spec result");
+        assert_eq!(
+            combined.accel.as_ref().unwrap().evals(),
+            2,
+            "both madd calls must have been computed by the tile datapath"
+        );
+
+        // (b) The SAME source minus the `accel` marker — pure-CPU build (madd becomes
+        // an ordinary compiled function). The two builds must agree.
+        let pure_src = ACCEL_SRC.replace("accel int madd", "int madd");
+        let pure_words = compile_source(&pure_src).expect("pure-CPU compile");
+        let mut pure_iss = V2Iss::from_program(&pure_words);
+        pure_iss.enable_wide_pc();
+        for _ in 0..2_000_000 {
+            if pure_iss.state().halted {
+                break;
+            }
+            pure_iss.step();
+        }
+        assert!(pure_iss.state().halted, "pure-CPU build must halt");
+        assert_eq!(
+            pure_iss.state().regs[0],
+            accel_r0,
+            "one source, one SoC: accelerated and pure-CPU builds must agree"
+        );
+    }
+
+    /// Sprint 388 Phase 3: the same SoC co-design path, but with a control-flow
+    /// accelerator. `sum_to` synthesizes to a sequential FSM datapath; call sites
+    /// still use the compact ARG_SELECT/ARG_DATA/RESULT protocol.
+    #[test]
+    #[ignore = "slow (>100s tile sim); run via: cargo nextest run --profile nightly --run-ignored all"]
+    fn test_v2_soc_codesign_seq_accel_differential() {
+        use crate::simulation::Simulation;
+        use crate::synth::hls::HlsConfig;
+        use crate::tile_cpu::v2_hls_accel::compile_source_with_accel;
+        use crate::tile_cpu::v2_mmio::V2MmioHandle;
+        use crate::tile_cpu::v2_mmio_devices::V2MmioCombinedDevice;
+        use crate::tile_cpu::v2_parser::compile_source;
+        use crate::tile_cpu::{V2Builder, V2SynthConfig};
+        use std::rc::Rc;
+
+        const ACCEL_SRC: &str = r#"
+            accel int sum_to(int n) {
+                int s = 0;
+                int i = 1;
+                while (i <= n) {
+                    s = s + i;
+                    i = i + 1;
+                }
+                return s;
+            }
+            int main() { return sum_to(5) + sum_to(3); }
+        "#;
+        const EXPECTED: u64 = 21;
+
+        let soc =
+            compile_source_with_accel(ACCEL_SRC, &HlsConfig { width: 5 }).expect("SoC compile");
+        let accel = soc.accel.expect("seq accel device must be synthesized");
+        let accel_func = accel.func().clone();
+        let accel_width = accel.width();
+
+        let combined = Rc::new(V2MmioCombinedDevice::with_accel(0xE, accel));
+        let mut sim = Simulation::with_size_layered(128, 640, 16);
+        let cpu = V2Builder::new()
+            .with_origin(0, 0)
+            .with_program(&soc.words)
+            .with_rom_size(128)
+            .with_ram_size(128)
+            .with_extended_pc()
+            .with_mmio(V2MmioHandle::from_rc(combined.clone()))
+            .with_synth_blocks(V2SynthConfig::max_authority())
+            .build(&mut sim);
+
+        let mut iss = V2Iss::from_program_with_mmio(&soc.words);
+        iss.enable_extended_pc();
+        iss.set_accel_model(accel_func, accel_width);
+
+        let res =
+            run_v2_differential_core(&mut iss, V2DiffConfig { max_ticks: 40_000 }, &cpu, &mut sim);
+        assert!(
+            res.is_ok(),
+            "seq SoC differential mismatch: {:?}",
+            res.err()
+        );
+        assert!(cpu.is_halted(), "accelerated program must halt");
+        let accel_r0 = cpu.read_reg(&sim, 0);
+        assert_eq!(accel_r0, EXPECTED, "accelerated seq build result");
+        assert_eq!(iss.state().regs[0], EXPECTED, "ISS seq accel-spec result");
+
+        let accel_dev = combined.accel.as_ref().unwrap();
+        assert_eq!(
+            accel_dev.evals(),
+            2,
+            "both sum_to calls must have been computed by the sequential tile datapath"
+        );
+        assert!(
+            accel_dev.last_seq_cycles().unwrap_or(0) >= 8,
+            "last sum_to(3) call should have taken multiple FSM cycles"
+        );
+        assert_eq!(accel_dev.last_error(), None);
+
+        let pure_src = ACCEL_SRC.replace("accel int sum_to", "int sum_to");
+        let pure_words = compile_source(&pure_src).expect("pure-CPU compile");
+        let mut pure_iss = V2Iss::from_program(&pure_words);
+        pure_iss.enable_wide_pc();
+        for _ in 0..2_000_000 {
+            if pure_iss.state().halted {
+                break;
+            }
+            pure_iss.step();
+        }
+        assert!(pure_iss.state().halted, "pure-CPU build must halt");
+        assert_eq!(
+            pure_iss.state().regs[0],
+            accel_r0,
+            "sequential accelerated and pure-CPU builds must agree"
         );
     }
 

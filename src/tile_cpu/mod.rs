@@ -75,20 +75,31 @@ mod v2_builder;
 pub mod v2_compiler;
 pub mod v2_compiler_bench;
 pub mod v2_components;
+pub mod v2_dense_stepper;
+pub mod v2_device_cycle;
+#[cfg(feature = "cuda")]
+pub mod v2_device_gpu;
 pub mod v2_disassembler;
 pub mod v2_execute;
 pub mod v2_fast;
 pub mod v2_fast_array;
+pub mod v2_full_phase_prover;
+pub mod v2_hls_accel;
 pub mod v2_iss;
 #[cfg(feature = "cranelift_jit")]
 pub mod v2_jit;
 pub mod v2_mmio;
 pub mod v2_mmio_devices;
 pub mod v2_parser;
+pub mod v2_player;
 pub mod v2_replay;
 pub mod v2_routing;
 pub mod v2_showcase;
 pub mod v2_simt_baseline;
+pub mod v2_simt_eval;
+pub mod v2_simt_fabric;
+#[cfg(feature = "cuda")]
+pub mod v2_simt_gpu;
 pub mod v2_stdlib;
 pub mod v2_trace;
 pub mod v2_visualization;
@@ -120,6 +131,13 @@ pub use v2_compiler::{
 pub use v2_compiler_bench::{
     V2_COMPILED_BENCHMARKS, V2CompiledBenchCase, V2CompiledBenchOutcome, run_v2_compiled_benchmark,
 };
+pub use v2_dense_stepper::{
+    DensePipelinePreflight, DensePipelineRunOutcome, DensePipelineStepOutcome,
+    DensePipelineStepper, DensePipelineUnsupportedOp,
+};
+pub use v2_device_cycle::{
+    CommitSwapIncidence, DEVICE_PHASES, DeviceCyclePlan, DeviceCycleState, ReadbackTaps,
+};
 pub use v2_disassembler::{V2DecodedInstruction, decode_v2_word, disassemble_v2_word};
 pub use v2_execute::{
     TileCpuV2, V2DebugBreakpoint, V2DebugRunResult, V2DebugSnapshot, V2DebugStopReason,
@@ -128,6 +146,13 @@ pub use v2_execute::{
 pub use v2_fast::{V2FastCpu, V2FastTickResult, hash_v2_iss_state};
 pub use v2_fast_array::{
     CpuSnapshot, V2FastCpuPool, V2FastFabric, V2FastFabricTopology, V2ParallelFabric,
+};
+pub use v2_full_phase_prover::{
+    CHARTER_PROGRAMS, CharterProgramReport, LaneCpuState, PHASE_NAMES, PhaseProfile, StaticProfile,
+    UnifiedSlotUniverse, charter_cases, prove_charter,
+};
+pub use v2_hls_accel::{
+    V2MmioHlsAccelDevice, V2SocProgram, compile_source_with_accel, eval_accel_func_ref,
 };
 pub use v2_iss::{
     V2DiffConfig, V2DiffMismatch, V2DiffStats, V2Iss, V2IssState, run_v2_differential,
@@ -138,18 +163,22 @@ pub use v2_mmio::{
 };
 pub use v2_mmio_devices::{
     DISPLAY_HEIGHT, DISPLAY_PIXELS, DISPLAY_WIDTH, DS_ERR_INVALID_CMD, DS_ERR_NO_SAMPLE,
-    DS_ERR_OOB, DS_OK, DatasetSample, InferenceModel, MMIO_CONSOLE_COUNT, MMIO_CONSOLE_DATA,
-    MMIO_DATASET_CMD, MMIO_DATASET_DATA, MMIO_DATASET_STATUS, MMIO_DISPLAY_CMD,
-    MMIO_DISPLAY_STATUS, MMIO_MAILBOX_IN, MMIO_MAILBOX_OUT, MMIO_MATH_A, MMIO_MATH_B,
-    MMIO_MATH_CMD, MMIO_MATH_RESULT, MMIO_PBIT_CTRL, MMIO_PBIT_RESULT, MMIO_QUANTUM_CMD,
-    MMIO_QUANTUM_DATA, MMIO_QUANTUM_PARAM, MMIO_QUANTUM_QUBIT, MMIO_RNG_DATA, MMIO_SNN_CMD,
-    MMIO_SNN_DATA, MMIO_TIMER_CYCLE, V2_MMIO_DISPLAY_SNAPSHOT_KIND, V2_MMIO_MATH_SNAPSHOT_KIND,
-    V2_MMIO_PBIT_SNAPSHOT_KIND, V2_MMIO_QUANTUM_SNAPSHOT_KIND, V2_MMIO_REF_SNAPSHOT_KIND,
-    V2_MMIO_SNN_SNAPSHOT_KIND, V2LinkMailboxDevice, V2MmioCombinedDevice, V2MmioDatasetDevice,
-    V2MmioDisplayDevice, V2MmioMathDevice, V2MmioPbitBridgeDevice, V2MmioQuantumDevice,
-    V2MmioRefDevicePack, V2MmioSnnBridgeDevice,
+    DS_ERR_OOB, DS_OK, DatasetSample, InferenceModel, MMIO_ACCEL_ARG_DATA, MMIO_ACCEL_ARG_SELECT,
+    MMIO_ACCEL_RESULT, MMIO_CONSOLE_COUNT, MMIO_CONSOLE_DATA, MMIO_DATASET_CMD, MMIO_DATASET_DATA,
+    MMIO_DATASET_STATUS, MMIO_DISPLAY_CMD, MMIO_DISPLAY_STATUS, MMIO_MAILBOX_IN, MMIO_MAILBOX_OUT,
+    MMIO_MATH_A, MMIO_MATH_B, MMIO_MATH_CMD, MMIO_MATH_RESULT, MMIO_PBIT_CTRL, MMIO_PBIT_RESULT,
+    MMIO_QUANTUM_CMD, MMIO_QUANTUM_DATA, MMIO_QUANTUM_PARAM, MMIO_QUANTUM_QUBIT, MMIO_RNG_DATA,
+    MMIO_SNN_CMD, MMIO_SNN_DATA, MMIO_TIMER_CYCLE, V2_MMIO_DISPLAY_SNAPSHOT_KIND,
+    V2_MMIO_MATH_SNAPSHOT_KIND, V2_MMIO_PBIT_SNAPSHOT_KIND, V2_MMIO_QUANTUM_SNAPSHOT_KIND,
+    V2_MMIO_REF_SNAPSHOT_KIND, V2_MMIO_SNN_SNAPSHOT_KIND, V2LinkMailboxDevice,
+    V2MmioCombinedDevice, V2MmioDatasetDevice, V2MmioDisplayDevice, V2MmioMathDevice,
+    V2MmioPbitBridgeDevice, V2MmioQuantumDevice, V2MmioRefDevicePack, V2MmioSnnBridgeDevice,
 };
 pub use v2_parser::{ParseError, compile_source, parse_program};
+pub use v2_player::{
+    V2PlayerProgram, build_player_html, default_player_programs, export_default_player,
+    write_player_html,
+};
 pub use v2_replay::{
     V2_REPLAY_MANIFEST_FILE, V2_REPLAY_MMIO_FINAL_FILE, V2_REPLAY_MMIO_INITIAL_FILE,
     V2_REPLAY_MMIO_MODE_NONE, V2_REPLAY_MMIO_MODE_SNAPSHOT, V2_REPLAY_PROGRAM_FILE,
@@ -166,6 +195,8 @@ pub use v2_simt_baseline::{
     SimtBaselineReport, SimtBaselineResult, run_scalar_baseline, run_scalar_baseline_case,
     run_scalar_baseline_corpus,
 };
+pub use v2_simt_eval::{LaneKernel, LanePack};
+pub use v2_simt_fabric::V2SimtFabric;
 pub use v2_stdlib::{
     V2_ARG0, V2_ARG1, V2_ARG2, V2_ARG3, V2_RET, V2_SP, V2_STDLIB_ABS, V2_STDLIB_CLAMP,
     V2_STDLIB_MAX, V2_STDLIB_MEMSET4, V2_STDLIB_MIN,

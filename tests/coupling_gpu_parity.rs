@@ -13,16 +13,11 @@ use engine::physics::{
 use engine::simulation::Simulation;
 use engine::tile_meta::TileType;
 use logic_fabric_core::cuda::CudaRuntime;
-use std::sync::atomic::Ordering;
 
 /// Helper to collect logic values from simulation
 #[allow(dead_code)]
 fn collect_logic_values(sim: &Simulation) -> Vec<u64> {
-    sim.tilemap
-        .tiles
-        .iter()
-        .map(|t| t.logic.load(Ordering::Relaxed))
-        .collect()
+    sim.tilemap.values_snapshot()
 }
 
 #[test]

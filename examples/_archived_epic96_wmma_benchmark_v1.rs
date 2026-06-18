@@ -18,6 +18,8 @@ use engine::brain::{BrainWeights, forward_batch_shared_weights};
 use engine::gpu_nn::gpu_nn_persistent::PersistentGpuNN;
 #[cfg(feature = "cuda")]
 use engine::gpu_nn::wmma_nn::WmmaGpuNN;
+#[cfg(feature = "cuda")]
+use std::time::Instant;
 
 fn main() {
     println!("╔══════════════════════════════════════════════════════════════╗");

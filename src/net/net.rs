@@ -61,7 +61,7 @@ impl<'a> NetWork<'a> {
                     Some(t) => t,
                     None => continue,
                 };
-                let logic = tile.logic.load(std::sync::atomic::Ordering::Relaxed);
+                let logic = self.sim.tilemap.value_at(x, y).unwrap_or(0);
                 if !is_participating_tile(tile.meta.tile_type, logic) {
                     continue;
                 }
@@ -107,7 +107,7 @@ impl<'a> NetWork<'a> {
 
             let tile = self.sim.tilemap.get_tile(x, y).unwrap();
             let ttype = tile.meta.tile_type;
-            let logic = tile.logic.load(std::sync::atomic::Ordering::Relaxed);
+            let logic = self.sim.tilemap.value_at(x, y).unwrap_or(0);
             if matches!(ttype, TileType::ClockGlobal) {
                 has_clock = true;
             }
@@ -124,7 +124,7 @@ impl<'a> NetWork<'a> {
                 fanout += 1;
                 if self.net_ids.get(nx, ny) == NET_ID_UNASSIGNED {
                     let ntile = self.sim.tilemap.get_tile(nx, ny).unwrap();
-                    let nlogic = ntile.logic.load(std::sync::atomic::Ordering::Relaxed);
+                    let nlogic = self.sim.tilemap.value_at(nx, ny).unwrap_or(0);
                     if is_participating_tile(ntile.meta.tile_type, nlogic) {
                         self.net_ids.set(nx, ny, id);
                         queue.push_back((nx, ny));
@@ -726,8 +726,7 @@ mod tests {
 
         // Ensure sim unchanged
         assert_eq!(sim.region_at(0, 0), Some(0));
-        let tile = sim.tilemap.get_tile(2, 2).unwrap();
-        assert_eq!(tile.logic.load(std::sync::atomic::Ordering::Relaxed), 1);
+        assert_eq!(sim.tilemap.value_at(2, 2).unwrap(), 1);
 
         // Summaries deterministic too
         let summary1 = net_summary::summarize(&report1);

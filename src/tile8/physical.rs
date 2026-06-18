@@ -1127,7 +1127,7 @@ pub fn run_all_cpus_fast(sim: &mut SlimSimulation, cpus: &[CpuInstance], cycles:
 /// Calculate required grid size for N CPUs with given spacing
 pub fn calculate_grid_size(count: usize, spacing: usize) -> (usize, usize) {
     let cpus_per_row = ((count as f64).sqrt().ceil() as usize).max(1);
-    let rows = (count + cpus_per_row - 1) / cpus_per_row;
+    let rows = count.div_ceil(cpus_per_row);
 
     let width = cpus_per_row * spacing;
     let height = rows * spacing;

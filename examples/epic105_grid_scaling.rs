@@ -202,9 +202,7 @@ fn setup_benchmark_world(sim: &mut Simulation, width: usize, height: usize) {
     let value_spacing = 8.min(width / 16);
     for y in (4..height.saturating_sub(4)).step_by(value_spacing.max(1)) {
         for x in (4..width.saturating_sub(4)).step_by(value_spacing.max(1)) {
-            if let Some(tile) = sim.tilemap.get_tile(x, y) {
-                tile.logic.store(1, Ordering::Relaxed);
-            }
+            sim.tilemap.set_value_at(x, y, 1);
         }
     }
 }

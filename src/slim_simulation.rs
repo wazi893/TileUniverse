@@ -14,7 +14,6 @@ use crate::field::FieldGrid;
 use crate::tile::Tile;
 use crate::tile_meta::TileType;
 use crate::tilemap::Tilemap;
-use std::sync::atomic::Ordering;
 
 /// Memory-optimized simulation for maximum grid scale.
 ///
@@ -130,21 +129,12 @@ impl SlimSimulation {
 
     /// Get logic value at position
     pub fn get_logic_at(&self, x: usize, y: usize) -> u64 {
-        if let Some(t) = self.tilemap.get_tile(x, y) {
-            t.logic.load(Ordering::Relaxed)
-        } else {
-            0
-        }
+        self.tilemap.value_at(x, y).unwrap_or(0)
     }
 
     /// Set logic value at position
     pub fn set_logic_value(&self, x: usize, y: usize, value: u64) -> bool {
-        if let Some(t) = self.tilemap.get_tile(x, y) {
-            t.logic.store(value, Ordering::Relaxed);
-            true
-        } else {
-            false
-        }
+        self.tilemap.set_value_at(x, y, value)
     }
 
     #[inline(always)]
@@ -182,9 +172,7 @@ impl SlimSimulation {
         if idx_u32 == u32::MAX {
             0
         } else {
-            self.tilemap.tiles[idx_u32 as usize]
-                .logic
-                .load(Ordering::Relaxed)
+            self.tilemap.value(idx_u32 as usize)
         }
     }
 
@@ -201,14 +189,13 @@ impl SlimSimulation {
         let up = self.load_logic_idx(n[2]);
         let down = self.load_logic_idx(n[3]);
 
-        let tile = &self.tilemap.tiles[idx];
-        let current = tile.logic.load(Ordering::Relaxed);
+        let current = self.tilemap.value(idx);
         let tt = self.tile_type_at(idx);
 
         let new_out = self.compute_tile_output(tt, left, right, up, down, current, idx);
 
         if new_out != current {
-            tile.logic.store(new_out, Ordering::Relaxed);
+            self.tilemap.set_value(idx, new_out);
             true
         } else {
             false
@@ -520,7 +507,7 @@ impl SlimSimulation {
                 let layer_size = self.tilemap.layer_size;
                 let target = idx + layer_size;
                 if target < self.tilemap.tiles.len() {
-                    self.tilemap.tiles[target].logic.load(Ordering::Relaxed)
+                    self.tilemap.value(target)
                 } else {
                     0
                 }
@@ -528,9 +515,7 @@ impl SlimSimulation {
             TileType::ViaDown => {
                 let layer_size = self.tilemap.layer_size;
                 if idx >= layer_size {
-                    self.tilemap.tiles[idx - layer_size]
-                        .logic
-                        .load(Ordering::Relaxed)
+                    self.tilemap.value(idx - layer_size)
                 } else {
                     0
                 }
@@ -541,7 +526,7 @@ impl SlimSimulation {
                 let layer_size = self.tilemap.layer_size;
                 let target = idx + layer_size;
                 if target < self.tilemap.tiles.len() {
-                    let source = self.tilemap.tiles[target].logic.load(Ordering::Relaxed);
+                    let source = self.tilemap.value(target);
                     (source >> self.tile_shift[idx]) & self.tile_mask[idx]
                 } else {
                     0
@@ -550,9 +535,7 @@ impl SlimSimulation {
             TileType::WeightedViaDown => {
                 let layer_size = self.tilemap.layer_size;
                 if idx >= layer_size {
-                    let source = self.tilemap.tiles[idx - layer_size]
-                        .logic
-                        .load(Ordering::Relaxed);
+                    let source = self.tilemap.value(idx - layer_size);
                     (source >> self.tile_shift[idx]) & self.tile_mask[idx]
                 } else {
                     0
@@ -564,7 +547,7 @@ impl SlimSimulation {
                 let layer_size = self.tilemap.layer_size;
                 let target = idx + layer_size;
                 if target < self.tilemap.tiles.len() {
-                    self.tilemap.tiles[target].logic.load(Ordering::Relaxed)
+                    self.tilemap.value(target)
                 } else {
                     0
                 }
@@ -572,9 +555,7 @@ impl SlimSimulation {
             TileType::ThresholdViaDown => {
                 let layer_size = self.tilemap.layer_size;
                 if idx >= layer_size {
-                    self.tilemap.tiles[idx - layer_size]
-                        .logic
-                        .load(Ordering::Relaxed)
+                    self.tilemap.value(idx - layer_size)
                 } else {
                     0
                 }
@@ -594,14 +575,13 @@ impl SlimSimulation {
             let up = self.load_logic_idx(n[2]);
             let down = self.load_logic_idx(n[3]);
 
-            let tile = &self.tilemap.tiles[idx];
-            let current = tile.logic.load(Ordering::Relaxed);
+            let current = self.tilemap.value(idx);
             let tt = self.tile_type_at(idx);
             let new_out = self.compute_tile_output(tt, left, right, up, down, current, idx);
 
             eval_count += 1;
             if new_out != current {
-                tile.logic.store(new_out, Ordering::Relaxed);
+                self.tilemap.set_value(idx, new_out);
                 change_count += 1;
             }
         }
@@ -744,9 +724,7 @@ mod tests {
             let slim_src_idx = layer_size + 4 * w + 4;
             slim.tilemap.tiles[slim_src_idx].meta.tile_type = TileType::Const;
             slim.meta_fast[slim_src_idx] = TileType::Const;
-            slim.tilemap.tiles[slim_src_idx]
-                .logic
-                .store(source, std::sync::atomic::Ordering::Relaxed);
+            slim.tilemap.set_value(slim_src_idx, source);
             // L0 WeightedViaUp at (4,4)
             let slim_via_idx = 4 * w + 4;
             slim.tilemap.tiles[slim_via_idx].meta.tile_type = TileType::WeightedViaUp;
@@ -754,9 +732,7 @@ mod tests {
             slim.set_tile_mask(slim_via_idx, mask);
             slim.set_tile_shift(slim_via_idx, shift);
             slim.eval_tile(slim_via_idx);
-            let slim_result = slim.tilemap.tiles[slim_via_idx]
-                .logic
-                .load(std::sync::atomic::Ordering::Relaxed);
+            let slim_result = slim.tilemap.value(slim_via_idx);
 
             assert_eq!(
                 full_result, expected,

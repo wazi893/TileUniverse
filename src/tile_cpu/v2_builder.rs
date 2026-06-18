@@ -7,7 +7,7 @@ use crate::simulation::Simulation;
 use crate::tile_cpu::v2_execute::TileCpuV2;
 use crate::tile_cpu::v2_mmio::V2MmioHandle;
 use crate::tile_cpu::v2_mmio_devices::V2LinkMailboxDevice;
-use crate::tile_cpu::v2_wiring::wire_v2_cpu;
+use crate::tile_cpu::v2_wiring::{V2CpuIndices, wire_v2_cpu};
 use crate::tiles::tile_meta::TileType;
 
 use crate::synth::bridge::BridgeConfig;
@@ -427,6 +427,29 @@ impl V2Builder {
         self
     }
 
+    /// Re-derive the physical tile-index layout for this builder's config WITHOUT
+    /// consuming the builder or mutating the real sim. The tile indices are layout
+    /// positions (content-independent), so wiring a throwaway `scratch` sim of the
+    /// same dimensions yields the same `V2CpuIndices` the real `build()` produces.
+    ///
+    /// This is the no-`v2_execute.rs`-edit hook the V2→CUDA device-cycle model uses to
+    /// locate injection/readback tiles (the named index fields are private on
+    /// `TileCpuV2`). Additive and golden-neutral — `build()` is unchanged.
+    ///
+    /// Returns a LAYOUT-only catalog: only tile-index fields are populated; the
+    /// scope/eval-order/cache fields `build_core` computes are intentionally empty here.
+    #[allow(dead_code)] // consumed by the V2→CUDA device-cycle driver (task #5).
+    pub(crate) fn derive_indices(&self, scratch: &mut Simulation) -> V2CpuIndices {
+        wire_v2_cpu(
+            scratch,
+            self.origin,
+            &self.program,
+            self.rom_size,
+            self.ram_size,
+            self.pc_addr_bits(),
+        )
+    }
+
     /// Internal: shared CPU construction (everything except wire chain fusion).
     /// Returns (cpu, placed_mask) for optional deferred chain finalization.
     fn build_core(self, sim: &mut Simulation) -> (TileCpuV2, Vec<u64>) {
@@ -620,7 +643,7 @@ impl V2Builder {
             }
             // Sprint 335: JIT-compile settle ops.
             if let Err(e) = crate::tile_cpu::tile_jit::preflight_check(&cpu.settle_compact_ops) {
-                // Expected: settle may have COP_WIRE/COP_GENERIC. Not fatal.
+                // Expected: settle may have COP_WIRE/COP_GENERIC/COP_THRESHOLD_VIA. Not fatal.
                 let _ = e; // silently skip JIT for settle
             } else {
                 match crate::tile_cpu::tile_jit::compile_tile_eval(
@@ -632,7 +655,7 @@ impl V2Builder {
                 }
             }
             // Sprint 352: JIT-compile backbone ops (filtered for JIT compatibility).
-            // Backbone is structurally clean (no COP_WIRE/COP_GENERIC) so preflight
+            // Backbone is structurally clean (no COP_WIRE/COP_GENERIC/COP_THRESHOLD_VIA) so preflight
             // should always pass, enabling JIT even when full settle JIT is blocked.
             if !cpu.backbone_ops.is_empty() {
                 if let Err(e) = crate::tile_cpu::tile_jit::preflight_check(&cpu.backbone_ops) {

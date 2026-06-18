@@ -72,6 +72,19 @@ pub enum RoutingError {
         source: (usize, usize, usize),
         target: (usize, usize, usize),
     },
+    /// Post-route structural validation failed: a net's route tree contains an
+    /// illegal layer-transition shape (same-net cells stacked on adjacent
+    /// layers without a via edge, opposing vias forming a read cycle, a via
+    /// reading both layers, or one cell feeding two vias). Returning such a
+    /// layout would silently mis-evaluate: the export cannot distinguish a
+    /// coincidental z-stack from a real transition.
+    CorruptLayerTransition {
+        net_id: u32,
+        x: usize,
+        y: usize,
+        z: usize,
+        reason: &'static str,
+    },
 }
 
 impl std::fmt::Display for RoutingError {
@@ -112,6 +125,16 @@ impl std::fmt::Display for RoutingError {
                     source, target
                 )
             }
+            RoutingError::CorruptLayerTransition {
+                net_id,
+                x,
+                y,
+                z,
+                reason,
+            } => write!(
+                f,
+                "corrupt layer transition for net {net_id} at ({x}, {y}, {z}): {reason}"
+            ),
         }
     }
 }
@@ -394,8 +417,9 @@ pub fn route_placed_netlist(
                         config.prefer_horizontal_first,
                         config.no_crossings,
                     )
-                    .map(|_| {
+                    .and_then(|_| {
                         let routes = flatten_routes(&net_trees);
+                        validate_routed_segments(&routes)?;
                         let mut routed = routing_view.clone();
                         routed.routes = routes;
                         routed.input_anchors = anchors.inputs.iter().map(|c| (c.x, c.y)).collect();
@@ -404,7 +428,7 @@ pub fn route_placed_netlist(
                             .iter()
                             .map(|opt| opt.map(|c| (c.x, c.y)).unwrap_or((0, 0)))
                             .collect();
-                        routed
+                        Ok(routed)
                     });
                 }
             }
@@ -418,6 +442,9 @@ pub fn route_placed_netlist(
     }
 
     let routes = flatten_routes(&net_trees);
+    // Mandatory post-route structural validation: never hand the export a
+    // layout with an ambiguous/corrupt layer transition.
+    validate_routed_segments(&routes)?;
     let mut routed = routing_view;
     routed.routes = routes;
     routed.input_anchors = anchors.inputs.iter().map(|c| (c.x, c.y)).collect();
@@ -427,6 +454,75 @@ pub fn route_placed_netlist(
         .map(|opt| opt.map(|c| (c.x, c.y)).unwrap_or((0, 0)))
         .collect();
     Ok(routed)
+}
+
+/// Final structural validation over the flattened segments of every net.
+///
+/// Checks, per net:
+/// - every z-adjacent same-(x,y) pair of segments carries exactly one via of
+///   the correct orientation (lower `ViaUp` XOR upper `ViaDown`);
+/// - every via segment's cross-layer source cell belongs to the same net
+///   (`ViaDown` additionally may not sit at z=0);
+/// - no cell feeds more than one via.
+fn validate_routed_segments(routes: &[RoutedSegment]) -> Result<(), RoutingError> {
+    let mut cells: HashMap<(u32, usize, usize, usize), TileType> = HashMap::new();
+    for seg in routes {
+        cells.insert((seg.net_id, seg.x, seg.y, seg.z), seg.tile_type);
+    }
+
+    for (&(net_id, x, y, z), &tile) in &cells {
+        let corrupt = |z: usize, reason: &'static str| {
+            Err(RoutingError::CorruptLayerTransition {
+                net_id,
+                x,
+                y,
+                z,
+                reason,
+            })
+        };
+
+        if let Some(&above) = cells.get(&(net_id, x, y, z + 1)) {
+            let lower_via_up = tile == TileType::ViaUp;
+            let upper_via_down = above == TileType::ViaDown;
+            match (lower_via_up, upper_via_down) {
+                (false, false) => {
+                    return corrupt(z, "z-adjacent same-net segments without a via");
+                }
+                (true, true) => return corrupt(z, "opposing vias form a read cycle"),
+                _ => {}
+            }
+        }
+
+        match tile {
+            TileType::ViaUp => {
+                if !cells.contains_key(&(net_id, x, y, z + 1)) {
+                    return corrupt(z, "ViaUp reads a cell outside its net");
+                }
+            }
+            TileType::ViaDown => {
+                if z == 0 {
+                    return corrupt(z, "ViaDown at z=0 has no layer below");
+                }
+                if !cells.contains_key(&(net_id, x, y, z - 1)) {
+                    return corrupt(z, "ViaDown reads a cell outside its net");
+                }
+            }
+            _ => {}
+        }
+
+        // One via reader per source cell.
+        let read_by_below = z > 0
+            && cells
+                .get(&(net_id, x, y, z - 1))
+                .is_some_and(|&t| t == TileType::ViaUp);
+        let read_by_above = cells
+            .get(&(net_id, x, y, z + 1))
+            .is_some_and(|&t| t == TileType::ViaDown);
+        if read_by_below && read_by_above {
+            return corrupt(z, "cell feeds two vias (one reader per source)");
+        }
+    }
+    Ok(())
 }
 
 /// Remove a net's routes from occupied map and net_trees.
@@ -921,6 +1017,91 @@ fn endpoint_name(netlist: &MappedNetlist, endpoint: Endpoint) -> String {
 
 const BEND_PENALTY: usize = 2;
 
+/// Layer-transition exclusivity (router correctness invariant).
+///
+/// The flattened route a net hands to the export is a coord set + tile types;
+/// the only edge information that survives is the via tile on a transition's
+/// receiving cell (`ViaUp` reads z+1, `ViaDown` reads z-1). Therefore:
+///
+/// 1. A cell NOT yet in the net's tree may not be placed directly above or
+///    below an existing same-net cell unless this very step IS the via
+///    transition from that cell. Otherwise the layout contains a same-net
+///    z-stacked pair with no via edge — a shape the export cannot distinguish
+///    from a real transition (it silently mis-threads wire directions).
+/// 2. A z-step may not give a cell both via read directions, oppose an
+///    existing via edge (read cycle), or make a cell feed two vias
+///    (`via_fwd` allows one via reader per source tile).
+fn layer_transition_is_legal(
+    current: Coord,
+    next: Coord,
+    orient: u8,
+    tree: &BTreeMap<Coord, u8>,
+) -> bool {
+    if orient == ORIENT_Z {
+        let cur_mask = tree.get(&current).copied().unwrap_or(0);
+        let next_mask = tree.get(&next).copied().unwrap_or(0);
+        if next.z > current.z {
+            // `next` becomes a ViaDown reading `current`.
+            // Read cycle: `current` already reads `next` from above.
+            if cur_mask & VIA_READS_ABOVE != 0 {
+                return false;
+            }
+            // Direction conflict: `next` already reads from above.
+            if next_mask & VIA_READS_ABOVE != 0 {
+                return false;
+            }
+            // Second reader: a cell below `current` already reads it.
+            if current.z > 0 {
+                let below = Coord {
+                    z: current.z - 1,
+                    ..current
+                };
+                if tree.get(&below).is_some_and(|m| m & VIA_READS_ABOVE != 0) {
+                    return false;
+                }
+            }
+        } else {
+            // `next` becomes a ViaUp reading `current`.
+            if cur_mask & VIA_READS_BELOW != 0 {
+                return false;
+            }
+            if next_mask & VIA_READS_BELOW != 0 {
+                return false;
+            }
+            let above = Coord {
+                z: current.z + 1,
+                ..current
+            };
+            if tree.get(&above).is_some_and(|m| m & VIA_READS_BELOW != 0) {
+                return false;
+            }
+        }
+    }
+    // Phantom-stack prevention: a fresh cell may not sit directly above or
+    // below an existing same-net cell unless this step is the via transition
+    // from that cell.
+    if !tree.contains_key(&next) {
+        let above = Coord {
+            z: next.z + 1,
+            ..next
+        };
+        if tree.contains_key(&above) && !(orient == ORIENT_Z && current == above) {
+            return false;
+        }
+        if next.z > 0 {
+            let below = Coord {
+                z: next.z - 1,
+                ..next
+            };
+            if tree.contains_key(&below) && !(orient == ORIENT_Z && current == below) {
+                return false;
+            }
+        }
+    }
+    true
+}
+
+#[allow(clippy::too_many_arguments)]
 fn find_route(
     starts: &[Coord],
     target: Coord,
@@ -930,6 +1111,7 @@ fn find_route(
     reserved: &HashMap<Coord, ReservedTerminal>,
     occupied: &HashMap<Coord, CoordUsage>,
     history: &HashMap<Coord, usize>,
+    tree: &BTreeMap<Coord, u8>,
     _prefer_horizontal_first: bool,
     no_crossings: bool,
 ) -> Option<Vec<Coord>> {
@@ -978,6 +1160,9 @@ fn find_route(
                 occupied,
                 no_crossings,
             ) {
+                continue;
+            }
+            if !layer_transition_is_legal(current.coord, next, orient, tree) {
                 continue;
             }
             if next == target && !endpoint_is_available(next, net_id, occupied) {
@@ -1066,10 +1251,11 @@ fn coord_is_traversable(
 ) -> bool {
     // Reserved terminals: always use orientation-aware check (allow perpendicular
     // crossing through pin areas even in no_crossings mode).
-    if let Some(term) = reserved.get(&coord) {
-        if term.net_id != net_id && (term.orient & orient) != 0 {
-            return false;
-        }
+    if let Some(term) = reserved.get(&coord)
+        && term.net_id != net_id
+        && (term.orient & orient) != 0
+    {
+        return false;
     }
     if let Some(usage) = occupied.get(&coord) {
         if no_crossings {
@@ -1080,20 +1266,15 @@ fn coord_is_traversable(
                 return false;
             }
         } else {
-            if orient & ORIENT_H != 0 {
-                if usage.horizontal_owner.is_some_and(|owner| owner != net_id) {
-                    return false;
-                }
+            if orient & ORIENT_H != 0 && usage.horizontal_owner.is_some_and(|owner| owner != net_id)
+            {
+                return false;
             }
-            if orient & ORIENT_V != 0 {
-                if usage.vertical_owner.is_some_and(|owner| owner != net_id) {
-                    return false;
-                }
+            if orient & ORIENT_V != 0 && usage.vertical_owner.is_some_and(|owner| owner != net_id) {
+                return false;
             }
-            if orient & ORIENT_Z != 0 {
-                if usage.layer_owner.is_some_and(|owner| owner != net_id) {
-                    return false;
-                }
+            if orient & ORIENT_Z != 0 && usage.layer_owner.is_some_and(|owner| owner != net_id) {
+                return false;
             }
         }
     }
@@ -1206,6 +1387,7 @@ fn route_single_net_with_history(
             reserved,
             &local_occupied,
             history,
+            &local_tree,
             prefer_horizontal_first,
             no_crossings,
         )
@@ -1219,8 +1401,67 @@ fn route_single_net_with_history(
         apply_path(net_id, &path, &mut local_tree, &mut local_occupied)?;
     }
 
+    // Structural validation BEFORE committing: a net whose tree violates the
+    // layer-transition invariant counts as failed (the negotiate/rip-up
+    // machinery retries it) instead of poisoning the final layout.
+    validate_net_tree(net_id, &local_tree)?;
+
     net_trees.insert(net_id, local_tree);
     *occupied = local_occupied;
+    Ok(())
+}
+
+/// Post-route structural validation of one net's route tree.
+///
+/// Invariant: every same-net pair of cells stacked on adjacent layers must be
+/// a real via edge — exactly one of (lower is ViaUp reading up, upper is
+/// ViaDown reading down) — no cell may read both layers, and no cell may feed
+/// more than one via (the simulation's `via_fwd` permits a single via reader
+/// per source tile).
+fn validate_net_tree(net_id: u32, tree: &BTreeMap<Coord, u8>) -> Result<(), RoutingError> {
+    let corrupt = |coord: Coord, reason: &'static str| {
+        Err(RoutingError::CorruptLayerTransition {
+            net_id,
+            x: coord.x,
+            y: coord.y,
+            z: coord.z,
+            reason,
+        })
+    };
+
+    for (&coord, &mask) in tree {
+        if mask & VIA_READS_ABOVE != 0 && mask & VIA_READS_BELOW != 0 {
+            return corrupt(coord, "via cell reads both adjacent layers");
+        }
+        let above = Coord {
+            z: coord.z + 1,
+            ..coord
+        };
+        let above_mask = tree.get(&above).copied();
+        if let Some(above_mask) = above_mask {
+            let lower_reads_up = mask & VIA_READS_ABOVE != 0;
+            let upper_reads_down = above_mask & VIA_READS_BELOW != 0;
+            match (lower_reads_up, upper_reads_down) {
+                (false, false) => {
+                    return corrupt(coord, "z-stacked same-net cells without a via edge");
+                }
+                (true, true) => return corrupt(coord, "opposing vias form a read cycle"),
+                _ => {}
+            }
+        }
+        // One via reader per source cell.
+        let read_by_below = coord.z > 0
+            && tree
+                .get(&Coord {
+                    z: coord.z - 1,
+                    ..coord
+                })
+                .is_some_and(|m| m & VIA_READS_ABOVE != 0);
+        let read_by_above = above_mask.is_some_and(|m| m & VIA_READS_BELOW != 0);
+        if read_by_below && read_by_above {
+            return corrupt(coord, "cell feeds two vias (one reader per source)");
+        }
+    }
     Ok(())
 }
 
@@ -1776,6 +2017,103 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// Layer-transition invariant: the tree validator rejects phantom stacks,
+    /// opposing vias, and ambiguous via cells, and accepts real via edges.
+    #[test]
+    fn validate_net_tree_enforces_layer_transition_invariant() {
+        let c0 = Coord { x: 5, y: 5, z: 0 };
+        let c1 = Coord { x: 5, y: 5, z: 1 };
+
+        // Phantom stack: same-net cells on adjacent layers, no via edge.
+        let mut tree: BTreeMap<Coord, u8> = BTreeMap::new();
+        tree.insert(c0, ORIENT_V);
+        tree.insert(c1, ORIENT_H);
+        assert!(matches!(
+            validate_net_tree(7, &tree),
+            Err(RoutingError::CorruptLayerTransition { net_id: 7, .. })
+        ));
+
+        // Real via edge (upper ViaDown reads lower): valid.
+        tree.insert(c0, ORIENT_V | ORIENT_Z);
+        tree.insert(c1, ORIENT_Z | VIA_READS_BELOW);
+        assert!(validate_net_tree(7, &tree).is_ok());
+
+        // Opposing vias (lower also reads upper): read cycle.
+        tree.insert(c0, ORIENT_Z | VIA_READS_ABOVE);
+        assert!(matches!(
+            validate_net_tree(7, &tree),
+            Err(RoutingError::CorruptLayerTransition { .. })
+        ));
+
+        // A single cell reading both adjacent layers is ambiguous.
+        let mut both = BTreeMap::new();
+        both.insert(c1, ORIENT_Z | VIA_READS_ABOVE | VIA_READS_BELOW);
+        assert!(matches!(
+            validate_net_tree(3, &both),
+            Err(RoutingError::CorruptLayerTransition { .. })
+        ));
+    }
+
+    /// Layer-transition invariant at segment level: stacked same-net segments
+    /// must carry exactly one correctly-oriented via.
+    #[test]
+    fn validate_routed_segments_enforces_layer_transition_invariant() {
+        let seg = |net_id, x, y, z, tile_type| RoutedSegment {
+            net_id,
+            x,
+            y,
+            z,
+            tile_type,
+        };
+
+        // Stacked without a via: the hls_mix6 corruption shape.
+        let phantom = vec![
+            seg(11, 31, 41, 0, TileType::WireV),
+            seg(11, 31, 41, 1, TileType::Wire),
+        ];
+        assert!(matches!(
+            validate_routed_segments(&phantom),
+            Err(RoutingError::CorruptLayerTransition { net_id: 11, .. })
+        ));
+
+        // Proper descent: lower cell is ViaUp reading the upper cell.
+        let descent = vec![
+            seg(11, 31, 41, 0, TileType::ViaUp),
+            seg(11, 31, 41, 1, TileType::Wire),
+        ];
+        assert!(validate_routed_segments(&descent).is_ok());
+
+        // Proper ascent: upper cell is ViaDown reading the lower cell.
+        let ascent = vec![
+            seg(11, 4, 44, 0, TileType::WireH),
+            seg(11, 4, 44, 1, TileType::ViaDown),
+        ];
+        assert!(validate_routed_segments(&ascent).is_ok());
+
+        // Opposing vias form a read cycle.
+        let cycle = vec![
+            seg(2, 1, 1, 0, TileType::ViaUp),
+            seg(2, 1, 1, 1, TileType::ViaDown),
+        ];
+        assert!(matches!(
+            validate_routed_segments(&cycle),
+            Err(RoutingError::CorruptLayerTransition { .. })
+        ));
+
+        // Vias reading cells outside their own net are dead inputs.
+        let dangling_up = vec![seg(4, 2, 2, 0, TileType::ViaUp)];
+        assert!(validate_routed_segments(&dangling_up).is_err());
+        let dangling_down = vec![seg(4, 2, 2, 1, TileType::ViaDown)];
+        assert!(validate_routed_segments(&dangling_down).is_err());
+
+        // Different nets stacked on adjacent layers are fine (no shared signal).
+        let cross_net = vec![
+            seg(1, 9, 9, 0, TileType::WireH),
+            seg(2, 9, 9, 1, TileType::WireV),
+        ];
+        assert!(validate_routed_segments(&cross_net).is_ok());
     }
 
     #[test]

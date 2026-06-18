@@ -3900,11 +3900,11 @@ fn main() {
     println!("phase: {}", phase);
 
     // Final logic checksum to prove identical end state across modes/builds
-    use std::sync::atomic::Ordering;
-    let logic_checksum: u64 = sim.tilemap.tiles.iter().fold(0u64, |acc, t| {
-        acc.wrapping_mul(31)
-            .wrapping_add(t.logic.load(Ordering::Relaxed))
-    });
+    let logic_checksum: u64 = sim
+        .tilemap
+        .values_snapshot()
+        .iter()
+        .fold(0u64, |acc, v| acc.wrapping_mul(31).wrapping_add(*v));
     println!("logic_checksum: 0x{:016x}", logic_checksum);
 
     // EPIC59A: final summary for JIT backend to ensure counters are visible even if interim logging was suppressed

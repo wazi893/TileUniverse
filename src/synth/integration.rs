@@ -9,7 +9,6 @@
 use crate::simulation::Simulation;
 use crate::synth::aig::{Aig, AigLit};
 use crate::synth::export::SynthExport;
-use std::sync::atomic::Ordering;
 
 // ---------------------------------------------------------------------------
 // Branch-taken truth table
@@ -1705,7 +1704,7 @@ pub fn drive_injected_block(
 
     // 1. Reset circuit tiles to 0 and mark dirty.
     for &idx in &block.circuit_indices {
-        sim.tilemap.tiles[idx].logic.store(0, Ordering::Relaxed);
+        sim.tilemap.set_value(idx, 0);
         sim.dirty.mark_dirty(idx);
     }
 
@@ -1746,7 +1745,7 @@ pub fn drive_injected_block(
     block
         .output_indices
         .iter()
-        .map(|&idx| sim.tilemap.tiles[idx].logic.load(Ordering::Relaxed) != 0)
+        .map(|&idx| sim.tilemap.value(idx) != 0)
         .collect()
 }
 

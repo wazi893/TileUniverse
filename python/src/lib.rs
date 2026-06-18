@@ -1296,8 +1296,8 @@ impl PyQuantumSimulation {
             )));
         }
 
-        match self.inner.tilemap.get_tile(x, y) {
-            Some(tile) => Ok(tile.logic.load(std::sync::atomic::Ordering::Relaxed)),
+        match self.inner.tilemap.value_at(x, y) {
+            Some(v) => Ok(v),
             None => Err(PyValueError::new_err(format!("No tile at ({}, {})", x, y))),
         }
     }

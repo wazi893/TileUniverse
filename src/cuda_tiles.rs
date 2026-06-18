@@ -32,12 +32,7 @@ impl GpuTilemap {
         let tile_count = width * height;
 
         // Extract logic values
-        let logic_host: Vec<u64> = sim
-            .tilemap
-            .tiles
-            .iter()
-            .map(|t| t.logic.load(Ordering::Relaxed))
-            .collect();
+        let logic_host: Vec<u64> = sim.tilemap.values_snapshot();
 
         // Extract tile types as u8
         let types_host: Vec<u8> = sim
@@ -105,7 +100,7 @@ impl GpuTilemap {
 
         let logic_host = rt.download(&self.logic)?;
         for (idx, val) in logic_host.iter().enumerate() {
-            sim.tilemap.tiles[idx].logic.store(*val, Ordering::Relaxed);
+            sim.tilemap.set_value(idx, *val);
         }
         Ok(())
     }
@@ -1847,12 +1842,7 @@ impl GpuWorldBatch {
         let total_tiles = tiles_per_world * num_worlds;
 
         // Extract logic values from template
-        let template_logic: Vec<u64> = sim
-            .tilemap
-            .tiles
-            .iter()
-            .map(|t| t.logic.load(Ordering::Relaxed))
-            .collect();
+        let template_logic: Vec<u64> = sim.tilemap.values_snapshot();
 
         // Replicate for all worlds
         let mut logic_host: Vec<u64> = Vec::with_capacity(total_tiles);
@@ -2126,12 +2116,7 @@ pub fn validate_gpu_correctness(
     }
 
     // Extract CPU final state
-    let cpu_logic: Vec<u64> = cpu_sim
-        .tilemap
-        .tiles
-        .iter()
-        .map(|t| t.logic.load(Ordering::Relaxed))
-        .collect();
+    let cpu_logic: Vec<u64> = cpu_sim.tilemap.values_snapshot();
 
     // Run GPU simulation using depth-batched kernel (single world)
     let mut batch = GpuWorldBatch::from_simulation_batch(rt, &gpu_sim, 1)?;
@@ -9837,12 +9822,7 @@ impl GpuSparseContext {
         let num_words = (tile_count + 63) / 64;
 
         // Extract logic values
-        let logic_host: Vec<u64> = sim
-            .tilemap
-            .tiles
-            .iter()
-            .map(|t| t.logic.load(Ordering::Relaxed))
-            .collect();
+        let logic_host: Vec<u64> = sim.tilemap.values_snapshot();
 
         // Extract tile types as u8
         let types_host: Vec<u8> = sim
@@ -10088,7 +10068,7 @@ impl GpuSparseContext {
 
         let logic_host = rt.download(&self.logic)?;
         for (idx, val) in logic_host.iter().enumerate() {
-            sim.tilemap.tiles[idx].logic.store(*val, Ordering::Relaxed);
+            sim.tilemap.set_value(idx, *val);
         }
         Ok(())
     }

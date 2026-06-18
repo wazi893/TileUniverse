@@ -32,12 +32,7 @@ fn test_dj_qdemo_constant_zero() {
     }
 
     // Read result (only first n_qubits bits matter)
-    let result = sim
-        .tilemap
-        .get_tile(50, 50)
-        .unwrap()
-        .logic
-        .load(Ordering::Relaxed);
+    let result = sim.tilemap.value_at(50, 50).unwrap();
     let input_bits = result & ((1u64 << n_qubits) - 1);
 
     // Constant oracle → should measure |000⟩
@@ -64,12 +59,7 @@ fn test_dj_qdemo_constant_one() {
         sim.tick();
     }
 
-    let result = sim
-        .tilemap
-        .get_tile(50, 50)
-        .unwrap()
-        .logic
-        .load(Ordering::Relaxed);
+    let result = sim.tilemap.value_at(50, 50).unwrap();
     let input_bits = result & ((1u64 << n_qubits) - 1);
 
     // Constant oracle → should measure |000⟩
@@ -97,12 +87,7 @@ fn test_dj_qdemo_balanced() {
         sim.tick();
     }
 
-    let result = sim
-        .tilemap
-        .get_tile(50, 50)
-        .unwrap()
-        .logic
-        .load(Ordering::Relaxed);
+    let result = sim.tilemap.value_at(50, 50).unwrap();
     let input_bits = result & ((1u64 << n_qubits) - 1);
 
     // Balanced oracle → should NOT measure |000⟩
@@ -130,12 +115,7 @@ fn test_bv_qdemo_finds_string() {
         sim.tick();
     }
 
-    let result = sim
-        .tilemap
-        .get_tile(50, 50)
-        .unwrap()
-        .logic
-        .load(Ordering::Relaxed);
+    let result = sim.tilemap.value_at(50, 50).unwrap();
     let input_bits = result & ((1u64 << n_qubits) - 1);
 
     // Should recover exact hidden string
@@ -163,12 +143,7 @@ fn test_bv_qdemo_exhaustive() {
             sim.tick();
         }
 
-        let result = sim
-            .tilemap
-            .get_tile(50, 50)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(50, 50).unwrap();
         let input_bits = result & ((1u64 << n_qubits) - 1);
 
         assert_eq!(
@@ -197,12 +172,7 @@ fn test_dj_qdemo_all_balanced_patterns() {
             sim.tick();
         }
 
-        let result = sim
-            .tilemap
-            .get_tile(50, 50)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(50, 50).unwrap();
         let input_bits = result & ((1u64 << n_qubits) - 1);
 
         assert_ne!(
@@ -246,12 +216,7 @@ fn test_multiple_dj_tiles() {
     let expected_constant = [true, true, false, false];
 
     for (i, &(x, y)) in positions.iter().enumerate() {
-        let result = sim
-            .tilemap
-            .get_tile(x, y)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(x, y).unwrap();
         let input_bits = result & ((1u64 << n_qubits) - 1);
         let is_constant = input_bits == 0;
 
@@ -286,12 +251,7 @@ fn test_multiple_bv_tiles() {
     }
 
     for (&hidden, &(x, y)) in hidden_strings.iter().zip(positions.iter()) {
-        let result = sim
-            .tilemap
-            .get_tile(x, y)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(x, y).unwrap();
         let input_bits = result & ((1u64 << n_qubits) - 1);
 
         assert_eq!(

@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Surface Code · Decoder</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  :root{
+    --bg:#070810; --panel:#0e1018; --line:#222637; --txt:#c6cad8; --dim:#646a82;
+    --accent:#8a8aff; --accent2:#aab0ff; --good:#46d08a; --bad:#ff5470;
+    --red:#ff5a6a; --blue:#42a6ff; --purple:#c07aff;
+  }
+  html,body{ height:100%; }
+  body{ background:var(--bg); color:var(--txt); height:100vh; overflow:hidden; display:flex; flex-direction:column;
+    font-family:'Consolas','SF Mono','Fira Code',ui-monospace,monospace; -webkit-font-smoothing:antialiased; }
+  header{ display:flex; align-items:center; gap:14px; padding:9px 16px; flex-shrink:0; z-index:5;
+    background:linear-gradient(180deg,#0d1018,#090b12); border-bottom:1px solid var(--line); }
+  .brand{ display:flex; align-items:baseline; gap:9px; margin-right:4px; }
+  .brand .logo{ font-size:15px; font-weight:700; letter-spacing:.4px; color:#eef3ff; }
+  .brand .logo b{ color:var(--accent2); }
+  .brand .sub{ font-size:10px; color:var(--dim); letter-spacing:1.2px; text-transform:uppercase; }
+  .sep{ width:1px; height:26px; background:var(--line); }
+  select{ background:#141722; color:var(--accent2); border:1px solid #2c3146; border-radius:6px; padding:5px 9px; font:inherit; font-size:12px; cursor:pointer; outline:none; }
+  select:hover{ border-color:#3e4566; }
+  .transport{ display:flex; gap:6px; }
+  .tbtn{ width:34px; height:30px; display:flex; align-items:center; justify-content:center; background:#141722; border:1px solid #2c3146; border-radius:6px; color:var(--accent2); font-size:13px; cursor:pointer; transition:all .12s; user-select:none; }
+  .tbtn:hover{ border-color:#5a5a82; background:#1a1a2c; color:#fff; }
+  .tbtn.play{ width:42px; background:#23234a; border-color:#4a4a8a; }
+  .scrub-wrap{ flex:1; display:flex; align-items:center; gap:10px; min-width:120px; }
+  input[type=range]{ -webkit-appearance:none; appearance:none; height:4px; border-radius:3px; background:#1f2433; outline:none; cursor:pointer; }
+  input[type=range].scrub{ flex:1; }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:14px; height:14px; border-radius:50%; background:var(--accent2); border:2px solid #070810; box-shadow:0 0 8px var(--accent); }
+  .speed{ display:flex; align-items:center; gap:6px; font-size:11px; color:var(--dim); }
+  .speed input{ width:78px; }
+  .shotc{ font-size:12px; color:var(--accent2); min-width:120px; text-align:right; white-space:nowrap; }
+  .shotc b{ color:#fff; }
+
+  #stage{ flex:1; display:flex; overflow:hidden; position:relative; }
+  #canvas-wrap{ flex:1; position:relative; overflow:hidden; background:radial-gradient(ellipse at center,#0a0c16,#070810); }
+  canvas#view{ display:block; cursor:grab; }
+  canvas#view:active{ cursor:grabbing; }
+  .overlay{ position:absolute; pointer-events:none; }
+  #verdict{ left:50%; top:18px; transform:translateX(-50%); font-size:13px; font-weight:700; letter-spacing:.5px; padding:5px 14px; border-radius:20px; opacity:0; transition:opacity .25s; }
+  #verdict.ok{ color:#06140d; background:var(--good); box-shadow:0 0 20px #46d08a66; }
+  #verdict.bad{ color:#1a0610; background:var(--bad); box-shadow:0 0 20px #ff547066; }
+  #legend{ left:14px; bottom:12px; display:flex; flex-direction:column; gap:3px; font-size:10.5px; }
+  #legend .li{ display:flex; align-items:center; gap:6px; color:var(--dim); }
+  #legend .sw{ width:11px; height:11px; border-radius:3px; }
+  #hint{ right:14px; bottom:12px; font-size:10px; color:#363b50; text-align:right; line-height:1.6; }
+
+  #panel{ width:316px; flex-shrink:0; background:var(--panel); border-left:1px solid var(--line); display:flex; flex-direction:column; overflow-y:auto; }
+  .sec{ padding:13px 15px; border-bottom:1px solid #181a26; }
+  .sec h2{ font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:1.4px; margin-bottom:9px; font-weight:600; }
+  .hero{ background:linear-gradient(150deg,#13131f,#0d1320); border:1px solid #262a44; border-radius:9px; padding:14px; }
+  .hero .num{ font-size:32px; font-weight:800; letter-spacing:-.5px; color:#fff; line-height:1; }
+  .hero .num .unit{ font-size:14px; font-weight:600; color:var(--accent2); }
+  .hero .label{ font-size:11px; color:var(--accent); margin-top:4px; }
+  .hero .meta{ margin-top:9px; font-size:10.5px; color:var(--dim); line-height:1.6; }
+  .hero .meta b{ color:#b9c0d4; }
+  .stat-row{ display:flex; justify-content:space-between; font-size:12px; padding:3px 0; }
+  .stat-row .k{ color:var(--dim); } .stat-row .v{ color:#cfd4e4; } .stat-row .v b{ color:#fff; }
+  .outcome{ font-weight:700; } .outcome.ok{ color:var(--good); } .outcome.bad{ color:var(--bad); }
+  .blurb{ font-size:11px; color:#8088a0; line-height:1.7; } .blurb b{ color:var(--accent2); } .blurb .r{ color:var(--red); } .blurb .b{ color:var(--blue); }
+  ::-webkit-scrollbar{ width:8px; } ::-webkit-scrollbar-thumb{ background:#222637; border-radius:4px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand"><span class="logo">Surface <b>Code</b></span><span class="sub">decoder</span></div>
+  <div class="sep"></div>
+  <select id="ds-select" title="Code distance / error rate"></select>
+  <div class="sep"></div>
+  <div class="transport">
+    <div class="tbtn" id="btn-first" title="Restart">⏮</div>
+    <div class="tbtn" id="btn-back" title="Prev shot (←)">◀</div>
+    <div class="tbtn play" id="btn-play" title="Play / Pause (Space)">▶</div>
+    <div class="tbtn" id="btn-fwd" title="Next shot (→)">▶▶</div>
+  </div>
+  <div class="scrub-wrap"><input type="range" class="scrub" id="scrub" min="0" max="1" value="0" step="1"></div>
+  <div class="speed"><span>spd</span><input type="range" id="speed" min="1" max="12" value="4"></div>
+  <div class="shotc" id="shotc">shot <b>0</b>/0</div>
+</header>
+
+<div id="stage">
+  <div id="canvas-wrap">
+    <canvas id="view"></canvas>
+    <div class="overlay" id="verdict"></div>
+    <div class="overlay" id="legend"></div>
+    <div class="overlay" id="hint">scroll: zoom · drag: pan · space: play<br>← → step a shot at a time</div>
+  </div>
+
+  <aside id="panel">
+    <div class="sec">
+      <h2>Logical-error rate</h2>
+      <div class="hero">
+        <div class="num" id="ler-num">0.0<span class="unit">%</span></div>
+        <div class="label" id="ler-label">over 0 shots decoded</div>
+        <div class="meta" id="ler-meta"></div>
+      </div>
+    </div>
+    <div class="sec">
+      <h2>This shot</h2>
+      <div class="stat-row"><span class="k">outcome</span><span class="v"><span class="outcome" id="s-out">—</span></span></div>
+      <div class="stat-row"><span class="k">errors</span><span class="v"><b id="s-err">0</b> qubits</span></div>
+      <div class="stat-row"><span class="k">defects</span><span class="v"><b id="s-def">0</b> lit stabilizers</span></div>
+      <div class="stat-row"><span class="k">correction</span><span class="v"><b id="s-corr">0</b> qubit flips</span></div>
+      <div class="stat-row"><span class="k">syndrome</span><span class="v" id="s-clr">—</span></div>
+    </div>
+    <div class="sec">
+      <div class="blurb">
+        A distance-<b id="b-d">d</b> <b>surface code</b> under depolarising noise (p=<b id="b-p">—</b>).
+        Real stabilizer measurements light up <b>defects</b>; a
+        <b>minimum-weight matching</b> decoder pairs them
+        (<span class="r">X-channel</span> / <span class="b">Z-channel</span>) and flips the
+        <b>correction chain</b>. The syndrome always clears — a <b>logical error</b> only occurs
+        when matching closes the wrong way across the code.
+      </div>
+    </div>
+  </aside>
+</div>
+
+<script>
+"use strict";
+const BUNDLE = /*__QEC_BUNDLE__*/null;
+const $ = id => document.getElementById(id);
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const view = $('view'), ctx = view.getContext('2d'), wrap = $('canvas-wrap');
+
+const RED=()=>css('--red'), BLUE=()=>css('--blue'), PUR=()=>css('--purple');
+let ds=null, sets=[], shot=0, playing=false, timer=null;
+let zoom=1, panX=0, panY=0, dpr=1;
+let reveal=1, raf=null;
+
+function boot(){
+  buildLegend();
+  if(!BUNDLE){ ctx.fillStyle=css('--dim'); ctx.fillText('No bundle embedded.',20,20); return; }
+  sets=BUNDLE.datasets;
+  const sel=$('ds-select');
+  sets.forEach((d,i)=>{ const o=document.createElement('option'); o.value=i; o.textContent=d.name; sel.appendChild(o); });
+  sel.addEventListener('change',()=> loadSet(sel.value|0));
+  const q=new URLSearchParams(location.search);
+  const di=q.has('ds')?Math.max(0,Math.min(sets.length-1,+q.get('ds')||0)):(BUNDLE.default|0);
+  sel.value=di;
+  wireControls(); resize(); loadSet(di);
+  if(q.has('shot')){ seek(+q.get('shot')||0, true); }
+  else if(q.get('play')!=='0') setPlaying(true);
+}
+
+function loadSet(i){
+  ds=sets[i];
+  $('scrub').max=Math.max(0,ds.shots.length-1);
+  $('b-d').textContent=ds.d; $('b-p').textContent=(ds.p*100).toFixed(0)+'%';
+  shot=0; fitView(); seek(0, true);
+}
+
+// ── geometry / transforms ───────────────────────────────────────────────
+function qpos(q){ return [q % ds.d, Math.floor(q/ds.d)]; } // (col,row)
+function fitView(){
+  const cw=view.clientWidth, ch=view.clientHeight;
+  const span=ds.d; // coords roughly -0.5 .. d-0.5
+  zoom=Math.min(cw/(span+1.5), ch/(span+1.5))*0.92;
+  panX=(cw - span*zoom)/2; panY=(ch - span*zoom)/2;
+}
+function S(x,y){ return [x*zoom+panX, y*zoom+panY]; }
+
+// ── render ──────────────────────────────────────────────────────────────
+function draw(){
+  const cw=view.clientWidth, ch=view.clientHeight;
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  ctx.clearRect(0,0,cw,ch);
+  const sh=ds.shots[shot];
+  const d=ds.d, r=Math.max(2.2, zoom*0.17);
+
+  // lattice: data qubits
+  ctx.fillStyle='#20243a';
+  for(let q=0;q<d*d;q++){ const [c,rw]=qpos(q); const [sx,sy]=S(c,rw); ctx.beginPath(); ctx.arc(sx,sy,r*0.7,0,7); ctx.fill(); }
+  // stabilizer markers (faint)
+  drawStabs(ds.xStab, '#1e2c4a'); drawStabs(ds.zStab, '#3a1e2a');
+
+  // ── reveal-gated layers ──
+  const a = reveal;
+  // 1) correction chains (data qubit flips) — the decoder's fix, in green
+  if(a>0.62){ const t=clamp((a-0.62)/0.25); const gc=css('--good'); drawCorr(sh.xc, gc, t, r); drawCorr(sh.zc, gc, t, r); }
+  // 2) matching connectors
+  if(a>0.5){ const t=clamp((a-0.5)/0.2); drawPairs(sh.zm, ds.zStab, RED(), t); drawPairs(sh.xm, ds.xStab, BLUE(), t); }
+  // 3) errors on data qubits
+  if(a>0.04){ const t=clamp((a-0.04)/0.2); drawErrors(sh.e, t, r); }
+  // 4) lit defects
+  if(a>0.28){ const t=clamp((a-0.28)/0.2); drawDefects(sh.zd, ds.zStab, RED(), t); drawDefects(sh.xd, ds.xStab, BLUE(), t); }
+
+  // verdict
+  const v=$('verdict');
+  if(a>0.92){ const bad=sh.lx||sh.lz; v.className=bad?'overlay bad':'overlay ok'; v.style.opacity=1;
+    v.textContent=bad?'✗ LOGICAL ERROR':'✓ CORRECTED'; }
+  else v.style.opacity=0;
+}
+
+function drawStabs(list, color){ const s=Math.max(1.6, zoom*0.1); ctx.fillStyle=color;
+  for(const [x,y] of list){ const [sx,sy]=S(x,y); ctx.fillRect(sx-s, sy-s, s*2, s*2); } }
+
+function drawErrors(errs, t, r){
+  for(const [q,type] of errs){ const [c,rw]=qpos(q); const [sx,sy]=S(c,rw);
+    const rad=r*1.15*t;
+    if(type===0||type===2){ ring(sx,sy,rad,RED()); }
+    if(type===1||type===2){ ring(sx,sy,rad*(type===2?0.62:1),BLUE()); }
+  }
+}
+function ring(x,y,rad,col){ ctx.beginPath(); ctx.arc(x,y,rad,0,7); ctx.lineWidth=Math.max(1.3,rad*0.4); ctx.strokeStyle=col; ctx.globalAlpha=0.95; ctx.stroke(); ctx.globalAlpha=1; }
+
+function drawDefects(defects, pos, col, t){
+  for(const i of defects){ const [x,y]=pos[i]; const [sx,sy]=S(x,y); const rad=Math.max(3,zoom*0.2)*t;
+    ctx.save(); ctx.shadowColor=col; ctx.shadowBlur=14*t; ctx.fillStyle=col; ctx.globalAlpha=0.9;
+    ctx.beginPath(); ctx.arc(sx,sy,rad,0,7); ctx.fill(); ctx.restore(); ctx.globalAlpha=1; }
+}
+
+function drawPairs(pairs, pos, col, t){
+  ctx.lineWidth=Math.max(1.4, zoom*0.09); ctx.strokeStyle=col; ctx.globalAlpha=0.5*t; ctx.setLineDash([Math.max(3,zoom*0.18), Math.max(3,zoom*0.16)]);
+  for(const [a,b] of pairs){ const pa=pos[a]; const pb = b<0 ? boundaryPoint(pa) : pos[b];
+    const [ax,ay]=S(pa[0],pa[1]); const [bx,by]=S(pb[0],pb[1]);
+    ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(bx,by); ctx.stroke(); }
+  ctx.setLineDash([]); ctx.globalAlpha=1;
+}
+function boundaryPoint(p){ // nearest lattice edge
+  const d=ds.d, x=p[0], y=p[1];
+  const cand=[[-0.5,y],[d-0.5,y],[x,-0.5],[x,d-0.5]];
+  let best=cand[0], bd=1e9;
+  for(const c of cand){ const dd=(c[0]-x)**2+(c[1]-y)**2; if(dd<bd){ bd=dd; best=c; } }
+  return best;
+}
+function drawCorr(qubits, col, t, r){
+  for(const q of qubits){ const [c,rw]=qpos(q); const [sx,sy]=S(c,rw); const rad=r*0.95*t;
+    ctx.save(); ctx.shadowColor=col; ctx.shadowBlur=8*t; ctx.fillStyle=col; ctx.globalAlpha=0.85;
+    ctx.beginPath(); ctx.arc(sx,sy,rad,0,7); ctx.fill(); ctx.restore(); ctx.globalAlpha=1; }
+}
+function clamp(v){ return Math.max(0,Math.min(1,v)); }
+
+// ── panel ───────────────────────────────────────────────────────────────
+function syncPanel(){
+  const sh=ds.shots[shot];
+  let logical=0; for(let i=0;i<=shot;i++){ const s=ds.shots[i]; if(s.lx||s.lz) logical++; }
+  const n=shot+1, rate=logical/n*100;
+  $('ler-num').innerHTML=`${rate.toFixed(1)}<span class="unit">%</span>`;
+  $('ler-label').textContent=`over ${n} shot${n>1?'s':''} decoded`;
+  $('ler-meta').innerHTML=`<b>${logical}</b> logical errors · syndrome cleared every shot ✓<br>distance <b>${ds.d}</b> · depolarising p=<b>${(ds.p*100).toFixed(0)}%</b>`;
+  const bad=sh.lx||sh.lz; const o=$('s-out'); o.className='outcome '+(bad?'bad':'ok'); o.textContent=bad?'logical error':'corrected';
+  $('s-err').textContent=sh.e.length;
+  $('s-def').textContent=sh.xd.length+sh.zd.length;
+  $('s-corr').textContent=sh.xc.length+sh.zc.length;
+  $('s-clr').textContent=sh.ok?'cleared ✓':'residual ✗';
+  $('shotc').innerHTML=`shot <b>${shot}</b>/${ds.shots.length-1}`;
+  $('scrub').value=shot;
+}
+
+function buildLegend(){
+  const items=[['X error','--red','ring'],['Z error','--blue','ring'],
+    ['defect (lit stab)','--accent2','dot'],['matching','--dim','line'],['correction','--good','dot']];
+  const host=$('legend'); host.innerHTML='';
+  for(const [lab,varn] of items){ const c=css(varn); const d=document.createElement('div'); d.className='li';
+    d.innerHTML=`<span class="sw" style="background:${c}"></span>${lab}`; host.appendChild(d); }
+}
+
+// ── reveal + transport ──────────────────────────────────────────────────
+function animateReveal(then){
+  if(raf) cancelAnimationFrame(raf);
+  reveal=0; let start=null;
+  const dur=650;
+  function tick(ts){ if(start===null) start=ts; reveal=clamp((ts-start)/dur); draw();
+    if(reveal<1) raf=requestAnimationFrame(tick); else { raf=null; if(then) then(); } }
+  raf=requestAnimationFrame(tick);
+}
+function seek(i, instant){
+  shot=Math.max(0,Math.min(ds.shots.length-1,i));
+  syncPanel();
+  if(instant){ reveal=1; draw(); } else animateReveal();
+}
+function setPlaying(on){
+  playing=on; $('btn-play').textContent=on?'❚❚':'▶';
+  if(timer){ clearTimeout(timer); timer=null; }
+  if(on) playStep();
+}
+function playStep(){
+  const fps=+$('speed').value; const hold=Math.max(120, 1000/fps);
+  syncPanel();
+  animateReveal(()=>{ if(!playing) return; timer=setTimeout(()=>{ if(!playing) return;
+    shot = shot>=ds.shots.length-1 ? 0 : shot+1; playStep(); }, hold); });
+}
+function wireControls(){
+  $('btn-play').onclick=()=>setPlaying(!playing);
+  $('btn-fwd').onclick=()=>{ setPlaying(false); seek(shot>=ds.shots.length-1?0:shot+1); };
+  $('btn-back').onclick=()=>{ setPlaying(false); seek(shot-1); };
+  $('btn-first').onclick=()=>{ setPlaying(false); seek(0,true); };
+  $('scrub').oninput=e=>{ setPlaying(false); seek(+e.target.value,true); };
+  $('speed').oninput=()=>{ if(playing){ setPlaying(false); setPlaying(true); } };
+  window.addEventListener('keydown',e=>{
+    if(e.target.tagName==='SELECT'||e.target.tagName==='INPUT') return;
+    if(e.code==='Space'){ e.preventDefault(); setPlaying(!playing); }
+    else if(e.code==='ArrowRight'){ setPlaying(false); seek(shot+1); }
+    else if(e.code==='ArrowLeft'){ setPlaying(false); seek(shot-1); }
+  });
+  let drag=false,lx=0,ly=0;
+  view.addEventListener('mousedown',e=>{ drag=true; lx=e.clientX; ly=e.clientY; });
+  window.addEventListener('mouseup',()=>drag=false);
+  view.addEventListener('mousemove',e=>{ if(!drag) return; panX+=e.clientX-lx; panY+=e.clientY-ly; lx=e.clientX; ly=e.clientY; draw(); });
+  view.addEventListener('wheel',e=>{ e.preventDefault(); const rc=view.getBoundingClientRect(); const mx=e.clientX-rc.left,my=e.clientY-rc.top;
+    const wx=(mx-panX)/zoom, wy=(my-panY)/zoom; zoom=Math.max(6,Math.min(180,zoom*(e.deltaY<0?1.12:1/1.12)));
+    panX=mx-wx*zoom; panY=my-wy*zoom; draw(); },{passive:false});
+}
+function resize(){ dpr=Math.max(1,window.devicePixelRatio||1); const w=wrap.clientWidth,h=wrap.clientHeight;
+  view.width=w*dpr; view.height=h*dpr; view.style.width=w+'px'; view.style.height=h+'px'; ctx.setTransform(dpr,0,0,dpr,0,0);
+  if(ds){ fitView(); draw(); } }
+window.addEventListener('resize',resize);
+
+boot();
+</script>
+</body>
+</html>

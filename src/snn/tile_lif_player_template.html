@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LIF neuron on the tile fabric</title>
+<style>
+  :root {
+    --bg: #070a11; --panel: #0e1422; --panel2: #131b2e; --line: #1f2a42;
+    --txt: #cdd9ef; --dim: #6b7a98; --accent: #34e1ff; --fire: #ff5bdc;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--txt);
+    font: 14px/1.5 ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+  a { color: var(--accent); }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 22px 18px 60px; }
+  h1 { font-size: 21px; margin: 0 0 2px; letter-spacing: .2px; }
+  h1 .spk { color: var(--fire); }
+  .sub { color: var(--dim); margin: 0 0 16px; font-size: 13px; }
+  .demos { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+  .demo-btn { background: var(--panel); border: 1px solid var(--line); color: var(--dim);
+    padding: 7px 13px; border-radius: 8px; cursor: pointer; font: inherit; font-size: 12.5px; }
+  .demo-btn:hover { color: var(--txt); border-color: #2c3c5e; }
+  .demo-btn.on { color: #061018; background: var(--accent); border-color: var(--accent); font-weight: 600; }
+  .blurb { color: var(--dim); font-size: 12.5px; margin: 0 0 14px; max-width: 880px; min-height: 34px; }
+  .grid-row { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-start; }
+  .stage { background: var(--panel); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px; position: relative; }
+  .stage canvas { display: block; image-rendering: pixelated; }
+  .side { flex: 1; min-width: 260px; display: flex; flex-direction: column; gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+  .card h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--dim);
+    margin: 0 0 10px; font-weight: 600; }
+  .meterwrap { display: flex; gap: 14px; align-items: stretch; }
+  .meter { position: relative; width: 56px; min-height: 150px; flex: none; background: var(--panel2);
+    border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+  .meter .fill { position: absolute; left: 0; right: 0; bottom: 0; background:
+    linear-gradient(180deg, var(--accent), #1f7fa8); transition: height .08s linear; }
+  .meter .thr { position: absolute; left: 0; right: 0; height: 0; border-top: 2px dashed var(--fire); }
+  .meter .thrlbl { position: absolute; right: 3px; font-size: 9px; color: var(--fire); transform: translateY(-11px); }
+  .readout { flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 6px; }
+  .readout .big { font-size: 30px; font-weight: 700; line-height: 1; }
+  .readout .big.fire { color: var(--fire); text-shadow: 0 0 18px var(--fire); }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 12.5px; }
+  .kv .k { color: var(--dim); }
+  .kv .v { text-align: right; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 6px; font-size: 11px; font-weight: 600; }
+  .badge.ok { background: #103022; color: #57f0a8; border: 1px solid #1c5a3c; }
+  .badge.no { background: #341014; color: #ff7a8a; border: 1px solid #5a1c24; }
+  .controls { display: flex; align-items: center; gap: 10px; margin-top: 14px; flex-wrap: wrap; }
+  button.ctl { background: var(--panel2); border: 1px solid var(--line); color: var(--txt);
+    width: 38px; height: 32px; border-radius: 8px; cursor: pointer; font-size: 15px; }
+  button.ctl:hover { border-color: #2c3c5e; }
+  button.ctl.play { width: 46px; color: #061018; background: var(--accent); border-color: var(--accent); }
+  .controls .tk { color: var(--dim); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+  .controls label { color: var(--dim); font-size: 12px; }
+  input[type=range] { accent-color: var(--accent); }
+  .legend { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 12px; font-size: 11.5px; color: var(--dim); }
+  .legend i { display: inline-block; width: 11px; height: 11px; border-radius: 3px; margin-right: 5px;
+    vertical-align: -1px; }
+  .timeline { margin-top: 16px; }
+  .timeline canvas { display: block; width: 100%; cursor: pointer; border-radius: 8px;
+    background: var(--panel); border: 1px solid var(--line); }
+  .foot { color: var(--dim); font-size: 11.5px; margin-top: 20px; line-height: 1.7; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>A leaky integrate-and-fire neuron computing on a logic fabric <span class="spk">⚡</span></h1>
+  <p class="sub">Every glowing tile is a real signal. The neuron's synapses, membrane, leak, threshold and reset
+    are synthesized to logic tiles and evaluated on the tile simulator — the membrane is the only state threaded
+    between ticks. Each frame is verified bit-for-bit against the software reference.</p>
+
+  <div class="demos" id="demos"></div>
+  <p class="blurb" id="blurb"></p>
+
+  <div class="grid-row">
+    <div class="stage">
+      <canvas id="grid"></canvas>
+      <div class="controls">
+        <button class="ctl play" id="play" title="play / pause">▶</button>
+        <button class="ctl" id="step" title="step one tick">⏭</button>
+        <button class="ctl" id="rew" title="restart">⏮</button>
+        <span class="tk" id="tk">tick 0 / 0</span>
+        <label>speed <input type="range" id="speed" min="1" max="12" value="5"></label>
+      </div>
+      <div class="legend">
+        <span><i style="background:#ffd24a"></i>input pad (vₘ bits, spikes)</span>
+        <span><i style="background:#ff7a4a"></i>output pad (next vₘ, spike)</span>
+        <span><i style="background:#34e1ff"></i>wire</span>
+        <span><i style="background:#ff5bdc"></i>gate</span>
+        <span><i style="background:#8dff5b"></i>via (layer↑)</span>
+        <span>bright = signal high</span>
+      </div>
+    </div>
+
+    <div class="side">
+      <div class="card">
+        <h2>Membrane</h2>
+        <div class="meterwrap">
+          <div class="meter" id="meter">
+            <div class="fill" id="fill"></div>
+            <div class="thr" id="thr"></div>
+            <div class="thrlbl" id="thrlbl">θ</div>
+          </div>
+          <div class="readout">
+            <div class="big" id="vbig">0</div>
+            <div style="color:var(--dim);font-size:12px" id="vsub">membrane potential</div>
+            <div style="margin-top:6px" class="kv">
+              <span class="k">current in</span><span class="v" id="curv">0</span>
+              <span class="k">spike out</span><span class="v" id="spkv">—</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Neuron</h2>
+        <div class="kv">
+          <span class="k">membrane bits</span><span class="v" id="i_bits"></span>
+          <span class="k">threshold</span><span class="v" id="i_thr"></span>
+          <span class="k">leak factor</span><span class="v" id="i_leak"></span>
+          <span class="k">synapse weights</span><span class="v" id="i_w"></span>
+          <span class="k">logic gates</span><span class="v" id="i_gates"></span>
+          <span class="k">tile grid</span><span class="v" id="i_grid"></span>
+          <span class="k">oracle</span><span class="v" id="i_ver"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="timeline">
+    <canvas id="tl"></canvas>
+  </div>
+
+  <p class="foot">
+    Built from <code>src/snn/tile_lif.rs</code> (the LIF datapath) and the synth place/route/export pipeline.
+    The membrane potential is threaded in software; the per-tick next-state — synaptic weighted sum, fixed-point
+    leak, saturating integrate, threshold compare and reset — is computed on real tiles. Self-contained: no network,
+    no dependencies. Regenerate with <code>cargo run --release --example tile_snn_player_export</code>.
+  </p>
+</div>
+
+<script>
+const DATA = /*__TILESNN_BUNDLE__*/null;
+
+// ---- base64 -> Uint8Array ----
+function b64(s) {
+  const T = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  const map = {}; for (let i = 0; i < T.length; i++) map[T[i]] = i;
+  let len = s.length; while (len > 0 && s[len-1] === '=') len--;
+  const out = new Uint8Array((len * 6) >> 3); let acc = 0, bits = 0, oi = 0;
+  for (let i = 0; i < len; i++) {
+    acc = (acc << 6) | map[s[i]]; bits += 6;
+    if (bits >= 8) { bits -= 8; out[oi++] = (acc >> bits) & 0xff; }
+  }
+  return out;
+}
+
+// ---- palette ----
+const PAL = [
+  { off: "#16243d", on: "#34e1ff" }, // 0 wire
+  { off: "#3a2150", on: "#ff5bdc" }, // 1 gate
+  { off: "#1f3d22", on: "#8dff5b" }, // 2 via
+  { off: "#3a3015", on: "#ffd24a" }, // 3 input pad
+  { off: "#3d2415", on: "#ff7a4a" }, // 4 output pad
+];
+
+const $ = id => document.getElementById(id);
+
+let demo, frames, bytesPerFrame, cur = 0, playing = true, speedHz = 5, acc = 0, lastT = 0;
+
+function on(cellIdx, tick) {
+  const byte = frames[tick * bytesPerFrame + (cellIdx >> 3)];
+  return (byte >> (cellIdx & 7)) & 1;
+}
+
+function loadDemo(idx) {
+  demo = DATA.demos[idx];
+  frames = b64(demo.frames);
+  bytesPerFrame = Math.ceil(demo.cells.length / 8);
+  cur = 0; acc = 0; playing = true; $("play").textContent = "❚❚";
+
+  // demo buttons
+  [...$("demos").children].forEach((b, i) => b.classList.toggle("on", i === idx));
+  $("blurb").textContent = demo.blurb;
+
+  // crop the render to the active bounding box (the fabric is mostly guard tiles)
+  let minX = 1e9, minY = 1e9, maxX = 0, maxY = 0;
+  for (const c of demo.cells) {
+    if (c[0] < minX) minX = c[0]; if (c[0] > maxX) maxX = c[0];
+    if (c[1] < minY) minY = c[1]; if (c[1] > maxY) maxY = c[1];
+  }
+  demo._ox = minX - 1; demo._oy = minY - 1;
+  demo._gw = (maxX - minX) + 3; demo._gh = (maxY - minY) + 3;
+
+  // info
+  $("i_bits").textContent = demo.bits;
+  $("i_thr").textContent = demo.threshold;
+  $("i_leak").textContent = demo.leak;
+  $("i_w").textContent = "[" + demo.weights.join(", ") + "]";
+  $("i_gates").textContent = demo.gates;
+  $("i_grid").textContent = demo.w + "×" + demo.h
+    + (demo.layers > 1 ? "×" + demo.layers + "L" : "")
+    + "  (active " + demo._gw + "×" + demo._gh + ")";
+  $("i_ver").innerHTML = demo.verified
+    ? '<span class="badge ok">tile == reference ✓</span>'
+    : '<span class="badge no">mismatch</span>';
+
+  // threshold line on meter
+  const maxv = (1 << demo.bits) - 1;
+  $("thr").style.bottom = (100 * demo.threshold / maxv) + "%";
+  $("thrlbl").style.bottom = (100 * demo.threshold / maxv) + "%";
+
+  sizeGrid();
+  sizeTimeline();
+  draw();
+}
+
+// ---- grid canvas ----
+const gc = $("grid"), gx = gc.getContext("2d");
+let cellPx = 18, dpr = Math.max(1, window.devicePixelRatio || 1);
+
+function sizeGrid() {
+  const maxW = 600, maxH = 560;
+  cellPx = Math.max(7, Math.min(26, Math.floor(maxW / demo._gw), Math.floor(maxH / demo._gh)));
+  gc.width = demo._gw * cellPx * dpr;
+  gc.height = demo._gh * cellPx * dpr;
+  gc.style.width = demo._gw * cellPx + "px";
+  gc.style.height = demo._gh * cellPx + "px";
+}
+
+function draw() {
+  // grid
+  gx.save();
+  gx.scale(dpr, dpr);
+  gx.clearRect(0, 0, gc.width, gc.height);
+  gx.fillStyle = "#070a11";
+  gx.fillRect(0, 0, demo._gw * cellPx, demo._gh * cellPx);
+
+  const r = Math.max(1, Math.floor(cellPx * 0.16));
+  gx.textAlign = "center"; gx.textBaseline = "middle";
+  const fs = Math.floor(cellPx * 0.5);
+  gx.font = fs + "px ui-monospace, monospace";
+
+  for (let c = 0; c < demo.cells.length; c++) {
+    const cell = demo.cells[c]; // [x,y,z,kind,label]
+    const x = cell[0], y = cell[1], z = cell[2], kind = cell[3], label = cell[4];
+    const lit = on(c, cur);
+    const pal = PAL[kind] || PAL[0];
+    let px = (x - demo._ox) * cellPx, py = (y - demo._oy) * cellPx, sz = cellPx;
+    if (z > 0) { px += cellPx * 0.22; py += cellPx * 0.22; sz = cellPx * 0.56; } // vias sit "above"
+    const pad = Math.max(0.5, cellPx * 0.08);
+
+    gx.shadowBlur = lit ? Math.floor(cellPx * 0.9) : 0;
+    gx.shadowColor = lit ? pal.on : "transparent";
+    gx.fillStyle = lit ? pal.on : pal.off;
+    roundRect(gx, px + pad, py + pad, sz - 2 * pad, sz - 2 * pad, r);
+    gx.fill();
+    gx.shadowBlur = 0;
+
+    if (label && cellPx >= 13) {
+      gx.fillStyle = lit ? "#06121a" : "#9fb0cf";
+      gx.fillText(label, px + sz / 2, py + sz / 2 + 0.5);
+    }
+  }
+  gx.restore();
+
+  // membrane meter + readouts
+  const maxv = (1 << demo.bits) - 1;
+  const v = demo.vOut[cur], fired = demo.spike[cur] === 1;
+  $("fill").style.height = (100 * v / maxv) + "%";
+  $("fill").style.background = fired
+    ? "linear-gradient(180deg,#ff5bdc,#7a1f8a)"
+    : "linear-gradient(180deg,#34e1ff,#1f7fa8)";
+  const vb = $("vbig");
+  vb.textContent = v; vb.classList.toggle("fire", fired);
+  $("vsub").textContent = "membrane potential (max " + maxv + ")";
+  $("curv").textContent = demo.current[cur];
+  $("spkv").innerHTML = fired ? '<span style="color:var(--fire)">⚡ FIRE</span>' : "—";
+  $("tk").textContent = "tick " + cur + " / " + (demo.ticks - 1);
+
+  drawTimeline();
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  r = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+// ---- timeline canvas ----
+const tc = $("tl"), tx = tc.getContext("2d");
+let tlW = 1100, tlH = 132;
+
+function sizeTimeline() {
+  tlW = $("tl").clientWidth || 1100;
+  const nSyn = demo.stim[0] ? demo.stim[0].length : 1;
+  tlH = 96 + nSyn * 14;
+  tc.width = tlW * dpr; tc.height = tlH * dpr;
+  tc.style.height = tlH + "px";
+}
+
+function drawTimeline() {
+  tx.save();
+  tx.scale(dpr, dpr);
+  tx.clearRect(0, 0, tlW, tlH);
+  const padL = 8, padR = 8, W = tlW - padL - padR;
+  const n = demo.ticks, colW = W / n;
+  const maxv = (1 << demo.bits) - 1;
+  const memTop = 8, memH = 64;
+
+  // threshold guide
+  const thrY = memTop + memH * (1 - demo.threshold / maxv);
+  tx.strokeStyle = "rgba(255,91,220,.35)"; tx.setLineDash([4, 4]); tx.lineWidth = 1;
+  tx.beginPath(); tx.moveTo(padL, thrY); tx.lineTo(padL + W, thrY); tx.stroke();
+  tx.setLineDash([]);
+
+  // membrane area trace
+  tx.beginPath();
+  for (let t = 0; t < n; t++) {
+    const xx = padL + t * colW + colW / 2;
+    const yy = memTop + memH * (1 - demo.vOut[t] / maxv);
+    if (t === 0) tx.moveTo(xx, yy); else tx.lineTo(xx, yy);
+  }
+  tx.strokeStyle = "#34e1ff"; tx.lineWidth = 1.6; tx.stroke();
+
+  // spike bars
+  for (let t = 0; t < n; t++) {
+    if (demo.spike[t] === 1) {
+      const xx = padL + t * colW + colW / 2;
+      tx.strokeStyle = "#ff5bdc"; tx.lineWidth = Math.max(1.4, colW * 0.4);
+      tx.beginPath(); tx.moveTo(xx, memTop); tx.lineTo(xx, memTop + memH); tx.stroke();
+    }
+  }
+
+  // input spike raster
+  const nSyn = demo.stim[0] ? demo.stim[0].length : 0;
+  const rasterTop = memTop + memH + 14;
+  tx.fillStyle = "#6b7a98"; tx.font = "10px ui-monospace, monospace"; tx.textAlign = "left";
+  for (let s = 0; s < nSyn; s++) {
+    const ry = rasterTop + s * 14;
+    tx.fillStyle = "#6b7a98"; tx.fillText("s" + s, 0, ry + 6);
+    for (let t = 0; t < n; t++) {
+      if (demo.stim[t][s]) {
+        const xx = padL + t * colW;
+        tx.fillStyle = "#ffd24a";
+        tx.fillRect(xx + colW * 0.2, ry, Math.max(2, colW * 0.6), 9);
+      }
+    }
+  }
+
+  // playhead
+  const phx = padL + cur * colW + colW / 2;
+  tx.strokeStyle = "#ffffff"; tx.lineWidth = 1.2;
+  tx.beginPath(); tx.moveTo(phx, 2); tx.lineTo(phx, tlH - 2); tx.stroke();
+  tx.fillStyle = "#fff"; tx.beginPath(); tx.arc(phx, 4, 2.4, 0, 7); tx.fill();
+
+  tx.restore();
+}
+
+$("tl").addEventListener("click", e => {
+  const rect = tc.getBoundingClientRect();
+  const padL = 8, W = (rect.width) - 16;
+  const frac = Math.min(1, Math.max(0, (e.clientX - rect.left - padL) / W));
+  cur = Math.min(demo.ticks - 1, Math.floor(frac * demo.ticks));
+  playing = false; $("play").textContent = "▶"; draw();
+});
+
+// ---- controls ----
+$("play").onclick = () => { playing = !playing; $("play").textContent = playing ? "❚❚" : "▶"; };
+$("step").onclick = () => { playing = false; $("play").textContent = "▶"; cur = (cur + 1) % demo.ticks; draw(); };
+$("rew").onclick = () => { cur = 0; draw(); };
+$("speed").oninput = e => { speedHz = +e.target.value; };
+
+function loop(ts) {
+  if (!lastT) lastT = ts;
+  const dt = (ts - lastT) / 1000; lastT = ts;
+  if (playing) {
+    acc += dt * speedHz;
+    while (acc >= 1) { acc -= 1; cur = (cur + 1) % demo.ticks; draw(); }
+  }
+  requestAnimationFrame(loop);
+}
+
+window.addEventListener("resize", () => { sizeTimeline(); draw(); });
+
+// ---- boot ----
+(function () {
+  const demosEl = $("demos");
+  DATA.demos.forEach((d, i) => {
+    const b = document.createElement("button");
+    b.className = "demo-btn"; b.textContent = d.name;
+    b.onclick = () => loadDemo(i);
+    demosEl.appendChild(b);
+  });
+  loadDemo(DATA.default || 0);
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

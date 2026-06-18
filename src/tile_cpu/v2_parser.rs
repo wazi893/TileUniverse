@@ -602,19 +602,41 @@ impl Parser {
     fn parse_program(&mut self) -> Result<Program, ParseError> {
         let mut funcs = Vec::new();
         let mut globals = Vec::new();
+        let mut accel_funcs = Vec::new();
         while self.peek() != &Tok::Eof {
+            // Sprint 388 (HW/SW co-design): `accel int f(...) { ... }` marks a function
+            // for HLS synthesis to a tile datapath. `accel` is a *contextual* keyword —
+            // only an identifier in this top-level position; everywhere else it remains
+            // a normal identifier.
+            let is_accel = matches!(self.peek(), Tok::Ident(w) if w == "accel");
+            if is_accel {
+                self.bump();
+            }
             // Every top-level item begins `int name`; the next token decides global vs fn.
             self.expect(&Tok::KwInt, "'int' (top-level declaration)")?;
             let name = self.expect_ident("function or global name")?;
             match self.peek() {
-                Tok::LBracket => globals.push(self.parse_global_rest(name)?),
-                Tok::LParen => funcs.push(self.parse_func_rest(name)?),
+                Tok::LBracket if !is_accel => globals.push(self.parse_global_rest(name)?),
+                Tok::LParen => {
+                    let func = self.parse_func_rest(name)?;
+                    if is_accel {
+                        accel_funcs.push(func);
+                    } else {
+                        funcs.push(func);
+                    }
+                }
                 other => {
                     return err(
                         self.line(),
-                        format!(
-                            "expected '(' (function) or '[' (global) after '{name}', found {other:?}"
-                        ),
+                        if is_accel {
+                            format!(
+                                "expected '(' after accel function name '{name}', found {other:?}"
+                            )
+                        } else {
+                            format!(
+                                "expected '(' (function) or '[' (global) after '{name}', found {other:?}"
+                            )
+                        },
                     );
                 }
             }
@@ -622,7 +644,9 @@ impl Parser {
         if funcs.is_empty() {
             return err(self.line(), "empty program (no functions)");
         }
-        Ok(Program::with_globals("main", globals, funcs))
+        let mut program = Program::with_globals("main", globals, funcs);
+        program.accel_funcs = accel_funcs;
+        Ok(program)
     }
 }
 
@@ -713,7 +737,8 @@ fn collect_called_names(funcs: &[Func]) -> std::collections::HashSet<String> {
 
 /// Auto-include prelude functions (`print_int` + its `div10`/`mod10` helpers) when the
 /// program calls them but doesn't define them. A user-supplied definition wins.
-fn inject_prelude(program: &mut Program) -> Result<(), ParseError> {
+/// `pub(crate)` since Sprint 388 so `v2_hls_accel::compile_source_with_accel` shares it.
+pub(crate) fn inject_prelude(program: &mut Program) -> Result<(), ParseError> {
     let called = collect_called_names(&program.funcs);
     let defined = |p: &Program, name: &str| p.funcs.iter().any(|f| f.name == name);
     if called.contains("print_int") && !defined(program, "print_int") {
@@ -728,9 +753,21 @@ fn inject_prelude(program: &mut Program) -> Result<(), ParseError> {
 }
 
 /// Parse + compile source text straight to machine words (auto-including the prelude).
+///
+/// Rejects `accel`-marked source: the accelerator device the lowered code talks to
+/// must be synthesized and registered, which this `Vec<u32>`-only signature cannot
+/// return — use [`compile_source_with_accel`]
+/// (crate::tile_cpu::v2_hls_accel::compile_source_with_accel) instead.
 pub fn compile_source(src: &str) -> Result<Vec<u32>, CompileError> {
     let mut program = parse_program(src).map_err(|e| CompileError(e.to_string()))?;
     inject_prelude(&mut program).map_err(|e| CompileError(e.to_string()))?;
+    if !program.accel_funcs.is_empty() {
+        return Err(CompileError(
+            "source declares an accel function; use compile_source_with_accel, which \
+             returns the synthesized accelerator device alongside the program words"
+                .to_string(),
+        ));
+    }
     compile_to_words(&program)
 }
 
@@ -950,6 +987,33 @@ mod tests {
         // Parentheses override: (2 + 3) * 4 = 20.
         let src2 = "int main() { return (2 + 3) * 4; }";
         assert_eq!(run_source(src2), 20);
+    }
+
+    /// Sprint 388: the `accel` contextual keyword routes a function into
+    /// `Program::accel_funcs` (HLS synthesis target) instead of `funcs`.
+    #[test]
+    fn test_v2_parser_accel_marker() {
+        let src = r#"
+            accel int madd(int a, int b, int c) { return a * b + c; }
+            int main() { return madd(2, 3, 4); }
+        "#;
+        let prog = parse_program(src).expect("parse");
+        assert_eq!(prog.accel_funcs.len(), 1);
+        assert_eq!(prog.accel_funcs[0].name, "madd");
+        assert_eq!(prog.accel_funcs[0].params, vec!["a", "b", "c"]);
+        assert_eq!(prog.funcs.len(), 1, "main stays a regular function");
+
+        // `accel` stays an ordinary identifier everywhere else.
+        let src2 = "int main() { int accel = 7; return accel + 1; }";
+        assert_eq!(run_source(src2), 8);
+
+        // Plain compile_source must reject accel-marked source with a pointer to
+        // the device-returning entry point.
+        let err = compile_source(src).unwrap_err();
+        assert!(
+            err.0.contains("compile_source_with_accel"),
+            "error should point at the SoC entry point: {err}"
+        );
     }
 
     #[test]

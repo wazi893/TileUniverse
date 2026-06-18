@@ -50,9 +50,15 @@
 //! transition is **audited against the AIG spec**; on a divergence the datapath
 //! recompiles at the next capacity config and restarts, and only an exhausted
 //! config ladder is an error. Silent corruption is therefore impossible — a
-//! completed run is bit-for-bit the AIG's behavior, executed by tiles. Widths
-//! beyond ~5–6 bits for loop kernels currently exceed the envelope; chasing the
-//! router bug to a minimal repro is follow-up work for the synth back-end.
+//! completed run is bit-for-bit the AIG's behavior, executed by tiles.
+//!
+//! The router defect behind that finding was fixed (layer-transition
+//! exclusivity + post-route validation in `synth::routing`; see
+//! `examples/router_bug_hunt.rs` for the diagnostic). Post-fix envelope
+//! (`examples/seq_width_probe.rs`): width 6 loop kernels fully verified, width 8
+//! verified for moderate cones (`sum_to`); the largest width-8 cones (`gcd`) hit
+//! a loud routing-capacity failure — a quality-of-results limit, not a
+//! correctness one. The run-time audit remains as defense in depth.
 
 use std::collections::HashMap;
 
@@ -61,7 +67,7 @@ use crate::synth::bridge::{BridgeConfig, compile_aig_to_export};
 use crate::synth::cell_lib::CellLibrary;
 use crate::synth::export::{SynthExport, evaluate_exported};
 use crate::synth::hls::{HlsConfig, HlsError, Lowering, check_width};
-use crate::tile_cpu::v2_compiler::{CmpOp, Cond, Expr, Func, Stmt};
+use tileuniverse_v2_lang::{CmpOp, Cond, Expr, Func, Stmt};
 
 // ===========================================================================
 // 1. CDFG — control/data-flow graph
@@ -846,6 +852,7 @@ mod tests {
     /// optimized FSM cone inside the place&route correctness envelope; sum_to(7)
     /// = 28 still fits.)
     #[test]
+    #[ignore = "slow (>100s tile sim); run via: cargo nextest run --profile nightly --run-ignored all"]
     fn seq_sum_loop_runs_as_real_tiles() {
         let func = func_of(SUM_TO, "sum_to");
         let width = 5u32;
@@ -866,6 +873,7 @@ mod tests {
 
     /// if/else datapath: |a - b| via a branch, on tiles.
     #[test]
+    #[ignore = "slow (>100s tile sim); run via: cargo nextest run --profile nightly --run-ignored all"]
     fn seq_if_else_abs_diff_runs_as_real_tiles() {
         let src = r#"
             int absdiff(int a, int b) {
@@ -890,6 +898,7 @@ mod tests {
     /// ISS (the CPU reference) and (2) synthesized to an FSM+datapath and run as
     /// tiles. Results must be bit-identical for every input.
     #[test]
+    #[ignore = "slow (>100s tile sim); run via: cargo nextest run --profile nightly --run-ignored all"]
     fn seq_two_targets_agree_differential() {
         // (function source, name, arg sets) — values chosen to fit the 5-bit
         // datapath so 64-bit CPU arithmetic and 5-bit FSM arithmetic coincide.

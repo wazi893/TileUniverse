@@ -39,11 +39,7 @@ pub fn run_logic_probe(
     }
     let mut values = Vec::with_capacity(steps as usize);
     for _ in 0..steps {
-        let val = sim
-            .tilemap
-            .get_tile(x as usize, y as usize)
-            .map(|t| t.logic.load(std::sync::atomic::Ordering::Relaxed))
-            .unwrap_or(0);
+        let val = sim.tilemap.value_at(x as usize, y as usize).unwrap_or(0);
         values.push(val);
         sim.tick();
     }

@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spiking Neural Network</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  :root{
+    --bg:#070810; --panel:#0e1018; --line:#222637; --txt:#c6cad8; --dim:#646a82;
+    --accent:#8a8aff; --accent2:#aab0ff; --exc:#2bb0b0; --inh:#d06070; --spike:#ffffff; --hot:#ffd64a;
+  }
+  html,body{ height:100%; }
+  body{ background:var(--bg); color:var(--txt); height:100vh; overflow:hidden; display:flex; flex-direction:column;
+    font-family:'Consolas','SF Mono','Fira Code',ui-monospace,monospace; -webkit-font-smoothing:antialiased; }
+  header{ display:flex; align-items:center; gap:14px; padding:9px 16px; flex-shrink:0; z-index:5;
+    background:linear-gradient(180deg,#0d1018,#090b12); border-bottom:1px solid var(--line); }
+  .brand{ display:flex; align-items:baseline; gap:9px; margin-right:4px; }
+  .brand .logo{ font-size:15px; font-weight:700; letter-spacing:.4px; color:#eef3ff; } .brand .logo b{ color:var(--accent2); }
+  .brand .sub{ font-size:10px; color:var(--dim); letter-spacing:1.2px; text-transform:uppercase; }
+  .sep{ width:1px; height:26px; background:var(--line); }
+  select{ background:#141722; color:var(--accent2); border:1px solid #2c3146; border-radius:6px; padding:5px 9px; font:inherit; font-size:12px; cursor:pointer; outline:none; }
+  .transport{ display:flex; gap:6px; }
+  .tbtn{ width:34px; height:30px; display:flex; align-items:center; justify-content:center; background:#141722; border:1px solid #2c3146; border-radius:6px; color:var(--accent2); font-size:13px; cursor:pointer; transition:all .12s; user-select:none; }
+  .tbtn:hover{ border-color:#5a5a82; background:#1a1a2c; color:#fff; } .tbtn.play{ width:42px; background:#23234a; border-color:#4a4a8a; }
+  .scrub-wrap{ flex:1; display:flex; align-items:center; gap:10px; min-width:120px; }
+  input[type=range]{ -webkit-appearance:none; appearance:none; height:4px; border-radius:3px; background:#1f2433; outline:none; cursor:pointer; }
+  input[type=range].scrub{ flex:1; }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:14px; height:14px; border-radius:50%; background:var(--accent2); border:2px solid #070810; box-shadow:0 0 8px var(--accent); }
+  .speed{ display:flex; align-items:center; gap:6px; font-size:11px; color:var(--dim); } .speed input{ width:78px; }
+  .tickc{ font-size:12px; color:var(--accent2); min-width:150px; text-align:right; white-space:nowrap; } .tickc b{ color:#fff; }
+
+  #stage{ flex:1; display:flex; overflow:hidden; position:relative; }
+  #main{ flex:1; display:flex; flex-direction:column; overflow:hidden; }
+  #net-wrap{ flex:1; position:relative; overflow:hidden; background:radial-gradient(ellipse at center,#0a0c16,#070810); }
+  #raster-wrap{ height:172px; flex-shrink:0; border-top:1px solid var(--line); position:relative; background:#06070d; }
+  canvas{ display:block; }
+  .overlay{ position:absolute; pointer-events:none; }
+  #hud{ left:14px; top:12px; font-size:11px; line-height:1.7; } #hud .l1{ color:#fff; font-weight:600; font-size:12px; } #hud .l2{ color:var(--dim); }
+  #rlabel{ left:10px; top:8px; font-size:10px; color:var(--dim); letter-spacing:1px; text-transform:uppercase; }
+  #legend{ left:14px; bottom:12px; display:flex; flex-direction:column; gap:3px; font-size:10.5px; }
+  #legend .li{ display:flex; align-items:center; gap:6px; color:var(--dim); } #legend .sw{ width:11px; height:11px; border-radius:3px; }
+  #hint{ right:14px; bottom:12px; font-size:10px; color:#363b50; text-align:right; }
+
+  #panel{ width:300px; flex-shrink:0; background:var(--panel); border-left:1px solid var(--line); display:flex; flex-direction:column; overflow-y:auto; }
+  .sec{ padding:13px 15px; border-bottom:1px solid #181a26; }
+  .sec h2{ font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:1.4px; margin-bottom:9px; font-weight:600; }
+  .hero{ background:linear-gradient(150deg,#101622,#0d1320); border:1px solid #233047; border-radius:9px; padding:14px; }
+  .hero .num{ font-size:30px; font-weight:800; color:#fff; line-height:1; } .hero .num small{ font-size:14px; color:var(--accent2); }
+  .hero .label{ font-size:11px; color:var(--accent2); margin-top:4px; } .hero .meta{ margin-top:9px; font-size:10.5px; color:var(--dim); line-height:1.6; } .hero .meta b{ color:#b9c0d4; }
+  .stat-row{ display:flex; justify-content:space-between; font-size:12px; padding:3px 0; } .stat-row .k{ color:var(--dim); } .stat-row .v{ color:#cfd4e4; } .stat-row .v b{ color:#fff; }
+  .blurb{ font-size:11px; color:#8088a0; line-height:1.7; } .blurb b{ color:var(--accent2); } .blurb .e{ color:var(--exc); } .blurb .i{ color:var(--inh); }
+  ::-webkit-scrollbar{ width:8px; } ::-webkit-scrollbar-thumb{ background:#222637; border-radius:4px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand"><span class="logo">Spiking <b>Net</b></span><span class="sub">leaky integrate-and-fire</span></div>
+  <div class="sep"></div>
+  <select id="ds-select" title="Network"></select>
+  <div class="sep"></div>
+  <div class="transport">
+    <div class="tbtn" id="btn-first" title="Restart">⏮</div>
+    <div class="tbtn play" id="btn-play" title="Play / Pause (Space)">▶</div>
+  </div>
+  <div class="scrub-wrap"><input type="range" class="scrub" id="scrub" min="0" max="1" value="0" step="0.01"></div>
+  <div class="speed"><span>spd</span><input type="range" id="speed" min="1" max="60" value="22"></div>
+  <div class="tickc" id="tickc">tick <b>0</b> · 0 spikes</div>
+</header>
+
+<div id="stage">
+  <div id="main">
+    <div id="net-wrap">
+      <canvas id="net"></canvas>
+      <div class="overlay" id="hud"><div class="l1" id="hud-name">—</div><div class="l2"><b id="hud-info">—</b></div></div>
+      <div class="overlay" id="legend"></div>
+      <div class="overlay" id="hint">space: play · scrub the timeline</div>
+    </div>
+    <div id="raster-wrap">
+      <canvas id="raster"></canvas>
+      <div class="overlay" id="rlabel">spike raster — neuron × time</div>
+    </div>
+  </div>
+
+  <aside id="panel">
+    <div class="sec">
+      <h2>Spiking activity</h2>
+      <div class="hero">
+        <div class="num" id="rate-num">0<small> spk/tick</small></div>
+        <div class="label">mean firing across the network</div>
+        <div class="meta" id="rate-meta"></div>
+      </div>
+    </div>
+    <div class="sec">
+      <h2>This network</h2>
+      <div class="stat-row"><span class="k">neurons</span><span class="v"><b id="s-n">0</b></span></div>
+      <div class="stat-row"><span class="k">synapses</span><span class="v"><b id="s-syn">0</b></span></div>
+      <div class="stat-row"><span class="k">layers</span><span class="v" id="s-layers">—</span></div>
+      <div class="stat-row"><span class="k">tick</span><span class="v"><b id="s-tick">0</b> / <span id="s-ticks">0</span></span></div>
+      <div class="stat-row"><span class="k">spikes this tick</span><span class="v"><b id="s-spk">0</b></span></div>
+    </div>
+    <div class="sec">
+      <div class="blurb">
+        A layered <b>leaky integrate-and-fire</b> network, fixed-point (Q8.8) and
+        deterministic. Each neuron's membrane integrates current and <b>fires</b> when it
+        crosses threshold, then resets. <span class="e">Excitatory</span> and
+        <span class="i">inhibitory</span> synapses fan the spike out. Watch the cascade
+        ripple layer to layer — the raster below is every spike, neuron × time.
+      </div>
+    </div>
+  </aside>
+</div>
+
+<script>
+"use strict";
+const BUNDLE = /*__SNN_BUNDLE__*/null;
+const $ = id => document.getElementById(id);
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const net = $('net'), nctx = net.getContext('2d'), nwrap = $('net-wrap');
+const ras = $('raster'), rctx = ras.getContext('2d'), rwrap = $('raster-wrap');
+
+let ds=null, sets=[], tick=0, playing=false, raf=null, lastTs=null, dpr=1;
+let volt=null, rasterImg=null;
+let nb={minX:0,minY:0,w:1,h:1};
+const TRAIL=4; // spike-flash trail length (ticks)
+
+function boot(){
+  buildLegend();
+  if(!BUNDLE){ nctx.fillStyle=css('--dim'); nctx.fillText('No bundle embedded.',20,20); return; }
+  sets=BUNDLE.datasets;
+  const sel=$('ds-select');
+  sets.forEach((d,i)=>{ const o=document.createElement('option'); o.value=i; o.textContent=d.name; sel.appendChild(o); });
+  sel.addEventListener('change',()=> loadSet(sel.value|0));
+  const q=new URLSearchParams(location.search);
+  const di=q.has('ds')?Math.max(0,Math.min(sets.length-1,+q.get('ds')||0)):(BUNDLE.default|0);
+  sel.value=di; wireControls(); resize(); loadSet(di);
+  if(q.has('t')){ tick=Math.max(0,Math.min(ds.ticks-1,+q.get('t')||0)); draw(); }
+  else if(q.get('play')!=='0') setPlaying(true);
+}
+
+function loadSet(i){
+  ds=sets[i]; volt=b64ToBytes(ds.volt);
+  // bounds of neuron positions
+  let minX=1e9,minY=1e9,maxX=-1e9,maxY=-1e9;
+  for(const [x,y] of ds.neurons){ if(x<minX)minX=x; if(y<minY)minY=y; if(x>maxX)maxX=x; if(y>maxY)maxY=y; }
+  nb={minX,minY,w:Math.max(1,maxX-minX),h:Math.max(1,maxY-minY)};
+  $('scrub').max=ds.ticks-1;
+  $('hud-name').textContent=ds.name;
+  $('hud-info').textContent=`${ds.n} LIF neurons · ${ds.synapses.length} synapses`;
+  $('rate-num').innerHTML=`${(ds.spikeTotal/ds.ticks).toFixed(1)}<small> spk/tick</small>`;
+  $('rate-meta').innerHTML=`<b>${ds.spikeTotal.toLocaleString()}</b> spikes over <b>${ds.ticks}</b> ticks · ${ds.n} neurons`;
+  $('s-n').textContent=ds.n; $('s-syn').textContent=ds.synapses.length.toLocaleString();
+  $('s-layers').textContent=ds.layers.map(l=>l[2]-l[1]).join(' · ');
+  $('s-ticks').textContent=ds.ticks;
+  buildRaster();
+  tick=0; fit(); draw();
+}
+
+// screen position of neuron g
+function NP(g){ const [x,y]=ds.neurons[g]; const cw=net.clientWidth, ch=net.clientHeight;
+  const pad=46; const sx=pad+(x-nb.minX)/nb.w*(cw-2*pad);
+  const sy=pad+(y-nb.minY)/nb.h*(ch-2*pad); return [sx,sy]; }
+function fit(){ /* positions computed live in NP via client size */ }
+
+function voltColor(v){ // 0..1 cool->hot
+  if(v<0.5){ const t=v/0.5; return `rgb(${26+(40-26)*t},${58+(190-58)*t},${110+(230-110)*t})`; }
+  const t=(v-0.5)/0.5; return `rgb(${40+(255-40)*t},${190+(214-190)*t},${230+(74-230)*t})`;
+}
+function layerColor(l){ const h=(l*55+185)%360; return `hsl(${h},70%,60%)`; }
+
+function draw(){
+  const cw=net.clientWidth, ch=net.clientHeight;
+  nctx.setTransform(dpr,0,0,dpr,0,0); nctx.clearRect(0,0,cw,ch);
+  const t=Math.round(tick);
+  const spikedNow=new Set(ds.spikes[t]||[]);
+  // flash intensity per neuron from recent spikes
+  const flash=new Float32Array(ds.n);
+  for(let k=0;k<TRAIL;k++){ const tt=t-k; if(tt<0) break; const f=1-k/TRAIL;
+    for(const g of ds.spikes[tt]) flash[g]=Math.max(flash[g],f); }
+
+  // synapses: faint base, then bright fan-out from neurons spiking now
+  nctx.lineWidth=0.6; nctx.globalAlpha=0.032;
+  nctx.beginPath(); for(const [p,q,w,e] of ds.synapses){ if(e!==1) continue; const a=NP(p),b=NP(q); nctx.moveTo(a[0],a[1]); nctx.lineTo(b[0],b[1]); } nctx.strokeStyle=css('--exc'); nctx.stroke();
+  nctx.beginPath(); for(const [p,q,w,e] of ds.synapses){ if(e!==0) continue; const a=NP(p),b=NP(q); nctx.moveTo(a[0],a[1]); nctx.lineTo(b[0],b[1]); } nctx.strokeStyle=css('--inh'); nctx.stroke();
+  // active fan-out
+  nctx.globalAlpha=1; nctx.lineWidth=1.1;
+  for(const [p,q,w,e] of ds.synapses){ if(!spikedNow.has(p)) continue; const a=NP(p),b=NP(q);
+    nctx.strokeStyle=e===1?css('--exc'):css('--inh'); nctx.globalAlpha=0.5;
+    nctx.beginPath(); nctx.moveTo(a[0],a[1]); nctx.lineTo(b[0],b[1]); nctx.stroke(); }
+  nctx.globalAlpha=1;
+
+  // neurons
+  const r=Math.max(2.5, Math.min(7, net.clientHeight/ (1.4*nb.h + 8)));
+  for(let g=0;g<ds.n;g++){ const [sx,sy]=NP(g); const v=(volt[t*ds.n+g]||0)/255; const fl=flash[g];
+    if(fl>0){ nctx.save(); nctx.shadowColor=css('--spike'); nctx.shadowBlur=16*fl; nctx.fillStyle=`rgba(255,255,255,${0.5+0.5*fl})`;
+      nctx.beginPath(); nctx.arc(sx,sy,r*(1+0.7*fl),0,7); nctx.fill(); nctx.restore(); }
+    else { nctx.fillStyle=voltColor(v); nctx.globalAlpha=0.55+0.45*v;
+      nctx.beginPath(); nctx.arc(sx,sy,r,0,7); nctx.fill(); nctx.globalAlpha=1; }
+  }
+
+  // raster: image + sweep line
+  drawRaster(t);
+
+  const sc=(ds.spikes[t]||[]).length;
+  $('tickc').innerHTML=`tick <b>${t}</b> · ${sc} spikes`;
+  $('s-tick').textContent=t; $('s-spk').textContent=sc; $('scrub').value=tick;
+}
+
+function buildRaster(){
+  // offscreen N(rows) x ticks(cols), 1px per spike, coloured by layer
+  const off=document.createElement('canvas'); off.width=ds.ticks; off.height=ds.n;
+  const o=off.getContext('2d'); o.fillStyle='#06070d'; o.fillRect(0,0,ds.ticks,ds.n);
+  // layer of each neuron
+  const lay=new Int16Array(ds.n); for(const [id,s,e] of ds.layers){ for(let g=s;g<e;g++) lay[g]=id; }
+  for(let t=0;t<ds.ticks;t++){ for(const g of ds.spikes[t]){ o.fillStyle=layerColor(lay[g]); o.fillRect(t, g, 1, 1); } }
+  rasterImg=off;
+}
+function drawRaster(t){
+  const w=ras.clientWidth, h=ras.clientHeight;
+  rctx.setTransform(dpr,0,0,dpr,0,0); rctx.clearRect(0,0,w,h);
+  rctx.imageSmoothingEnabled=false; rctx.globalAlpha=0.95; rctx.drawImage(rasterImg,0,0,w,h); rctx.globalAlpha=1;
+  const x=t/Math.max(1,ds.ticks-1)*w; rctx.strokeStyle=css('--accent2'); rctx.lineWidth=1.2;
+  rctx.beginPath(); rctx.moveTo(x,0); rctx.lineTo(x,h); rctx.stroke();
+}
+
+function buildLegend(){
+  const items=[['resting','rgb(26,58,110)'],['charging','rgb(40,190,230)'],['near threshold',css('--hot')],['spike',css('--spike')],['excitatory',css('--exc')],['inhibitory',css('--inh')]];
+  const host=$('legend'); host.innerHTML='';
+  for(const [lab,c] of items){ const d=document.createElement('div'); d.className='li'; d.innerHTML=`<span class="sw" style="background:${c}"></span>${lab}`; host.appendChild(d); }
+}
+
+function setPlaying(on){ playing=on; $('btn-play').textContent=on?'❚❚':'▶'; if(on){ lastTs=null; if(!raf) raf=requestAnimationFrame(loop); } }
+function loop(ts){ if(!playing){ raf=null; return; } if(lastTs===null) lastTs=ts; const dt=(ts-lastTs)/1000; lastTs=ts;
+  tick+=dt*(+$('speed').value);
+  if(tick>=ds.ticks-1){ tick=ds.ticks-1; draw(); setTimeout(()=>{ if(playing) tick=0; },700); }
+  draw(); raf=requestAnimationFrame(loop); }
+function wireControls(){
+  $('btn-play').onclick=()=>setPlaying(!playing);
+  $('btn-first').onclick=()=>{ tick=0; draw(); };
+  $('scrub').oninput=e=>{ setPlaying(false); tick=+e.target.value; draw(); };
+  window.addEventListener('keydown',e=>{ if(e.target.tagName==='SELECT'||e.target.tagName==='INPUT') return;
+    if(e.code==='Space'){ e.preventDefault(); setPlaying(!playing); } });
+}
+function resize(){ dpr=Math.max(1,window.devicePixelRatio||1);
+  for(const [c,wrap] of [[net,nwrap],[ras,rwrap]]){ const w=wrap.clientWidth,h=wrap.clientHeight;
+    c.width=w*dpr; c.height=h*dpr; c.style.width=w+'px'; c.style.height=h+'px'; }
+  if(ds) draw();
+}
+window.addEventListener('resize',resize);
+
+function b64ToBytes(b64){ const bin=atob(b64); const out=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) out[i]=bin.charCodeAt(i); return out; }
+
+boot();
+</script>
+</body>
+</html>

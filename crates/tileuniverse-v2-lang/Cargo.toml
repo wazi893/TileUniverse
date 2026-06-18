@@ -1,0 +1,7 @@
+[package]
+name = "tileuniverse-v2-lang"
+version = "0.1.0"
+edition = "2024"
+description = "V2 source-language front-end (AST) for the TileUniverse tile CPU — a leaf crate the synthesizer can consume without the heavy tile-CPU codegen."
+
+[dependencies]

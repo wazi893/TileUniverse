@@ -1,0 +1,43 @@
+name: Slow tests (full tier)
+
+# The heavy tile-simulation tests below were #[ignore]'d out of the per-commit
+# CI lane (each runs 100-300s and set the parallel wall-clock floor). They are
+# still real correctness oracles / perf profiles, so this lane runs them on a
+# daily schedule and on demand. It is scoped to EXACTLY those 9 tests — it does
+# NOT use --run-ignored blanket, because the repo has ~128 other #[ignore]'d
+# tests (CUDA-only, superseded, diagnostic) that must not be resurrected here.
+
+on:
+  schedule:
+    - cron: '0 6 * * *'   # daily 06:00 UTC
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  slow-tier:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@v1
+      with:
+        toolchain: stable
+
+    - name: Install nextest
+      uses: taiki-e/install-action@nextest
+
+    - name: Run slow tile-sim tier
+      run: >
+        cargo nextest run --release --profile nightly --run-ignored all -E
+        'test(seq_sum_loop_runs_as_real_tiles)
+        or test(seq_if_else_abs_diff_runs_as_real_tiles)
+        or test(seq_two_targets_agree_differential)
+        or test(test_v2_soc_codesign_seq_accel_differential)
+        or test(test_v2_hls_seq_accel_device_matches_reference)
+        or test(test_v2_s308_blockskip_profile)
+        or test(test_v2_s312_no_dirty_settle_profile)
+        or test(test_v2_s319_cached_blockskip_profile)
+        or test(test_v2_s322_pruned_clock_profile)'

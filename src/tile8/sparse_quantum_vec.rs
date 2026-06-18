@@ -132,7 +132,7 @@ impl SparseQuantumGridVec {
     /// Pre-allocates all blocks upfront for maximum performance.
     pub fn new(n_qubits: usize) -> Self {
         assert!(n_qubits >= 7, "Minimum 7 qubits required");
-        let n_blocks = (n_qubits + BLOCK_SIZE - 1) / BLOCK_SIZE;
+        let n_blocks = n_qubits.div_ceil(BLOCK_SIZE);
 
         Self {
             n_qubits,
@@ -146,7 +146,7 @@ impl SparseQuantumGridVec {
     /// Blocks are allocated on first access, saving memory for sparse states.
     pub fn new_lazy(n_qubits: usize) -> Self {
         assert!(n_qubits >= 7, "Minimum 7 qubits required");
-        let n_blocks = (n_qubits + BLOCK_SIZE - 1) / BLOCK_SIZE;
+        let n_blocks = n_qubits.div_ceil(BLOCK_SIZE);
 
         Self {
             n_qubits,

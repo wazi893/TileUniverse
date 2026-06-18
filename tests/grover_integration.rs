@@ -38,8 +38,7 @@ fn test_grover_on_qdemo_tile_finds_marked_state() {
     }
 
     // Read measurement result from tile logic output
-    let tile = sim.tilemap.get_tile(50, 50).unwrap();
-    let result = tile.logic.load(Ordering::Relaxed);
+    let result = sim.tilemap.value_at(50, 50).unwrap();
 
     // With the specific seed and optimal iterations, should find marked state
     // Note: Due to quantum randomness, this might occasionally fail with a
@@ -82,26 +81,11 @@ fn test_grover_result_propagates_to_neighbors() {
     sim.eval_at(50, 51);
 
     // QDemo tile output
-    let qdemo_logic = sim
-        .tilemap
-        .get_tile(50, 50)
-        .unwrap()
-        .logic
-        .load(Ordering::Relaxed);
+    let qdemo_logic = sim.tilemap.value_at(50, 50).unwrap();
 
     // Neighbors should have received the signal
-    let right_logic = sim
-        .tilemap
-        .get_tile(51, 50)
-        .unwrap()
-        .logic
-        .load(Ordering::Relaxed);
-    let down_logic = sim
-        .tilemap
-        .get_tile(50, 51)
-        .unwrap()
-        .logic
-        .load(Ordering::Relaxed);
+    let right_logic = sim.tilemap.value_at(51, 50).unwrap();
+    let down_logic = sim.tilemap.value_at(50, 51).unwrap();
 
     // Wire tiles OR their inputs, so they should have the QDemo output
     assert!(
@@ -136,12 +120,7 @@ fn test_grover_success_rate_3_qubits() {
             sim.tick();
         }
 
-        let result = sim
-            .tilemap
-            .get_tile(50, 50)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(50, 50).unwrap();
 
         if result == marked_state {
             successes += 1;
@@ -189,12 +168,7 @@ fn test_grover_different_marked_states() {
                 sim.tick();
             }
 
-            let result = sim
-                .tilemap
-                .get_tile(50, 50)
-                .unwrap()
-                .logic
-                .load(Ordering::Relaxed);
+            let result = sim.tilemap.value_at(50, 50).unwrap();
 
             if result == marked {
                 success_count += 1;
@@ -271,12 +245,7 @@ fn test_multiple_grover_tiles() {
 
     // Check each tile has a measurement result
     for (i, &(x, y)) in positions.iter().enumerate() {
-        let result = sim
-            .tilemap
-            .get_tile(x, y)
-            .unwrap()
-            .logic
-            .load(Ordering::Relaxed);
+        let result = sim.tilemap.value_at(x, y).unwrap();
 
         assert!(
             result <= 0b111,

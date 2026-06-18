@@ -50,7 +50,7 @@ pub struct DepolarizingNoise {
 
 impl DepolarizingNoise {
     pub fn new(p: f64) -> Self {
-        assert!(p >= 0.0 && p <= 1.0);
+        assert!((0.0..=1.0).contains(&p));
         Self { p }
     }
 
@@ -92,7 +92,7 @@ pub struct BitFlipNoise {
 
 impl BitFlipNoise {
     pub fn new(p: f64) -> Self {
-        assert!(p >= 0.0 && p <= 1.0);
+        assert!((0.0..=1.0).contains(&p));
         Self { p }
     }
 
@@ -112,7 +112,7 @@ pub struct PhaseFlipNoise {
 
 impl PhaseFlipNoise {
     pub fn new(p: f64) -> Self {
-        assert!(p >= 0.0 && p <= 1.0);
+        assert!((0.0..=1.0).contains(&p));
         Self { p }
     }
 
@@ -134,7 +134,7 @@ pub struct MeasurementError {
 
 impl MeasurementError {
     pub fn new(p: f64) -> Self {
-        assert!(p >= 0.0 && p <= 1.0);
+        assert!((0.0..=1.0).contains(&p));
         Self { p }
     }
 

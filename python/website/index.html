@@ -437,10 +437,9 @@
                 TileUniverse
             </a>
             <ul>
+                <li><a href="demos/index.html">Live Demos</a></li>
                 <li><a href="#features">Features</a></li>
                 <li><a href="#performance">Performance</a></li>
-                <li><a href="#quickstart">Quick Start</a></li>
-                <li><a href="https://github.com/tileuniverse/tileuniverse">GitHub</a></li>
                 <li><a href="docs/whitepaper.html">Whitepaper</a></li>
             </ul>
         </div>
@@ -450,33 +449,73 @@
         <div class="hero-content">
             <h1>Trillion-Scale<br>Simulation at <span>GPU Speed</span></h1>
             <p class="tagline">
-                High-performance simulation substrate for massively parallel world execution.
-                2.5 trillion operations per second on consumer hardware.
+                A tile-based substrate where cellular automata, classical logic, and quantum
+                circuits all run on the same engine &mdash; at GPU scale on consumer hardware.
             </p>
 
             <div class="hero-stats">
                 <div class="stat">
-                    <span class="stat-value">2.5T</span>
-                    <span class="stat-label">Ops/sec (Quantum)</span>
+                    <span class="stat-value">115T</span>
+                    <span class="stat-label">Tiles/sec (RTX 5090)</span>
                 </div>
                 <div class="stat">
-                    <span class="stat-value">40.5B</span>
-                    <span class="stat-label">Evals/sec (Cellular)</span>
+                    <span class="stat-value">9T</span>
+                    <span class="stat-label">Game-of-Life updates/sec</span>
                 </div>
                 <div class="stat">
-                    <span class="stat-value">50,000×</span>
-                    <span class="stat-label">vs CPU</span>
+                    <span class="stat-value">5</span>
+                    <span class="stat-label">Live demos</span>
                 </div>
             </div>
 
             <div class="cta-buttons">
-                <a href="#quickstart" class="btn btn-primary">
-                    Get Started
+                <a href="demos/index.html" class="btn btn-primary">
+                    Watch the Live Demos
                 </a>
                 <a href="https://github.com/tileuniverse/tileuniverse" class="btn btn-secondary">
                     View on GitHub
                 </a>
             </div>
+        </div>
+    </section>
+
+    <section id="demos">
+        <h2>See it run</h2>
+        <p class="section-desc">
+            Five interactive demos &mdash; each a single self-contained page of real engine output.
+            No install, no dependencies. Open one and press space.
+        </p>
+        <div class="features-grid">
+            <a class="feature-card" href="demos/cellular.html" style="text-decoration:none; color:inherit;">
+                <div class="feature-icon">&#129518;</div>
+                <h3>Cellular at Scale</h3>
+                <p>Conway's Game of Life on the packed GPU fabric &mdash; ~9 trillion cell-updates/sec on an RTX 5090, verified bit-identical to CPU.</p>
+            </a>
+            <a class="feature-card" href="demos/tilecpu.html" style="text-decoration:none; color:inherit;">
+                <div class="feature-icon">&#128187;</div>
+                <h3>A CPU made of tiles</h3>
+                <p>A working processor built entirely from logic tiles, executing a real program. Every glowing tile is a real signal.</p>
+            </a>
+            <a class="feature-card" href="demos/qec.html" style="text-decoration:none; color:inherit;">
+                <div class="feature-icon">&#9883;</div>
+                <h3>Surface-Code Decoder</h3>
+                <p>Quantum errors light up as defects; a minimum-weight matching decoder pairs them and clears the syndrome.</p>
+            </a>
+            <a class="feature-card" href="demos/alphafabric.html" style="text-decoration:none; color:inherit;">
+                <div class="feature-icon">&#129302;</div>
+                <h3>AlphaFabric</h3>
+                <p>A learned placer lays out a chip &mdash; wires cool from long to short as wirelength drops ~55%.</p>
+            </a>
+            <a class="feature-card" href="demos/snn.html" style="text-decoration:none; color:inherit;">
+                <div class="feature-icon">&#129504;</div>
+                <h3>Spiking Neural Network</h3>
+                <p>A leaky-integrate-and-fire network firing in real time, with live membrane potentials and a spike raster.</p>
+            </a>
+            <a class="feature-card" href="demos/index.html" style="text-decoration:none; color:inherit; display:flex; flex-direction:column; justify-content:center; align-items:center; text-align:center;">
+                <div style="font-size:2rem; color:var(--quantum-cyan);">&rarr;</div>
+                <h3>All five demos</h3>
+                <p>Open the demos gallery.</p>
+            </a>
         </div>
     </section>
 
@@ -564,46 +603,47 @@ world = engine.<span class="code-function">get_world</span>(<span class="code-nu
     <section id="performance">
         <h2>Performance</h2>
         <p class="section-desc">
-            Benchmarked on NVIDIA GeForce RTX 4070. Tensor Cores + CUDA 13.0.
+            Measured on NVIDIA GeForce RTX 5090, CUDA 13.1. Cellular numbers are kernel-only
+            and verified bit-identical to a CPU reference.
         </p>
 
-        <h3 style="text-align: center; color: var(--quantum-cyan); margin-bottom: 1.5rem;">Quantum Substrate</h3>
+        <h3 style="text-align: center; color: var(--quantum-cyan); margin-bottom: 1.5rem;">Cellular Substrate</h3>
         <div class="perf-grid">
             <div class="perf-card">
-                <div class="value">2.5T</div>
-                <div class="label">Amplitude Ops/sec</div>
+                <div class="value">115T</div>
+                <div class="label">Tiles/sec (packed eval)</div>
             </div>
             <div class="perf-card">
-                <div class="value">821M</div>
-                <div class="label">Gate Ops/sec</div>
+                <div class="value">~9T</div>
+                <div class="label">Game-of-Life updates/sec</div>
             </div>
             <div class="perf-card">
-                <div class="value">46.8×</div>
-                <div class="label">vs CPU</div>
+                <div class="value">bit-exact</div>
+                <div class="label">Verified vs CPU</div>
             </div>
             <div class="perf-card">
-                <div class="value">WMMA</div>
-                <div class="label">Tensor Cores</div>
+                <div class="value">1-bit</div>
+                <div class="label">64 cells / 64-bit word</div>
             </div>
         </div>
 
-        <h3 style="text-align: center; color: var(--soft-white); margin: 3rem 0 1.5rem;">Cellular Substrate</h3>
+        <h3 style="text-align: center; color: var(--soft-white); margin: 3rem 0 1.5rem;">Quantum Substrate</h3>
         <div class="perf-grid">
             <div class="perf-card">
-                <div class="value">40.5B</div>
-                <div class="label">Logic Evals/sec</div>
+                <div class="value">63.6P</div>
+                <div class="label">Tensor-Core ops/sec</div>
             </div>
             <div class="perf-card">
-                <div class="value">100+</div>
-                <div class="label">Parallel Worlds</div>
+                <div class="value">WMMA</div>
+                <div class="label">FP16 Tensor Cores</div>
             </div>
             <div class="perf-card">
-                <div class="value">~1M</div>
-                <div class="label">RL Steps/sec</div>
+                <div class="value">2&#x207F;</div>
+                <div class="label">Sparse GHZ states</div>
             </div>
             <div class="perf-card">
-                <div class="value">L2</div>
-                <div class="label">Cache Resident</div>
+                <div class="value">Surface</div>
+                <div class="label">QEC + decoders</div>
             </div>
         </div>
     </section>
@@ -622,9 +662,9 @@ world = engine.<span class="code-function">get_world</span>(<span class="code-nu
     <footer>
         <p>
             TileUniverse is open source under the MIT License.<br>
+            <a href="demos/index.html">Live Demos</a> ·
             <a href="https://github.com/tileuniverse/tileuniverse">GitHub</a> ·
-            <a href="docs/whitepaper.html">Whitepaper</a> ·
-            <a href="docs/api.html">API Reference</a>
+            <a href="docs/whitepaper.html">Whitepaper</a>
         </p>
     </footer>
 </body>

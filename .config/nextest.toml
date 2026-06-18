@@ -1,0 +1,35 @@
+# cargo-nextest configuration — https://nexte.st/book/configuration
+#
+# Why nextest: the previous `cargo test -- --test-threads=1` serialized the
+# whole 3.5k-test lib suite (~59 min) purely to dodge "resource exhaustion ->
+# SIGABRT" from parallel libtest threads sharing one process. nextest runs
+# each test in its OWN process, so memory is bounded per-test and reclaimed —
+# that isolation removes the SIGABRT cause WITHOUT giving up parallelism.
+
+[profile.default]
+# slow-timeout flags long-running tests in the summary (feeds the "slow tier"
+# triage) and terminates genuine hangs. 30s mark, killed after 30s * 6 = 180s.
+slow-timeout = { period = "30s", terminate-after = 6 }
+# Keep determinism front-and-centre: never retry, never mask a failure.
+retries = 0
+fail-fast = false
+# Surface SLOW tests at the end so the slow set stays visible over time.
+final-status-level = "slow"
+
+[profile.ci]
+# CI runners are small (2-4 vCPUs), so process parallelism is naturally bounded.
+# Mark tests SLOW at 60s for visibility; only kill true hangs (60s * 12 = 720s),
+# so genuinely heavy oracle tests (the slowest measured ~300s) are never killed.
+slow-timeout = { period = "60s", terminate-after = 12 }
+retries = 0
+fail-fast = false
+final-status-level = "slow"
+status-level = "fail"
+
+# Nightly / on-demand "full" tier: runs everything including #[ignore]'d slow
+# tests (cargo nextest run --profile nightly --run-ignored all).
+[profile.nightly]
+slow-timeout = { period = "120s", terminate-after = 8 }
+retries = 0
+fail-fast = false
+final-status-level = "slow"

@@ -269,7 +269,7 @@ fn find_crossings(
         );
     }
 
-    for _ in 0..candidates.len().max(1).min(20) {
+    for _ in 0..candidates.len().clamp(1, 20) {
         let conflict_pairs = find_bypass_conflict_pairs(&result, route_data);
         if conflict_pairs.is_empty() {
             break;
@@ -501,8 +501,10 @@ fn compute_route_direction_data(
     let mut net_tiles: HashMap<u32, HashMap<(usize, usize), TileType>> = HashMap::new();
     // 3D coordinate tracking for multi-layer BFS.
     let mut net_coords_3d: HashMap<u32, HashSet<(usize, usize, usize)>> = HashMap::new();
-    // Via positions: tiles that must keep their router-assigned ViaUp/ViaDown type.
-    let mut via_positions: HashSet<(u32, usize, usize, usize)> = HashSet::new();
+    // Via positions: tiles that must keep their router-assigned ViaUp/ViaDown
+    // type. The tile type is recorded so the directional BFS only follows real
+    // via edges (ViaUp reads z+1, ViaDown reads z-1).
+    let mut via_positions: HashMap<(u32, usize, usize, usize), TileType> = HashMap::new();
     for seg in &placed.routes {
         // 2D maps are used by crossing detection (L0 only).
         if seg.z == 0 {
@@ -521,7 +523,7 @@ fn compute_route_direction_data(
             .or_default()
             .insert((seg.x, seg.y, seg.z));
         if seg.tile_type == TileType::ViaUp || seg.tile_type == TileType::ViaDown {
-            via_positions.insert((seg.net_id, seg.x, seg.y, seg.z));
+            via_positions.insert((seg.net_id, seg.x, seg.y, seg.z), seg.tile_type);
         }
     }
 
@@ -606,7 +608,7 @@ fn compute_route_direction_data(
                     // Allow 2D neighbors to fill in the direction, but don't
                     // re-enqueue (the node is already being/been processed).
                     !directional_tiles.contains_key(&(net_id, next.0, next.1, next.2))
-                        && !via_positions.contains(&(net_id, next.0, next.1, next.2))
+                        && !via_positions.contains_key(&(net_id, next.0, next.1, next.2))
                 } else {
                     false
                 };
@@ -654,6 +656,21 @@ fn compute_route_direction_data(
                 if !in_net {
                     continue;
                 }
+                // Only follow REAL via edges: the receiving cell must carry the
+                // via tile that reads `pos` (ViaDown above reads down; ViaUp
+                // below reads up). Same-net cells that are merely stacked on
+                // adjacent layers are NOT electrically connected — treating
+                // them as connected mis-threads wire directions downstream
+                // (the routable-but-incorrect class found by hls_mix6).
+                let via_tile = via_positions.get(&(net_id, next.0, next.1, next.2));
+                let reads_pos = match via_tile {
+                    Some(&TileType::ViaDown) => dz == 1,
+                    Some(&TileType::ViaUp) => dz == -1,
+                    _ => false,
+                };
+                if !reads_pos {
+                    continue;
+                }
                 visited_3d.insert(next);
                 // Via tiles keep their type from the router; just mark visited
                 // so z>0 neighbors can be explored.
@@ -671,7 +688,7 @@ fn compute_route_direction_data(
                 if directional_tiles.contains_key(&(net_id, cx, cy, 0)) {
                     continue;
                 }
-                if via_positions.contains(&(net_id, cx, cy, 0)) {
+                if via_positions.contains_key(&(net_id, cx, cy, 0)) {
                     continue;
                 }
                 // Find first in-net neighbor to derive direction.
@@ -851,12 +868,12 @@ fn build_bypass_plan(
             .collect();
 
         for &coord in &candidate_coords {
-            if let Some(&parent) = route_data.parent_coords.get(&(net_id, coord.0, coord.1)) {
-                if candidate_coords.contains(&parent) {
-                    *degree.entry(coord).or_default() += 1;
-                    *degree.entry(parent).or_default() += 1;
-                    children.entry(parent).or_default().push(coord);
-                }
+            if let Some(&parent) = route_data.parent_coords.get(&(net_id, coord.0, coord.1))
+                && candidate_coords.contains(&parent)
+            {
+                *degree.entry(coord).or_default() += 1;
+                *degree.entry(parent).or_default() += 1;
+                children.entry(parent).or_default().push(coord);
             }
         }
 
@@ -877,15 +894,15 @@ fn build_bypass_plan(
                 continue;
             }
 
-            if let Some(&parent) = route_data.parent_coords.get(&(net_id, coord.0, coord.1)) {
-                if core.contains(&parent) {
-                    let next_deg = degree
-                        .get_mut(&parent)
-                        .expect("parent coord should have a degree entry");
-                    *next_deg = next_deg.saturating_sub(1);
-                    if *next_deg <= 1 && !crossing_set.contains(&parent) {
-                        queue.push_back(parent);
-                    }
+            if let Some(&parent) = route_data.parent_coords.get(&(net_id, coord.0, coord.1))
+                && core.contains(&parent)
+            {
+                let next_deg = degree
+                    .get_mut(&parent)
+                    .expect("parent coord should have a degree entry");
+                *next_deg = next_deg.saturating_sub(1);
+                if *next_deg <= 1 && !crossing_set.contains(&parent) {
+                    queue.push_back(parent);
                 }
             }
 
@@ -912,10 +929,10 @@ fn build_bypass_plan(
         let mut exit_coords = HashSet::new();
 
         for &coord in &core {
-            if let Some(&parent) = route_data.parent_coords.get(&(net_id, coord.0, coord.1)) {
-                if !core.contains(&parent) {
-                    entry_coords.insert(parent);
-                }
+            if let Some(&parent) = route_data.parent_coords.get(&(net_id, coord.0, coord.1))
+                && !core.contains(&parent)
+            {
+                entry_coords.insert(parent);
             }
             if let Some(child_list) = full_children.get(&(net_id, coord.0, coord.1)) {
                 for &child in child_list {
@@ -930,10 +947,10 @@ fn build_bypass_plan(
             }
         }
 
-        if let Some(source) = source_coord {
-            if core.contains(&source) {
-                entry_coords.insert(source);
-            }
+        if let Some(source) = source_coord
+            && core.contains(&source)
+        {
+            entry_coords.insert(source);
         }
 
         // Fix stay-crossing gaps: when a position is both entry and exit for
@@ -953,10 +970,10 @@ fn build_bypass_plan(
             entry_coords.clear();
             exit_coords.clear();
             for &coord in &core {
-                if let Some(&parent) = route_data.parent_coords.get(&(net_id, coord.0, coord.1)) {
-                    if !core.contains(&parent) {
-                        entry_coords.insert(parent);
-                    }
+                if let Some(&parent) = route_data.parent_coords.get(&(net_id, coord.0, coord.1))
+                    && !core.contains(&parent)
+                {
+                    entry_coords.insert(parent);
                 }
                 if let Some(child_list) = full_children.get(&(net_id, coord.0, coord.1)) {
                     for &child in child_list {
@@ -968,10 +985,10 @@ fn build_bypass_plan(
                     exit_coords.insert(coord);
                 }
             }
-            if let Some(source) = source_coord {
-                if core.contains(&source) {
-                    entry_coords.insert(source);
-                }
+            if let Some(source) = source_coord
+                && core.contains(&source)
+            {
+                entry_coords.insert(source);
             }
         }
 
@@ -995,6 +1012,7 @@ fn build_bypass_plan(
 /// - Core coords on layer K
 /// - Entry coords on layers 1..=K (ViaDown chain)
 /// - Exit coords on layers 1..=K (ViaUp chain)
+///
 /// Positions appearing in multiple categories on the same layer count only once.
 fn net_occupancy(plan: &BypassPlan, net_id: u32, k: usize) -> Vec<(usize, usize, usize)> {
     let mut seen: HashSet<(usize, usize, usize)> = HashSet::new();
@@ -1296,11 +1314,11 @@ fn resolve_entry_core_conflicts(plan: &mut BypassPlan, route_data: &RouteDirecti
             for &entry in entries {
                 // ViaDown occupies layers 1..=top at the entry position.
                 for layer in 1..=top {
-                    if let Some(core_nets) = core_on_layer.get(&(layer, entry.0, entry.1)) {
-                        if core_nets.iter().any(|&n| n != net_id) {
-                            to_absorb.push((net_id, entry));
-                            break;
-                        }
+                    if let Some(core_nets) = core_on_layer.get(&(layer, entry.0, entry.1))
+                        && core_nets.iter().any(|&n| n != net_id)
+                    {
+                        to_absorb.push((net_id, entry));
+                        break;
                     }
                 }
             }
@@ -1341,10 +1359,10 @@ fn recompute_net_entries_exits(
         let mut new_exits = HashSet::new();
 
         for &coord in core {
-            if let Some(&parent) = route_data.parent_coords.get(&(net_id, coord.0, coord.1)) {
-                if !core.contains(&parent) {
-                    new_entries.insert(parent);
-                }
+            if let Some(&parent) = route_data.parent_coords.get(&(net_id, coord.0, coord.1))
+                && !core.contains(&parent)
+            {
+                new_entries.insert(parent);
             }
             if let Some(child_list) = full_children.get(&(net_id, coord.0, coord.1)) {
                 for &child in child_list {
@@ -1356,10 +1374,10 @@ fn recompute_net_entries_exits(
                 new_exits.insert(coord);
             }
         }
-        if let Some(source) = source_coord {
-            if core.contains(&source) {
-                new_entries.insert(source);
-            }
+        if let Some(source) = source_coord
+            && core.contains(&source)
+        {
+            new_entries.insert(source);
         }
 
         let overlap: Vec<_> = new_entries.intersection(&new_exits).copied().collect();
@@ -1488,14 +1506,15 @@ fn apply_crossing_bypasses(
                     _ => None,
                 };
 
-                if let Some((nx, ny)) = next {
-                    if nx < width && ny < height {
-                        // Place continuation wire + ViaUp at the next position.
-                        sim.set_tile_3d(nx, ny, top_layer, wire_tile);
-                        layer_occupied[top_layer].insert((nx, ny));
-                        for layer in 0..top_layer {
-                            sim.set_tile_3d(nx, ny, layer, TileType::ViaUp);
-                        }
+                if let Some((nx, ny)) = next
+                    && nx < width
+                    && ny < height
+                {
+                    // Place continuation wire + ViaUp at the next position.
+                    sim.set_tile_3d(nx, ny, top_layer, wire_tile);
+                    layer_occupied[top_layer].insert((nx, ny));
+                    for layer in 0..top_layer {
+                        sim.set_tile_3d(nx, ny, layer, TileType::ViaUp);
                     }
                 }
             }
@@ -1590,9 +1609,7 @@ pub fn evaluate_exported(export: &mut SynthExport, input_values: &[bool]) -> Vec
 
     // Reset only circuit (non-Const) tiles to 0 and mark dirty.
     for &idx in &export.circuit_indices {
-        export.sim.tilemap.tiles[idx]
-            .logic
-            .store(0, std::sync::atomic::Ordering::Relaxed);
+        export.sim.tilemap.set_value(idx, 0);
         export.sim.dirty.mark_dirty(idx);
     }
 
@@ -1911,7 +1928,7 @@ mod tests {
                                             let idx_z = z * w * h + ty * w + tx;
                                             let tt_z = export.sim.tilemap.tiles[idx_z].meta.tile_type;
                                             if tt_z != TileType::Const {
-                                                let val_z = export.sim.tilemap.tiles[idx_z].logic.load(std::sync::atomic::Ordering::Relaxed);
+                                                let val_z = export.sim.tilemap.value(idx_z);
                                                 layer_info += &format!(" L{}={:?}({:#X})", z, tt_z, val_z);
                                             }
                                         }
@@ -1934,7 +1951,7 @@ mod tests {
                                                     if lx >= w || ly >= h { break; }
                                                     let lidx = top * w * h + ly * w + lx;
                                                     let ltt = export.sim.tilemap.tiles[lidx].meta.tile_type;
-                                                    let lval = export.sim.tilemap.tiles[lidx].logic.load(std::sync::atomic::Ordering::Relaxed);
+                                                    let lval = export.sim.tilemap.value(lidx);
                                                     println!("  L{}_trace[{}] ({},{}) {:?} val={:#X}", top, lstep, lx, ly, ltt, lval);
                                                     let lnext = match ltt {
                                                         TileType::WireRight => (lx.wrapping_sub(1), ly),
@@ -1945,7 +1962,7 @@ mod tests {
                                                             println!("  L{}_trace[{}] ViaDown→L0 signal pickup", top, lstep);
                                                             let l0idx = ly * w + lx;
                                                             let l0tt = export.sim.tilemap.tiles[l0idx].meta.tile_type;
-                                                            let l0val = export.sim.tilemap.tiles[l0idx].logic.load(std::sync::atomic::Ordering::Relaxed);
+                                                            let l0val = export.sim.tilemap.value(l0idx);
                                                             println!("    L0: {:?} val={:#X}", l0tt, l0val);
                                                             // Check bypass involvement
                                                             let vd_pos = (lx, ly);

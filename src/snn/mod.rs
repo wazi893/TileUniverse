@@ -110,6 +110,14 @@ pub mod mlp_weights;
 // Convergence S4: threshold neuron realized as a single ThresholdVia tile
 pub mod tile_neuron;
 
+// SNN-in-tiles: quantized integrate-and-fire membrane step as a logic datapath
+// (toward a LIF membrane that computes in tiles).
+pub mod tile_lif;
+
+// SNN-in-tiles: self-contained HTML player that captures a real LIF neuron
+// computing on the tile fabric (glowing tiles + membrane + spikes).
+pub mod tile_lif_player;
+
 // Re-exports
 pub use config::{NeuronConfig, SNNConfig, STDPConfig};
 pub use neuron::LIFNeuron;

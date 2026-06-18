@@ -1,20 +1,21 @@
 pub mod algorithms;
+pub mod alphafabric_player; // Self-contained learned-placement visualization player
 pub mod assembler;
 pub mod bench_api;
 pub mod blueprint;
 pub mod brain;
 pub mod bus;
+#[cfg(feature = "cuda")]
+pub mod cellular_player;
 pub mod chungus; // Chungus neural architecture compiler
 pub mod circuits_mod;
 pub mod clock_domain; // Priority 6: Multi-Clock Domains
 pub mod component;
 pub mod config;
 #[cfg(feature = "cuda")]
-pub mod cuda_tiles;
-#[cfg(feature = "cuda")]
 pub mod cuda_life;
 #[cfg(feature = "cuda")]
-pub mod cellular_player;
+pub mod cuda_tiles;
 pub mod debug_macros;
 pub mod demo;
 pub mod distributed;
@@ -45,12 +46,14 @@ pub mod pbit; // Probabilistic bit simulation for Ising machines
 pub mod physics;
 pub mod probe;
 pub mod qec; // Quantum Error Correction: stabilizer simulation, codes, decoders
+pub mod qec_player; // Self-contained surface-code decoder visualization player
 pub mod qram; // SPRINT 46.0: Quantum Random Access Memory
 
 pub mod scripts;
 pub mod search; // SPRINT 65.0: Quantum-Enhanced Neural Search Engine
 pub mod simulation;
 pub mod snn; // CHUNGUS 4: Neuromorphic Spiking Neural Network
+pub mod snn_player; // Self-contained SNN spike-cascade visualization player
 pub mod synth; // Logic synthesis: AIG core, cut enumeration, technology mapping
 pub mod tensor_network; // Tensor network simulation for shallow circuits
 pub mod tile8;

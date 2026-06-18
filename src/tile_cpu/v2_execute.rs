@@ -99,8 +99,35 @@ const CTRL_B_LUT: [u8; 32] = [
     0x00, 0x00, 0x00, 0x00, 0x00, 0x87, 0x08, 0x10, 0x08, 0x10, 0x01, 0x02, 0x03, 0x04, 0x05, 0x46,
 ];
 
+/// Sprint 386 (SIMT Tier 2b): per-cycle Stage-F context carried across the
+/// extracted phase methods (inject → settle → post). Everything here is a
+/// pure function of the lane's PC + committed register state — per-lane data,
+/// safe to hold while other lanes run their phases.
+#[derive(Clone, Copy)]
+pub(crate) struct StageFCtx {
+    pub(crate) pc: u32,
+    pub(crate) rom_lanes: [u64; 4],
+    pub(crate) super_mux_out: [usize; 4],
+    pub(crate) bank_group: u32,
+    pub(crate) is_upper: bool,
+    pub(crate) ext_upper: bool,
+    pub(crate) ir_low: u8,
+    pub(crate) ir_ext: u16,
+    pub(crate) opcode: u8,
+    pub(crate) rd: u8,
+    pub(crate) rs_lo: u8,
+    pub(crate) rd_hi: bool,
+    pub(crate) rs_hi: bool,
+    pub(crate) rd_s0: u64,
+    pub(crate) rd_s1: u64,
+    pub(crate) rd_s2: u64,
+    pub(crate) rs_s0: u64,
+    pub(crate) rs_s1: u64,
+    pub(crate) mov_ldi_pre_injected: bool,
+}
+
 #[derive(Debug, Clone, Copy, Default)]
-struct PipelineLatch {
+pub(crate) struct PipelineLatch {
     valid: bool,
     /// Sprint 370 (Gate B.3): widened to u32 to carry the wide PC through commit.
     pc: u32,
@@ -119,7 +146,7 @@ struct PipelineLatch {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct StageStats {
+pub(crate) struct StageStats {
     comb_deltas: u32,
     comb_eval: u32,
     comb_switched: u32,
@@ -959,6 +986,12 @@ pub struct TileCpuV2 {
     physical_byte2_selector: Cell<bool>,
     byte2_selector_checks: Cell<u64>,
     byte2_selector_mismatches: Cell<u64>,
+
+    /// V2->CUDA 1b.1: read-only per-cycle capture of the physical ALU result
+    /// (`wb_alu_root_idx`, incl. SRA overlay). Recorded in `run_stage_x`; never read by the
+    /// evaluator, so it is golden-neutral. Lets the device-cycle prover validate its
+    /// trunk-settle ALU output against the authoritative value (which later phases clobber).
+    last_alu_result: Cell<u64>,
 }
 
 impl TileCpuV2 {
@@ -1374,6 +1407,7 @@ impl TileCpuV2 {
             physical_byte2_selector: Cell::new(false),
             byte2_selector_checks: Cell::new(0),
             byte2_selector_mismatches: Cell::new(0),
+            last_alu_result: Cell::new(0),
         }
     }
 
@@ -1502,12 +1536,9 @@ impl TileCpuV2 {
                 // faster than compare-and-skip (apply_backbone_snapshot)
                 // because most decode tiles change value across cycles,
                 // making the per-tile load unfruitful.
-                use std::sync::atomic::Ordering;
                 debug_assert_eq!(snapshot.len(), self.decode_output_indices.len());
                 for (i, &idx32) in self.decode_output_indices.iter().enumerate() {
-                    sim.tilemap.tiles[idx32 as usize]
-                        .logic
-                        .store(snapshot[i], Ordering::Relaxed);
+                    sim.tilemap.set_value(idx32 as usize, snapshot[i]);
                 }
                 // Run hybrid kernel ONLY on execute portion. Treat all
                 // execute ops as backbone (eval unconditionally) since
@@ -1610,12 +1641,9 @@ impl TileCpuV2 {
                 // tiles. No kernel eval needed — by determinism, the cached
                 // outputs equal what hybrid_eval(seeds=input_buf) would
                 // produce.
-                use std::sync::atomic::Ordering;
                 debug_assert_eq!(snapshot.len(), self.backbone_output_indices.len());
                 for (i, &idx32) in self.backbone_output_indices.iter().enumerate() {
-                    sim.tilemap.tiles[idx32 as usize]
-                        .logic
-                        .store(snapshot[i], Ordering::Relaxed);
+                    sim.tilemap.set_value(idx32 as usize, snapshot[i]);
                 }
                 {
                     let mut drain_buf = Vec::new();
@@ -2655,13 +2683,30 @@ impl TileCpuV2 {
         let _ = self.settle_pipeline_only_counted(sim);
     }
 
+    /// Sprint 386 (SIMT Tier 2b): run_stage_f split into phase methods so a
+    /// lane-lockstep fabric can barrier at the cone and combined-settle evals
+    /// (F1/F3 are the wide candidates; F0/F2/F4 stay per-lane). This driver
+    /// preserves the exact original single-CPU order.
     fn run_stage_f(&self, sim: &mut Simulation) -> (PipelineLatch, StageStats) {
         let mut stats = StageStats::empty();
+        let pc = self.stage_f_pre_cone(sim);
+        self.stage_f_cone(sim, &mut stats);
+        let ctx = self.stage_f_inject(sim, pc);
+        self.stage_f_settle(sim, &ctx, &mut stats);
+        let latch = self.stage_f_post(sim, &ctx, &mut stats);
+        (latch, stats)
+    }
 
+    /// Phase F0 (per-lane software): read the committed PC.
+    pub(crate) fn stage_f_pre_cone(&self, sim: &mut Simulation) -> u32 {
         // Read committed PC directly from the PC register tile.
         let pc = (sim.get_logic_value_by_idx(self.pc_idx) as u32) & self.pc_phys_mask;
         self.pc.set(pc);
+        pc
+    }
 
+    /// Phase F1 (wide-eval candidate): pipeline dirty mark + cone propagation.
+    pub(crate) fn stage_f_cone(&self, sim: &mut Simulation, stats: &mut StageStats) {
         // Pipeline phase: fetch -> extraction -> decode -> tree selectors -> tree roots.
         // Sprint 272: First propagation uses cone-pruned eval (only output-feeding tiles).
         let cone_start = if self.stage_f_profiled.get() {
@@ -2670,12 +2715,15 @@ impl TileCpuV2 {
             None
         };
         self.mark_pipeline_dirty(sim);
-        self.propagate_pipeline_cone(sim, &mut stats);
+        self.propagate_pipeline_cone(sim, stats);
         if let Some(t) = cone_start {
             self.stage_f_cone_ns
                 .set(self.stage_f_cone_ns.get() + t.elapsed().as_nanos() as u64);
         }
+    }
 
+    /// Phase F2 (per-lane software): ROM read, IR decode, all injections.
+    pub(crate) fn stage_f_inject(&self, sim: &mut Simulation, pc: u32) -> StageFCtx {
         // Sprint 254: Combined Super Mux + upper-bank IR delivery.
         let early_bank_group = (pc >> 6) & 1;
         let rom_lanes = self.read_active_rom_lanes(sim);
@@ -2875,13 +2923,40 @@ impl TileCpuV2 {
             sim.set_logic_value_by_idx(self.alu_add_l_enable_idx, u64::MAX);
             sim.dirty.mark_dirty(self.alu_add_l_mux_idx);
         }
+
+        StageFCtx {
+            pc,
+            rom_lanes,
+            super_mux_out,
+            bank_group,
+            is_upper,
+            ext_upper,
+            ir_low,
+            ir_ext,
+            opcode,
+            rd,
+            rs_lo,
+            rd_hi,
+            rs_hi,
+            rd_s0,
+            rd_s1,
+            rd_s2,
+            rs_s0,
+            rs_s1,
+            mov_ldi_pre_injected,
+        }
+    }
+
+    /// Phase F3 (wide-eval candidate): the single combined settle.
+    pub(crate) fn stage_f_settle(
+        &self,
+        sim: &mut Simulation,
+        ctx: &StageFCtx,
+        stats: &mut StageStats,
+    ) {
+        let is_upper = ctx.is_upper;
         {
             // Sprint 334: Time injection work (everything between cone and settle).
-            if let Some(_t) = cone_start {
-                // cone_start was re-used as a marker that profiling is on.
-                // inject_ns = time from cone end to settle start.
-                // We capture it as: total_so_far - cone_ns at settle entry.
-            }
             let settle_start = if self.stage_f_profiled.get() {
                 Some(std::time::Instant::now())
             } else {
@@ -2890,12 +2965,12 @@ impl TileCpuV2 {
             self.settle_reason_counts[0].set(self.settle_reason_counts[0].get() + 1); // combined
             if is_upper {
                 self.mark_pipeline_dirty(sim);
-                self.propagate_pipeline_until_settled(sim, &mut stats);
+                self.propagate_pipeline_until_settled(sim, stats);
             } else {
                 if self.physical_ir_spine.get() || self.physical_super_mux.get() {
-                    self.propagate_pipeline_until_settled(sim, &mut stats);
+                    self.propagate_pipeline_until_settled(sim, stats);
                 } else {
-                    self.propagate_pipeline_until_settled(sim, &mut stats);
+                    self.propagate_pipeline_until_settled(sim, stats);
                 }
             }
             if let Some(t) = settle_start {
@@ -2903,6 +2978,38 @@ impl TileCpuV2 {
                     .set(self.stage_f_settle_ns.get() + t.elapsed().as_nanos() as u64);
             }
         }
+    }
+
+    /// Phase F4 (per-lane software): verification, operand readback, restores,
+    /// latch assembly. Contains the two rare per-lane conditional re-settles
+    /// (via-decode mismatch, LDI.W constswap).
+    pub(crate) fn stage_f_post(
+        &self,
+        sim: &mut Simulation,
+        ctx: &StageFCtx,
+        stats: &mut StageStats,
+    ) -> PipelineLatch {
+        let StageFCtx {
+            pc,
+            rom_lanes,
+            super_mux_out,
+            bank_group,
+            is_upper,
+            ext_upper,
+            ir_low,
+            ir_ext,
+            opcode,
+            rd,
+            rs_lo,
+            rd_hi,
+            rs_hi,
+            rd_s0,
+            rd_s1,
+            rd_s2,
+            rs_s0,
+            rs_s1,
+            mov_ldi_pre_injected,
+        } = *ctx;
         // Sprint 314: Restore L-enable after combined settle.
         if mov_ldi_pre_injected {
             sim.set_logic_value_by_idx(self.alu_add_l_enable_idx, 0);
@@ -3017,7 +3124,7 @@ impl TileCpuV2 {
                 self.via_decode_mismatches
                     .set(self.via_decode_mismatches.get() + 1);
                 self.settle_reason_counts[1].set(self.settle_reason_counts[1].get() + 1); // via_decode
-                self.propagate_pipeline_until_settled(sim, &mut stats);
+                self.propagate_pipeline_until_settled(sim, stats);
             }
         }
 
@@ -3042,7 +3149,7 @@ impl TileCpuV2 {
                 sim.set_logic_value_by_idx(self.alu_add_l_enable_idx, u64::MAX);
                 sim.dirty.mark_dirty(self.alu_add_l_mux_idx);
                 self.settle_reason_counts[3].set(self.settle_reason_counts[3].get() + 1);
-                self.propagate_pipeline_constswap_settled(sim, &mut stats);
+                self.propagate_pipeline_constswap_settled(sim, stats);
                 sim.set_logic_value_by_idx(self.alu_add_l_enable_idx, 0);
             }
             // else: non-wide MOV/LDI already handled by pre-injection (S314).
@@ -3215,7 +3322,7 @@ impl TileCpuV2 {
             sim.set_logic_value_by_idx(self.top_mux_b_sel_const_idx, 0);
         }
 
-        let latch = PipelineLatch {
+        PipelineLatch {
             valid: true,
             pc,
             opcode,
@@ -3227,9 +3334,7 @@ impl TileCpuV2 {
             b,
             phys_top_a,
             phys_top_b,
-        };
-
-        (latch, stats)
+        }
     }
 
     fn run_stage_x(&self, sim: &mut Simulation, latch: PipelineLatch) -> StageStats {
@@ -3431,6 +3536,9 @@ impl TileCpuV2 {
         } else {
             None
         };
+        // V2->CUDA 1b.1: capture the authoritative ALU result before later phases clobber
+        // wb_alu_root_idx (read-only, golden-neutral).
+        self.last_alu_result.set(physical_alu_result.unwrap_or(0));
 
         // Sprint 239/243: Restore injection tiles to pre-injection values.
         if trunk_injected {
@@ -8058,12 +8166,146 @@ impl TileCpuV2 {
         self.lr.get()
     }
 
+    /// V2->CUDA 1b.1: the physical ALU result captured during the most recent
+    /// `run_stage_x` (golden-neutral read-only probe; later phases clobber the tile).
+    pub(crate) fn last_alu_result(&self) -> u64 {
+        self.last_alu_result.get()
+    }
+
+    /// V2->CUDA 1b.1: the latched Stage-X operands + opcode for the instruction about to
+    /// execute this cycle (None if the pipeline latch is invalid). Read-only.
+    pub(crate) fn latch_operands(&self) -> Option<(u64, u64, u8)> {
+        let l = self.latch.get();
+        if l.valid {
+            Some((l.a, l.b, l.opcode))
+        } else {
+            None
+        }
+    }
+
+    /// V2->CUDA 1b.1: the effective destination register (rd) of the latched instruction
+    /// (None if the latch is invalid). Mirrors `run_stage_x`'s `rd_eff` (~3348). Read-only.
+    pub(crate) fn latch_rd_eff(&self) -> Option<usize> {
+        let l = self.latch.get();
+        if l.valid {
+            let rd_hi = (l.ir_ext & EXT_RD_HI) != 0;
+            Some(effective_reg(l.rd & 0x07, rd_hi) as usize)
+        } else {
+            None
+        }
+    }
+
     pub fn write_lr(&self, value: u32) {
         self.lr.set(value & self.pc_phys_mask);
     }
 
     pub fn is_halted(&self) -> bool {
         self.halted.get()
+    }
+
+    /// SIMT Tier 2a: read-only view of the settle compact ops + WVIA params
+    /// (the dominant per-step eval cost, ~72% of tile evals) so the lane-packed
+    /// kernel benchmark can run against the real op array.
+    pub fn settle_compact_view(&self) -> (&[crate::simulation::CompactOp], &[(usize, u8, u64)]) {
+        (&self.settle_compact_ops, &self.settle_compact_wvia)
+    }
+
+    // === Sprint 386 (SIMT Tier 2b): fabric phase entry points ===
+    //
+    // The lane-lockstep fabric advances every lane to the Stage-F combined-
+    // settle barrier (fabric_tick_pre_settle), runs ONE wide dense settle via
+    // the lane kernel, then finishes each lane (fabric_finish_settle). Within
+    // a lane the order is exactly tick(): stage X (with its own small evals,
+    // incl. Const swaps that are restored before the next lane runs), then
+    // stage F phases F0..F2. Lane isolation rests on (a) per-lane value slots
+    // via the tilemap's active-lane redirect, (b) per-lane DirtyBitset/clock
+    // state swapped in by the fabric, and (c) every shared tile-TYPE swap
+    // being restored within the same per-lane call.
+
+    /// Per-lane: tick bookkeeping + stage X + stage F up to the settle
+    /// barrier. Returns None when the lane is halted (nothing to settle).
+    pub(crate) fn fabric_tick_pre_settle(&self, sim: &mut Simulation) -> Option<StageFCtx> {
+        if self.halted.get() {
+            self.last_stage_x_valid.set(false);
+            return None;
+        }
+        self.last_stage_x_mmio_reads.borrow_mut().clear();
+        self.last_stage_x_mmio_writes.borrow_mut().clear();
+        let next_cycle = self.cycle_count.get() + 1;
+        if let Some(mmio) = &self.mmio {
+            mmio.device().tick(next_cycle);
+        }
+        self.cycle_count.set(next_cycle);
+
+        let latch_in = self.latch.get();
+        self.last_stage_x_valid.set(latch_in.valid);
+        if latch_in.valid {
+            self.retired_count.set(self.retired_count.get() + 1);
+            let _ = self.run_stage_x(sim, latch_in);
+        } else {
+            self.changed_regs_mask.set(0);
+        }
+
+        if self.halted.get() {
+            // Halt decoded this cycle (stage X) — no fetch needed.
+            self.latch.set(PipelineLatch::default());
+            return None;
+        }
+
+        let mut stats = StageStats::empty();
+        let pc = self.stage_f_pre_cone(sim);
+        // Fabric v1: cone stays per-lane (16% of evals; widening it is a
+        // follow-up — the settle barrier below is the 73% win).
+        self.stage_f_cone(sim, &mut stats);
+        Some(self.stage_f_inject(sim, pc))
+    }
+
+    /// True when THIS lane's compact ops are stale this cycle (upper-bank
+    /// Const-swap) — the wide dense kernel must not evaluate any lane then.
+    pub(crate) fn fabric_settle_inhibited(&self) -> bool {
+        self.compact_eval_inhibit.get()
+    }
+
+    /// Per-lane: finish the cycle after the settle barrier. With
+    /// `wide_settled` the fabric already ran the lane kernel — drain this
+    /// lane's settle-scope dirty bits (the scalar settle paths do the same,
+    /// S384) and run Stage-F post. Otherwise run the normal scalar settle
+    /// first (inhibit/fallback cycles).
+    pub(crate) fn fabric_finish_settle(
+        &self,
+        sim: &mut Simulation,
+        ctx: &StageFCtx,
+        wide_settled: bool,
+    ) {
+        let mut stats = StageStats::empty();
+        if wide_settled {
+            let mut drain_buf = Vec::new();
+            sim.dirty
+                .fill_into_masked(&self.settle_cone_set, &mut drain_buf);
+        } else {
+            self.stage_f_settle(sim, ctx, &mut stats);
+        }
+        let latch = self.stage_f_post(sim, ctx, &mut stats);
+        self.latch.set(latch);
+    }
+
+    /// Fabric mode disables JIT eval (it walks the stride-1 value array).
+    /// Memoization stays ON — each lane's cpu clone owns its caches and sees
+    /// only its own lane's values, so the snapshots are lane-correct.
+    pub(crate) fn fabric_disable_jit(&mut self) {
+        #[cfg(feature = "cranelift_jit")]
+        {
+            self.settle_jit = None;
+            self.backbone_jit = None;
+            self.pipeline_cone_jit = None;
+            self.settle_jit_enabled.set(false);
+        }
+    }
+
+    /// Settle-scope mask view for fabric-side accounting.
+    #[allow(dead_code)]
+    pub(crate) fn fabric_settle_scope(&self) -> &[u64] {
+        &self.settle_cone_set
     }
 
     pub fn read_ram(&self, _sim: &Simulation, addr: usize) -> u64 {

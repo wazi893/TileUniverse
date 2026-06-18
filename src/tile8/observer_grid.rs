@@ -447,7 +447,7 @@ impl ObserverGrid {
     pub fn new(config: ObserverGridConfig) -> Self {
         let num = config.num_observers;
         let width = config.grid_width;
-        let height = (num + width - 1) / width;
+        let height = num.div_ceil(width);
 
         let observers: Vec<Observer> = (0..num)
             .map(|i| Observer::new(i, config.default_rule))

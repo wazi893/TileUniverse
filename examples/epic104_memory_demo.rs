@@ -333,14 +333,9 @@ fn demo_alu_with_memory() {
 // Helper functions
 
 fn set_tile_value(sim: &mut Simulation, x: usize, y: usize, value: u64) {
-    if let Some(tile) = sim.tilemap.get_tile(x, y) {
-        tile.logic.store(value, Ordering::Relaxed);
-    }
+    sim.tilemap.set_value_at(x, y, value);
 }
 
 fn get_tile_value(sim: &Simulation, x: usize, y: usize) -> u64 {
-    sim.tilemap
-        .get_tile(x, y)
-        .map(|t| t.logic.load(Ordering::Relaxed))
-        .unwrap_or(0)
+    sim.tilemap.value_at(x, y).unwrap_or(0)
 }

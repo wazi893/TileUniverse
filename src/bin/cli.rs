@@ -149,7 +149,7 @@ fn print_tile_summary(sim: &Simulation, x: usize, y: usize) {
         TileType::ThresholdViaUp => "ThresholdViaUp",
         TileType::ThresholdViaDown => "ThresholdViaDown",
     };
-    let val = t.logic.load(std::sync::atomic::Ordering::Relaxed);
+    let val = sim.tilemap.value(idx);
     println!("Tile ({},{})", x, y);
     println!("  Type: {}", ty);
     println!("  Value: 0x{:016x}", val);
@@ -695,11 +695,7 @@ fn main() {
                     (Some(x), Some(y)) if x < WIDTH && y < HEIGHT => {
                         let changed = sim.eval_at(x, y);
                         if cfg.verbose {
-                            let val = sim
-                                .tilemap
-                                .get_tile(x, y)
-                                .map(|t| t.logic.load(std::sync::atomic::Ordering::Relaxed))
-                                .unwrap_or(0);
+                            let val = sim.tilemap.value_at(x, y).unwrap_or(0);
                             println!(
                                 "{} (value=0x{:016x})",
                                 if changed { "changed" } else { "nochange" },
@@ -716,11 +712,7 @@ fn main() {
                 let (sx, sy) = (parts.next(), parts.next());
                 match (sx.and_then(parse_usize), sy.and_then(parse_usize)) {
                     (Some(x), Some(y)) if x < WIDTH && y < HEIGHT => {
-                        let val = sim
-                            .tilemap
-                            .get_tile(x, y)
-                            .map(|t| t.logic.load(std::sync::atomic::Ordering::Relaxed))
-                            .unwrap_or(0);
+                        let val = sim.tilemap.value_at(x, y).unwrap_or(0);
                         println!("Logic at ({},{}): 0x{:016x}", x, y, val);
                     }
                     _ => println!("OOB"),

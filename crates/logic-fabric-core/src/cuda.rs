@@ -293,19 +293,29 @@ pub fn is_nvrtc_available() -> bool {
 
     *NVRTC_AVAILABLE.get_or_init(|| {
         std::panic::catch_unwind(|| {
-            // Try a minimal compilation AND load to test nvrtc loading
-            // Ptx::from_src is lazy, so we need to actually load it
+            // Try a minimal compilation AND load to test nvrtc loading.
             let ctx = match cudarc::driver::CudaContext::new(0) {
                 Ok(c) => c,
                 Err(_) => return false,
             };
-            let minimal_ptx =
-                cudarc::nvrtc::Ptx::from_src(r#"extern "C" __global__ void _nvrtc_test() {}"#);
-            // Actually load the module - this triggers nvrtc compilation
-            match ctx.load_module(minimal_ptx) {
-                Ok(_) => true,
-                Err(_) => false,
-            }
+            // Compile with an EXPLICIT virtual arch. The no-arch `Ptx::from_src`
+            // default targets an old compute capability whose JIT image newer
+            // drivers (Blackwell / sm_120) reject with CUDA_ERROR_INVALID_IMAGE —
+            // a false negative even though nvrtc itself works. compute_89 PTX
+            // forward-JITs onto every currently supported device.
+            use cudarc::nvrtc::{compile_ptx_with_opts, CompileOptions};
+            let opts = CompileOptions {
+                arch: Some("compute_89"),
+                ..Default::default()
+            };
+            let ptx =
+                match compile_ptx_with_opts(r#"extern "C" __global__ void _nvrtc_test() {}"#, opts)
+                {
+                    Ok(p) => p,
+                    Err(_) => return false,
+                };
+            // Actually load the module - this triggers the driver JIT + load.
+            ctx.load_module(ptx).is_ok()
         })
         .unwrap_or(false)
     })

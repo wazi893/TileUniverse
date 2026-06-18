@@ -36,8 +36,8 @@ fn single_layer_identity() {
     sim2.set_logic_value(5, 5, 42);
 
     assert_eq!(
-        sim1.tilemap.tiles[5 * 32 + 5].logic.load(Ordering::Relaxed),
-        sim2.tilemap.tiles[5 * 32 + 5].logic.load(Ordering::Relaxed),
+        sim1.tilemap.value(5 * 32 + 5),
+        sim2.tilemap.value(5 * 32 + 5),
     );
 }
 
@@ -414,9 +414,7 @@ fn slim_simulation_via_eval() {
     // Place Const on layer 1 at (3,3) using tilemap directly
     let const_idx = layer_size + 3 * 8 + 3;
     sim.tilemap.tiles[const_idx].meta.tile_type = TileType::Const;
-    sim.tilemap.tiles[const_idx]
-        .logic
-        .store(0xBEEF, Ordering::Relaxed);
+    sim.tilemap.set_value(const_idx, 0xBEEF);
     sim.meta_fast[const_idx] = TileType::Const;
 
     // Place ViaUp on layer 0 at (3,3) — reads from layer 1
@@ -427,7 +425,7 @@ fn slim_simulation_via_eval() {
     // Evaluate the via tile
     sim.eval_tile(via_idx);
 
-    let via_val = sim.tilemap.tiles[via_idx].logic.load(Ordering::Relaxed);
+    let via_val = sim.tilemap.value(via_idx);
     assert_eq!(
         via_val, 0xBEEF,
         "SlimSimulation ViaUp should read from layer above"

@@ -43,7 +43,7 @@ use crate::synth::bridge::{BridgeConfig, compile_aig_to_export};
 use crate::synth::cell_lib::CellLibrary;
 use crate::synth::timing::{TimingConstraint, analyze_timing};
 use crate::synth::{SynthConfig, materialize_inversions, synthesize};
-use crate::tile_cpu::v2_compiler::{ArithOp, Expr, Func, Stmt};
+use tileuniverse_v2_lang::{ArithOp, Expr, Func, Stmt};
 
 /// Configuration for behavioral synthesis.
 #[derive(Clone, Copy, Debug)]

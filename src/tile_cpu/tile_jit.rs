@@ -16,9 +16,9 @@ use target_lexicon::Triple;
 
 use crate::simulation::{
     COP_ADD, COP_AND, COP_BITSEL, COP_CARRY, COP_CONST, COP_DEC3, COP_GENERIC, COP_MUX, COP_MUX4,
-    COP_MUX16, COP_NOT, COP_OR, COP_RAM, COP_SHL, COP_SHR, COP_SUB, COP_VIA, COP_WIRE, COP_WIRE_D,
-    COP_WIRE_H, COP_WIRE_L, COP_WIRE_R, COP_WIRE_U, COP_WIRE_V, COP_WVIA, COP_XOR, COP_ZERO,
-    CompactOp,
+    COP_MUX16, COP_NOT, COP_OR, COP_RAM, COP_SHL, COP_SHR, COP_SUB, COP_THRESHOLD_VIA, COP_VIA,
+    COP_WIRE, COP_WIRE_D, COP_WIRE_H, COP_WIRE_L, COP_WIRE_R, COP_WIRE_U, COP_WIRE_V, COP_WVIA,
+    COP_XOR, COP_ZERO, CompactOp,
 };
 
 // ---------------------------------------------------------------------------
@@ -32,7 +32,7 @@ unsafe impl Sync for SendJITModule {}
 /// JIT function signature:
 ///   (tiles_ptr: *mut u8, changed_buf: *mut u32, buf_cap: u32) -> u32
 ///
-/// - tiles_ptr: pointer to tilemap.tiles[0] (stride = TILE_STRIDE bytes per tile)
+/// - tiles_ptr: pointer to tilemap.values[0] (stride = TILE_STRIDE bytes per value)
 /// - changed_buf: output buffer for indices of tiles that changed value
 /// - buf_cap: capacity of changed_buf
 /// - returns: number of changed tiles written to changed_buf
@@ -55,22 +55,18 @@ impl std::fmt::Debug for TileEvalJitProgram {
 unsafe impl Send for TileEvalJitProgram {}
 unsafe impl Sync for TileEvalJitProgram {}
 
-/// Tile struct stride in bytes. Tile = { logic: AtomicU64 (8), meta: TileMeta (1), pad (7) } = 16.
-/// logic field is at offset 0.
-const TILE_STRIDE: i64 = 16;
+/// Value stride in bytes. Sprint 385 relocated tile values into the SoA
+/// `Tilemap::values: Vec<AtomicU64>`, so the JIT walks a dense u64 array
+/// (8 bytes per tile) instead of the old 16-byte `Tile` struct.
+const TILE_STRIDE: i64 = 8;
 
 // Sprint 273.1: Compile-time layout verification.
 const _: () = {
+    // AtomicU64 is repr(transparent) over u64; the JIT loads/stores raw u64s
+    // at values_ptr + idx * 8.
     assert!(
-        std::mem::size_of::<crate::tiles::tile::Tile>() == TILE_STRIDE as usize,
-        "Tile stride mismatch — JIT hardcodes 16-byte stride"
-    );
-    // logic field must be at offset 0 (first field).
-    // AtomicU64 is repr(transparent) over u64, so offset_of would be 0.
-    // We verify size_of<AtomicU64> == 8 to ensure the stride math is correct.
-    assert!(
-        std::mem::size_of::<std::sync::atomic::AtomicU64>() == 8,
-        "AtomicU64 size mismatch — JIT assumes 8-byte logic field"
+        std::mem::size_of::<std::sync::atomic::AtomicU64>() == TILE_STRIDE as usize,
+        "AtomicU64 size mismatch — JIT assumes 8-byte value stride"
     );
 };
 
@@ -94,6 +90,13 @@ pub fn preflight_check(ops: &[CompactOp]) -> Result<(), String> {
                 i, op.idx
             ));
         }
+        if op.op == COP_THRESHOLD_VIA {
+            return Err(format!(
+                "cone op {} (tile {}) is COP_THRESHOLD_VIA — JIT signature has 3 inputs, \
+                 threshold via needs 4 in-plane neighbors + cross-layer source",
+                i, op.idx
+            ));
+        }
     }
     Ok(())
 }
@@ -105,7 +108,7 @@ pub fn preflight_check(ops: &[CompactOp]) -> Result<(), String> {
 /// Compile a CompactOp array into a native tile evaluation function.
 ///
 /// Performs preflight verification before compilation. Returns Err if the
-/// cone contains unsupported ops (COP_GENERIC, COP_WIRE).
+/// cone contains unsupported ops (COP_GENERIC, COP_WIRE, COP_THRESHOLD_VIA).
 pub fn compile_tile_eval(
     ops: &[CompactOp],
     wvia_params: &[(usize, u8, u64)],

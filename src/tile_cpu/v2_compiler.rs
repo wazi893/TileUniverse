@@ -35,185 +35,15 @@
 
 use crate::tile_cpu::assemble_v2;
 use crate::tile_cpu::v2_mmio::{V2_MMIO_BASE, V2_MMIO_END};
+use crate::tile_cpu::v2_mmio_devices::{
+    MMIO_ACCEL_ARG_DATA, MMIO_ACCEL_ARG_SELECT, MMIO_ACCEL_RESULT,
+};
 
 // ===================================================================
 // AST
 // ===================================================================
 
-/// Binary arithmetic / bitwise operators (value-producing).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ArithOp {
-    Add,
-    Sub,
-    Mul,
-    And,
-    Or,
-    Xor,
-}
-
-/// Comparison operators (used only in `if`/`while` conditions in D.1).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CmpOp {
-    Eq,
-    Ne,
-    Lt,
-    Le,
-    Gt,
-    Ge,
-}
-
-/// A value-producing expression.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Expr {
-    /// Integer literal.
-    Int(i64),
-    /// Local variable / parameter reference.
-    Var(String),
-    /// Binary arithmetic/bitwise op.
-    Bin(ArithOp, Box<Expr>, Box<Expr>),
-    /// Function call `name(args...)` — result in R0.
-    Call(String, Vec<Expr>),
-    /// Global-array element read `name[index]` (Sprint 382, Gate F). The array base is a
-    /// fixed RAM address; the access lowers to `LD R0, [Rindex + base]`.
-    Index(String, Box<Expr>),
-}
-
-/// A boolean condition (branch-only in D.1).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Cond {
-    Cmp(CmpOp, Expr, Expr),
-}
-
-/// A statement.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Stmt {
-    /// Declare + initialize a local: `let name = expr`.
-    Let(String, Expr),
-    /// Assign to an existing local/param: `name = expr`.
-    Assign(String, Expr),
-    /// `if cond { then } else { els }`.
-    If(Cond, Vec<Stmt>, Vec<Stmt>),
-    /// `while cond { body }`.
-    While(Cond, Vec<Stmt>),
-    /// `return expr`.
-    Return(Expr),
-    /// Expression evaluated for effect (e.g. a call), result discarded.
-    Expr(Expr),
-    /// Global-array element store `name[index] = value` (Sprint 382, Gate F).
-    StoreIndex(String, Expr, Expr),
-}
-
-/// A function definition.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Func {
-    pub name: String,
-    pub params: Vec<String>,
-    pub body: Vec<Stmt>,
-}
-
-/// A global array (Sprint 382, Gate F): a fixed-size block of RAM cells with an optional
-/// initializer. Bases are assigned at compile time from address 0 upward; the entry stub
-/// zero/literal-initializes every cell so ISS and physical agree regardless of RAM reset.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct GlobalArray {
-    pub name: String,
-    /// Number of cells (the declared length; `init` may be shorter — trailing cells 0).
-    pub len: usize,
-    /// Initial cell values (each 0..=65535); cells beyond `init.len()` start at 0.
-    pub init: Vec<i64>,
-}
-
-/// A whole program: globals, a set of functions, an entry point, and the initial stack top.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Program {
-    pub globals: Vec<GlobalArray>,
-    pub funcs: Vec<Func>,
-    pub entry: String,
-    /// Initial SP (RAM address, empty-descending). Must stay within RAM (0..127).
-    pub stack_top: u8,
-}
-
-impl Program {
-    /// Build a program with the default stack top (120, leaving headroom in RAM).
-    pub fn new(entry: &str, funcs: Vec<Func>) -> Self {
-        Program {
-            globals: Vec::new(),
-            funcs,
-            entry: entry.to_string(),
-            stack_top: 120,
-        }
-    }
-
-    /// Build a program with global arrays (Gate F).
-    pub fn with_globals(entry: &str, globals: Vec<GlobalArray>, funcs: Vec<Func>) -> Self {
-        Program {
-            globals,
-            funcs,
-            entry: entry.to_string(),
-            stack_top: 120,
-        }
-    }
-}
-
-/// A compilation failure with a human-readable message.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CompileError(pub String);
-
-impl std::fmt::Display for CompileError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "compile error: {}", self.0)
-    }
-}
-
-// ===================================================================
-// Ergonomic AST builders (keep test programs readable)
-// ===================================================================
-
-pub fn int(n: i64) -> Expr {
-    Expr::Int(n)
-}
-pub fn var(name: &str) -> Expr {
-    Expr::Var(name.to_string())
-}
-pub fn add(a: Expr, b: Expr) -> Expr {
-    Expr::Bin(ArithOp::Add, Box::new(a), Box::new(b))
-}
-pub fn sub(a: Expr, b: Expr) -> Expr {
-    Expr::Bin(ArithOp::Sub, Box::new(a), Box::new(b))
-}
-pub fn mul(a: Expr, b: Expr) -> Expr {
-    Expr::Bin(ArithOp::Mul, Box::new(a), Box::new(b))
-}
-pub fn band(a: Expr, b: Expr) -> Expr {
-    Expr::Bin(ArithOp::And, Box::new(a), Box::new(b))
-}
-pub fn bor(a: Expr, b: Expr) -> Expr {
-    Expr::Bin(ArithOp::Or, Box::new(a), Box::new(b))
-}
-pub fn bxor(a: Expr, b: Expr) -> Expr {
-    Expr::Bin(ArithOp::Xor, Box::new(a), Box::new(b))
-}
-pub fn call(name: &str, args: Vec<Expr>) -> Expr {
-    Expr::Call(name.to_string(), args)
-}
-pub fn lt(a: Expr, b: Expr) -> Cond {
-    Cond::Cmp(CmpOp::Lt, a, b)
-}
-pub fn le(a: Expr, b: Expr) -> Cond {
-    Cond::Cmp(CmpOp::Le, a, b)
-}
-pub fn gt(a: Expr, b: Expr) -> Cond {
-    Cond::Cmp(CmpOp::Gt, a, b)
-}
-pub fn ge(a: Expr, b: Expr) -> Cond {
-    Cond::Cmp(CmpOp::Ge, a, b)
-}
-pub fn eq(a: Expr, b: Expr) -> Cond {
-    Cond::Cmp(CmpOp::Eq, a, b)
-}
-pub fn ne(a: Expr, b: Expr) -> Cond {
-    Cond::Cmp(CmpOp::Ne, a, b)
-}
+pub use tileuniverse_v2_lang::*;
 
 // ===================================================================
 // Codegen
@@ -269,6 +99,9 @@ struct Codegen {
     label_counter: usize,
     /// name → fixed RAM base/len for global arrays.
     globals: Vec<(String, GlobalLoc)>,
+    /// Sprint 388: the accel-marked function this program may call — `(name, arity)`.
+    /// Calls to it lower to the MMIO accelerator protocol instead of `CALL.W`.
+    accel: Option<(String, usize)>,
 }
 
 impl Codegen {
@@ -277,6 +110,7 @@ impl Codegen {
             out: Vec::new(),
             label_counter: 0,
             globals: Vec::new(),
+            accel: None,
         }
     }
 
@@ -428,6 +262,40 @@ impl Codegen {
             self.gen_expr(ctx, &args[0])?; // char value -> R0
             self.emit("STB [CONSOLE_DATA], R0");
             return Ok(());
+        }
+        // Sprint 388 (HW/SW co-design, Phase 2): a call to the `accel`-marked function
+        // lowers to the MMIO accelerator's indexed-operand protocol instead of CALL.W:
+        // for each argument, write its index to ARG_SELECT and its value to ARG_DATA
+        // (full 64-bit ST — the device latches operand[index]); then a single LD from
+        // RESULT triggers evaluation of the synthesized tile datapath and returns the
+        // answer in R0. No LR/stack-frame involvement — the "call" is three stores and
+        // a load per argument, like the putchar builtin but with a result.
+        if let Some((accel_name, accel_arity)) = self.accel.clone() {
+            if name == accel_name {
+                if args.len() != accel_arity {
+                    return Err(CompileError(format!(
+                        "accel function '{accel_name}' expects {accel_arity} argument(s), got {}",
+                        args.len()
+                    )));
+                }
+                // Stage every argument on the eval stack first: an argument expression
+                // may itself contain calls (including nested accel calls) that would
+                // clobber the device's operand latches mid-sequence.
+                for arg in args {
+                    self.gen_expr(ctx, arg)?;
+                    self.emit(format!("PUSH {RESULT}"));
+                }
+                self.emit(format!("LDI {ADDR}, 0")); // base 0 for [R5+addr] MMIO access
+                for i in (0..args.len()).rev() {
+                    self.emit(format!("POP {RESULT}")); // arg i value
+                    self.emit(format!("LDI {LEFT}, {i}"));
+                    self.emit(format!("ST [{ADDR}+{MMIO_ACCEL_ARG_SELECT}], {LEFT}"));
+                    self.emit(format!("ST [{ADDR}+{MMIO_ACCEL_ARG_DATA}], {RESULT}"));
+                }
+                // Read RESULT: the device evaluates the tile datapath on this access.
+                self.emit(format!("LD {RESULT}, [{ADDR}+{MMIO_ACCEL_RESULT}]"));
+                return Ok(());
+            }
         }
         if args.len() > 4 {
             return Err(CompileError(format!(
@@ -790,6 +658,31 @@ fn collect_locals(func: &Func) -> Vec<String> {
 
 /// Compile a [`Program`] to V2 assembly *text*.
 pub fn compile_program(program: &Program) -> Result<String, CompileError> {
+    // Sprint 388 (HW/SW co-design, Phase 2): register the accel-marked function so its
+    // call sites lower to the MMIO accelerator protocol. The function body is NOT
+    // compiled to instructions — it is synthesized to a tile datapath by the caller
+    // (`compile_source_with_accel`), which owns the resulting MMIO device.
+    if program.accel_funcs.len() > 1 {
+        return Err(CompileError(format!(
+            "{} accel functions declared; this sprint supports at most one accelerator \
+             per program (one MMIO device window)",
+            program.accel_funcs.len()
+        )));
+    }
+    if let Some(af) = program.accel_funcs.first() {
+        if program.funcs.iter().any(|f| f.name == af.name) {
+            return Err(CompileError(format!(
+                "function '{}' is defined both as a regular function and as accel",
+                af.name
+            )));
+        }
+        if af.name == program.entry {
+            return Err(CompileError(format!(
+                "entry function '{}' cannot be an accel function",
+                af.name
+            )));
+        }
+    }
     if !program.funcs.iter().any(|f| f.name == program.entry) {
         return Err(CompileError(format!(
             "entry function '{}' not found",
@@ -797,6 +690,9 @@ pub fn compile_program(program: &Program) -> Result<String, CompileError> {
         )));
     }
     let mut cg = Codegen::new();
+    if let Some(af) = program.accel_funcs.first() {
+        cg.accel = Some((af.name.clone(), af.params.len()));
+    }
 
     // Sprint 382 (Gate F): allocate global arrays into RAM, avoiding the reserved MMIO
     // window (`V2_MMIO_BASE..=V2_MMIO_END`, i.e. 41..=63). A load/store to an MMIO

@@ -691,6 +691,18 @@ impl SurfaceCode {
         self.z_stabilizers.len()
     }
 
+    /// Data-qubit supports of each X stabilizer, in X-syndrome order.
+    /// Stabilizer `i` corresponds to `measure_x_syndrome()[i]`; its lattice
+    /// position is the centroid of these qubits' `(row, col)` coordinates.
+    pub fn x_stabilizer_supports(&self) -> &[Vec<usize>] {
+        &self.x_stabilizers
+    }
+
+    /// Data-qubit supports of each Z stabilizer, in Z-syndrome order.
+    pub fn z_stabilizer_supports(&self) -> &[Vec<usize>] {
+        &self.z_stabilizers
+    }
+
     /// Measure X-type syndrome (detects Z errors)
     ///
     /// Returns a vector of syndrome bits, one per X stabilizer.

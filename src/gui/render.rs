@@ -1,7 +1,6 @@
 use crate::simulation::Simulation;
 use crate::tilemap::{HEIGHT, WIDTH};
 use std::io::{self, Write};
-use std::sync::atomic::Ordering;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ImageFormat {
@@ -116,11 +115,7 @@ pub fn render_region(
         for (jx, x) in (x0 as usize..x1 as usize).enumerate() {
             let color = match params.fields {
                 FieldLayerMode::Logic => {
-                    let v = sim
-                        .tilemap
-                        .get_tile(x, y)
-                        .map(|t| t.logic.load(Ordering::Relaxed))
-                        .unwrap_or(0);
+                    let v = sim.tilemap.value_at(x, y).unwrap_or(0);
                     palette_logic(v)
                 }
                 FieldLayerMode::Heat => {
@@ -137,11 +132,7 @@ pub fn render_region(
                     blend_add(palette_heat(hval), palette_charge(cval))
                 }
                 FieldLayerMode::LogicAndHeat => {
-                    let v = sim
-                        .tilemap
-                        .get_tile(x, y)
-                        .map(|t| t.logic.load(Ordering::Relaxed))
-                        .unwrap_or(0);
+                    let v = sim.tilemap.value_at(x, y).unwrap_or(0);
                     let hval = sim.get_heat_field_for_test(x, y);
                     // Heat as base + green logic overlay
                     let base = palette_heat(hval);

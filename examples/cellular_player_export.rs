@@ -17,7 +17,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or_else(|| PathBuf::from("cellular_player.html"));
 
     let rt = CudaRuntime::new()?;
-    println!("device: {}", rt.device_name().unwrap_or_else(|_| "?".into()));
+    println!(
+        "device: {}",
+        rt.device_name().unwrap_or_else(|_| "?".into())
+    );
     println!("capturing Game-of-Life demos on the GPU…");
 
     export_default_cellular_player(&rt, &out)?;

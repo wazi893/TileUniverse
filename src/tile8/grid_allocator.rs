@@ -256,12 +256,12 @@ impl GridAllocator {
             });
         }
 
-        let num_cpus = 1 << (num_qubits - 7); // 2^(N-7)
+        let num_cpus: usize = 1 << (num_qubits - 7); // 2^(N-7)
 
         // Try to make it as square as possible
         let side = (num_cpus as f64).sqrt().ceil() as usize;
         let rows = side;
-        let cols = (num_cpus + rows - 1) / rows; // Ceiling division
+        let cols = num_cpus.div_ceil(rows); // Ceiling division
 
         self.allocate_grid(rows, cols)
     }

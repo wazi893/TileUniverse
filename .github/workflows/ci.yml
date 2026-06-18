@@ -22,6 +22,9 @@ jobs:
         toolchain: stable
         components: rustfmt, clippy
 
+    - name: Install nextest
+      uses: taiki-e/install-action@nextest
+
     - name: Cache cargo registry
       uses: actions/cache@v4
       with:
@@ -45,10 +48,14 @@ jobs:
     - name: Build (release, with perf-bench)
       run: cargo build --release --verbose --features perf-bench
 
-    - name: Run tests
-      # Use release mode to avoid debug-mode memory issues
-      # Use single thread to avoid resource exhaustion causing SIGABRT
-      run: cargo test --release --verbose -- --test-threads=1
+    - name: Run tests (nextest)
+      # nextest runs each test in its own process, so it parallelizes safely
+      # without the resource-exhaustion SIGABRT that forced --test-threads=1.
+      run: cargo nextest run --release --profile ci
+
+    - name: Doctests
+      # nextest does not run doctests; run them separately.
+      run: cargo test --release --doc
 
     - name: Clippy
       run: cargo clippy -- -D warnings
@@ -65,12 +72,19 @@ jobs:
       with:
         toolchain: stable
 
+    - name: Install nextest
+      uses: taiki-e/install-action@nextest
+
     - name: Clean build artifacts
       run: cargo clean
 
     - name: Build
       run: cargo build --release --verbose
 
-    - name: Run tests
-      # Use release mode on Windows to avoid debug-mode heap corruption issues
-      run: cargo test --release --verbose
+    - name: Run tests (nextest)
+      # Release mode avoids debug-mode heap corruption issues; nextest's
+      # process-per-test isolation keeps parallel runs stable.
+      run: cargo nextest run --release --profile ci
+
+    - name: Doctests
+      run: cargo test --release --doc

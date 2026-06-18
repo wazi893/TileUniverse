@@ -431,7 +431,7 @@ impl Blueprint {
             let (x, y, z) = sim.tilemap.coords_from_idx(idx);
             let tile = &sim.tilemap.tiles[idx];
             let tt = tile.meta.tile_type;
-            let val = tile.logic.load(std::sync::atomic::Ordering::Relaxed);
+            let val = sim.tilemap.value(idx);
             let logic = if val != 0 { Some(val) } else { None };
             bp.tiles.push(BlueprintTile {
                 x: x as u32,
@@ -792,12 +792,7 @@ mod tests {
         });
         let mut sim = Simulation::new();
         bp.apply_to_simulation(&mut sim).expect("apply ok");
-        let v = sim
-            .tilemap
-            .get_tile(10, 10)
-            .unwrap()
-            .logic
-            .load(std::sync::atomic::Ordering::Relaxed);
+        let v = sim.tilemap.value_at(10, 10).unwrap();
         assert_eq!(v, 0xABCD);
     }
 

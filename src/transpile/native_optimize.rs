@@ -150,13 +150,14 @@ fn cancel_adjacent_cx(gates: &[IBMGate]) -> (Vec<IBMGate>, usize) {
     while i < gates.len() {
         if i + 1 < gates.len() {
             // Check for CX·CX pattern
-            if let (IBMGate::CX(c1, t1), IBMGate::CX(c2, t2)) = (&gates[i], &gates[i + 1]) {
-                if c1 == c2 && t1 == t2 {
-                    // CX·CX = Identity, skip both
-                    cancelled += 2;
-                    i += 2;
-                    continue;
-                }
+            if let (IBMGate::CX(c1, t1), IBMGate::CX(c2, t2)) = (&gates[i], &gates[i + 1])
+                && c1 == c2
+                && t1 == t2
+            {
+                // CX·CX = Identity, skip both
+                cancelled += 2;
+                i += 2;
+                continue;
             }
         }
         result.push(gates[i].clone());
@@ -175,15 +176,15 @@ fn merge_adjacent_rz(gates: &[IBMGate]) -> (Vec<IBMGate>, usize) {
     while i < gates.len() {
         if i + 1 < gates.len() {
             // Check for Rz·Rz pattern
-            if let (IBMGate::Rz(q1, a1), IBMGate::Rz(q2, a2)) = (&gates[i], &gates[i + 1]) {
-                if q1 == q2 {
-                    // Merge: Rz(θ₁)·Rz(θ₂) = Rz(θ₁+θ₂)
-                    let combined_angle = (a1 + a2).rem_euclid(TAU);
-                    result.push(IBMGate::Rz(*q1, combined_angle));
-                    merged += 1;
-                    i += 2;
-                    continue;
-                }
+            if let (IBMGate::Rz(q1, a1), IBMGate::Rz(q2, a2)) = (&gates[i], &gates[i + 1])
+                && q1 == q2
+            {
+                // Merge: Rz(θ₁)·Rz(θ₂) = Rz(θ₁+θ₂)
+                let combined_angle = (a1 + a2).rem_euclid(TAU);
+                result.push(IBMGate::Rz(*q1, combined_angle));
+                merged += 1;
+                i += 2;
+                continue;
             }
         }
         result.push(gates[i].clone());
@@ -199,11 +200,11 @@ fn eliminate_zero_rz(gates: &[IBMGate]) -> (Vec<IBMGate>, usize) {
     let mut eliminated = 0;
 
     for gate in gates {
-        if let IBMGate::Rz(_, angle) = gate {
-            if is_zero_angle(*angle) {
-                eliminated += 1;
-                continue;
-            }
+        if let IBMGate::Rz(_, angle) = gate
+            && is_zero_angle(*angle)
+        {
+            eliminated += 1;
+            continue;
         }
         result.push(gate.clone());
     }
@@ -220,15 +221,15 @@ fn reduce_sx_pairs(gates: &[IBMGate]) -> (Vec<IBMGate>, usize) {
     while i < gates.len() {
         if i + 1 < gates.len() {
             // Check for SX·SX pattern
-            if let (IBMGate::SX(q1), IBMGate::SX(q2)) = (&gates[i], &gates[i + 1]) {
-                if q1 == q2 {
-                    // SX·SX = X (but X = Rz(π)·SX·Rz(π) in IBM basis)
-                    // For simplicity, we can represent this as X directly
-                    result.push(IBMGate::X(*q1));
-                    reduced += 1; // Reduced 2 SX to 1 X
-                    i += 2;
-                    continue;
-                }
+            if let (IBMGate::SX(q1), IBMGate::SX(q2)) = (&gates[i], &gates[i + 1])
+                && q1 == q2
+            {
+                // SX·SX = X (but X = Rz(π)·SX·Rz(π) in IBM basis)
+                // For simplicity, we can represent this as X directly
+                result.push(IBMGate::X(*q1));
+                reduced += 1; // Reduced 2 SX to 1 X
+                i += 2;
+                continue;
             }
         }
         result.push(gates[i].clone());
@@ -331,15 +332,15 @@ fn cancel_inverse_gpi(gates: &[IonQGate]) -> (Vec<IonQGate>, usize) {
     let mut i = 0;
 
     while i < gates.len() {
-        if i + 1 < gates.len() {
-            if let (IonQGate::GPI(q1, phi1), IonQGate::GPI(q2, phi2)) = (&gates[i], &gates[i + 1]) {
-                if q1 == q2 && angles_differ_by_pi(*phi1, *phi2) {
-                    // GPI(φ)·GPI(φ+π) = I
-                    cancelled += 2;
-                    i += 2;
-                    continue;
-                }
-            }
+        if i + 1 < gates.len()
+            && let (IonQGate::GPI(q1, phi1), IonQGate::GPI(q2, phi2)) = (&gates[i], &gates[i + 1])
+            && q1 == q2
+            && angles_differ_by_pi(*phi1, *phi2)
+        {
+            // GPI(φ)·GPI(φ+π) = I
+            cancelled += 2;
+            i += 2;
+            continue;
         }
         result.push(gates[i].clone());
         i += 1;
@@ -355,24 +356,22 @@ fn cancel_inverse_gpi2(gates: &[IonQGate]) -> (Vec<IonQGate>, usize) {
     let mut i = 0;
 
     while i < gates.len() {
-        if i + 1 < gates.len() {
-            if let (IonQGate::GPI2(q1, phi1), IonQGate::GPI2(q2, phi2)) = (&gates[i], &gates[i + 1])
-            {
-                if q1 == q2 {
-                    // Two GPI2 with same angle = GPI
-                    if angles_equal(*phi1, *phi2) {
-                        result.push(IonQGate::GPI(*q1, *phi1));
-                        cancelled += 1; // Merged 2 into 1
-                        i += 2;
-                        continue;
-                    }
-                    // Two GPI2 with opposite angles = I (up to global phase)
-                    if angles_differ_by_pi(*phi1, *phi2) {
-                        cancelled += 2;
-                        i += 2;
-                        continue;
-                    }
-                }
+        if i + 1 < gates.len()
+            && let (IonQGate::GPI2(q1, phi1), IonQGate::GPI2(q2, phi2)) = (&gates[i], &gates[i + 1])
+            && q1 == q2
+        {
+            // Two GPI2 with same angle = GPI
+            if angles_equal(*phi1, *phi2) {
+                result.push(IonQGate::GPI(*q1, *phi1));
+                cancelled += 1; // Merged 2 into 1
+                i += 2;
+                continue;
+            }
+            // Two GPI2 with opposite angles = I (up to global phase)
+            if angles_differ_by_pi(*phi1, *phi2) {
+                cancelled += 2;
+                i += 2;
+                continue;
             }
         }
         result.push(gates[i].clone());
