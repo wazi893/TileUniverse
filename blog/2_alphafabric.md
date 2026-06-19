@@ -77,7 +77,7 @@ But crank the timing weight too hard on the 4-bit multiplier — a congested blo
 
 **And the circuit computes the wrong answer.**
 
-The oracle caught it. I'd been quietly assuming "routable ⟹ correct" — that if the router connected every net, the function was preserved. For dense, over-packed placements, that assumption is false: a too-tight solution can create an unintended physical adjacency that corrupts the logic while still settling to a stable, fully-routed state. I built a diagnostic (`Unroutable / NotConverged / WrongOutput / Correct`) to classify it, confirmed it was genuinely `WrongOutput`, and it pointed straight at a real router defect — same-net stacked cells being treated as connected without an actual via — which I then fixed (a regression that took 244 failing cases to 0). Re-run today, after the fix, that same over-packed multiplier verifies `Correct`: the oracle that caught the bug now confirms its absence.
+The oracle caught it. I'd been quietly assuming "routable ⟹ correct" — that if the router connected every net, the function was preserved. For dense, over-packed placements, that assumption is false: a too-tight solution can create an unintended physical adjacency that corrupts the logic while still settling to a stable, fully-routed state. I built a diagnostic (`Unroutable / NotConverged / WrongOutput / Correct`) to classify it, confirmed it was genuinely `WrongOutput`, and it pointed straight at a real router defect — same-net stacked cells being treated as connected without an actual via — which I then fixed (a regression that took 244 failing cases to 0). Two things came out of that, and they're separate. The router defect itself is fixed — that regression went 244 failing cases to 0 — so a legitimately-placed dense layout now routes and verifies `Correct`. The over-aggressive *timing weight* is a different lever: if you run the `alphafabric_af_timing` example today, that multiplier still surfaces as `WrongOutput` and the oracle still rejects it. That's the demonstration working, not a contradiction — the claim was never "the multiplier is always correct," it's that the gate is physical, so it catches the layouts that aren't.
 
 I want to be clear about what happened here, because it's the most important part of the whole project: **routability was not a sound proxy for correctness, and the only reason I know that is that the legality gate was physical, not heuristic.** A reward signal built on "did it route?" would have happily optimized toward a broken circuit. The oracle is what kept the optimizer — learned or classical — honest.
 
@@ -101,7 +101,7 @@ I wanted one project that was unambiguously *machine learning for systems* — t
 
 The arc — environment → annealing baseline → learned policy → route-aware → timing-driven, every layout verified correct on real simulated tiles — is the whole pitch. The fabric was already the environment. The oracle was already the referee. All I added was a player that learned to generalize, and the discipline to only claim what the oracle could prove.
 
-*Code: `https://github.com/wazi893/TileUniverse`. The fabric this runs on is a CPU built out of logic tiles with a C compiler that targets it — and that same compiler can now lower a marked function to a spatial tile datapath instead of instructions; the companion "one source, one SoC" post is forthcoming.*
+*Code: <https://github.com/wazi893/TileUniverse>. The fabric this runs on is a CPU built out of logic tiles with a C compiler that targets it — and that same compiler can now lower a marked function to a spatial tile datapath instead of instructions; the companion "one source, one SoC" post is forthcoming.*
 
 ---
 
@@ -111,7 +111,7 @@ The arc — environment → annealing baseline → learned policy → route-awar
 - Learned one-shot (held-out, zero search): 60% of naive baseline wirelength.
 - Warm start (learned + ¼ anneal): 55% of naive, vs 51% for full cold anneal.
 - Both wirelength-only and route-aware policies place all 5 held-out circuits validly one-shot (after the router via-defect fix); route-aware trades a little wirelength for conservative spread.
-- Timing-driven: −21% criticality-weighted wirelength on 8-bit equality; rescued an unroutable 12-bit adder; over-aggressive weighting on the multiplier produced a routable-but-wrong layout that the correctness oracle rejected — found, diagnosed, and fixed at the router level, and the layout now verifies correct.
+- Timing-driven: −21% criticality-weighted wirelength on 8-bit equality; rescued an unroutable 12-bit adder; over-aggressive weighting on the multiplier produces a routable-but-wrong layout that the correctness oracle rejects (the `alphafabric_af_timing` example still surfaces this `WrongOutput` catch by design). Diagnosing it separately surfaced a real router via-defect, since fixed (244 failing cases → 0).
 
 ### Reproduce
 ```
