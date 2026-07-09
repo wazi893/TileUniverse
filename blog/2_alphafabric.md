@@ -39,10 +39,10 @@ Results, all verified correct on real tiles:
 
 | Circuit | Routed wirelength vs. naive |
 |---|---|
-| 4-bit adder | **−44%** |
+| 4-bit adder | **−45%** |
 | 8-bit equality | −26% |
 | 8-bit parity | −21% |
-| **4-bit multiplier** | **−30%** |
+| **4-bit multiplier** | **−28%** |
 | 8-bit adder | naive layout was **unroutable** → SA made it routable |
 
 That last row is my favorite. The naive row-major placement of the 8-bit adder *couldn't even be routed*. The annealer didn't just shrink it — it found a legal layout where the dumb approach found none.
@@ -77,7 +77,7 @@ But crank the timing weight too hard on the 4-bit multiplier — a congested blo
 
 **And the circuit computes the wrong answer.**
 
-The oracle caught it. I'd been quietly assuming "routable ⟹ correct" — that if the router connected every net, the function was preserved. For dense, over-packed placements, that assumption is false: a too-tight solution can create an unintended physical adjacency that corrupts the logic while still settling to a stable, fully-routed state. I built a diagnostic (`Unroutable / NotConverged / WrongOutput / Correct`) to classify it, confirmed it was genuinely `WrongOutput`, and it pointed straight at a real router defect — same-net stacked cells being treated as connected without an actual via — which I then fixed (a regression that took 244 failing cases to 0). Two things came out of that, and they're separate. The router defect itself is fixed — that regression went 244 failing cases to 0 — so a legitimately-placed dense layout now routes and verifies `Correct`. The over-aggressive *timing weight* is a different lever: if you run the `alphafabric_af_timing` example today, that multiplier still surfaces as `WrongOutput` and the oracle still rejects it. That's the demonstration working, not a contradiction — the claim was never "the multiplier is always correct," it's that the gate is physical, so it catches the layouts that aren't.
+The oracle caught it. I'd been quietly assuming "routable ⟹ correct" — that if the router connected every net, the function was preserved. For dense, over-packed placements, that assumption is false: a too-tight solution can create an unintended physical adjacency that corrupts the logic while still settling to a stable, fully-routed state. I built a diagnostic (`Unroutable / NotConverged / WrongOutput / Correct`) to classify it, confirmed it was genuinely `WrongOutput`, and it pointed straight at a real router defect — same-net stacked cells being treated as connected without an actual via — which I then fixed (a regression that took 244 failing cases to 0). And here's the epilogue that makes the story complete: after the router fix, re-running the same over-aggressive-weight experiment shows the reclaimed multiplier layout now verifies **`Correct`** end-to-end. The "impossible" routable-but-wrong layout *was* that router defect, caught from the placement side by the physical gate. The `alphafabric_af_timing` example prints the live physical diagnosis on every run — so if any future change re-opens a gap between "routes" and "computes correctly," the demo will say so instead of assuming.
 
 I want to be clear about what happened here, because it's the most important part of the whole project: **routability was not a sound proxy for correctness, and the only reason I know that is that the legality gate was physical, not heuristic.** A reward signal built on "did it route?" would have happily optimized toward a broken circuit. The oracle is what kept the optimizer — learned or classical — honest.
 
@@ -107,11 +107,11 @@ The arc — environment → annealing baseline → learned policy → route-awar
 
 ### Appendix: the numbers, in one place
 - Corpus: 76 parametric circuits (adders, equality, parity, AND-reduce), widths 2–20, split 56 train / 20 held-out.
-- SA baseline: routed wirelength −21% to −44% across blocks; rescued an unroutable 8-bit adder.
+- SA baseline: routed wirelength −21% to −45% across blocks; rescued an unroutable 8-bit adder.
 - Learned one-shot (held-out, zero search): 60% of naive baseline wirelength.
 - Warm start (learned + ¼ anneal): 55% of naive, vs 51% for full cold anneal.
 - Both wirelength-only and route-aware policies place all 5 held-out circuits validly one-shot (after the router via-defect fix); route-aware trades a little wirelength for conservative spread.
-- Timing-driven: −21% criticality-weighted wirelength on 8-bit equality; rescued an unroutable 12-bit adder; over-aggressive weighting on the multiplier produces a routable-but-wrong layout that the correctness oracle rejects (the `alphafabric_af_timing` example still surfaces this `WrongOutput` catch by design). Diagnosing it separately surfaced a real router via-defect, since fixed (244 failing cases → 0).
+- Timing-driven: −21% criticality-weighted wirelength on 8-bit equality; rescued an unroutable 12-bit adder; over-aggressive weighting on the multiplier once produced a routable-but-wrong layout — the correctness oracle caught it, and root-causing it surfaced a real router via-defect, since fixed (244 failing cases → 0). Post-fix the same experiment verifies `Correct`; the `alphafabric_af_timing` example prints the live physical diagnosis on every run.
 
 ### Reproduce
 ```

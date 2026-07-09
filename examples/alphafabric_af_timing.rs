@@ -147,12 +147,31 @@ fn main() {
         }
         println!(
             "  -> route_validated_best reclaims a ROUTABLE layout via a bounded route\n\
-             check (not the full router in the inner loop). But the diagnosis is\n\
-             WrongOutput: the reclaimed mul4 layout routes AND the tile sim settles,\n\
-             yet computes the wrong function. So routability is NOT a sound legality\n\
-             proxy for dense timing-driven placement — 'routable => correct' breaks\n\
-             here. verify_physical (physical authority) is the real gate; the safe\n\
-             operating range is a moderate weight, where the table's blocks stay legal."
+             check (not the full router in the inner loop)."
         );
+        if recovered
+            .iter()
+            .all(|(_, _, _, diag)| matches!(diag, PhysicalDiagnosis::Correct))
+        {
+            println!(
+                "  Historical note: this same recovery once reclaimed a layout that routed\n\
+                 AND settled yet computed the WRONG function (WrongOutput). Root-causing\n\
+                 that catch surfaced a real router via-defect (same-net stacked cells\n\
+                 treated as connected without a via), since fixed — after the fix the\n\
+                 reclaimed layout verifies Correct end-to-end, as printed above. The\n\
+                 lesson stands: routability alone is NOT a sound legality proxy;\n\
+                 verify_physical (physical authority) is the real gate, and the printed\n\
+                 diagnosis is what keeps it observable."
+            );
+        } else {
+            println!(
+                "  The diagnosis above is NOT Correct: the reclaimed layout routes (and may\n\
+                 settle) yet fails physical verification. Routability is NOT a sound\n\
+                 legality proxy for dense timing-driven placement — 'routable => correct'\n\
+                 breaks here. verify_physical (physical authority) is the real gate; the\n\
+                 safe operating range is a moderate weight, where the table's blocks stay\n\
+                 legal."
+            );
+        }
     }
 }
