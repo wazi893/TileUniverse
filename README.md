@@ -101,8 +101,8 @@ The flagship: a working processor whose datapath *is* simulated logic.
 An AlphaChip-style learned placement system lays out logic circuits on the fabric:
 
 - A policy trained on small circuits **generalizes one-shot to unseen circuit widths** at ~60% of the naive baseline's wirelength — zero per-instance search.
-- Beats a strong **simulated-annealing baseline** by 21–44% on wirelength.
-- **Correctness oracle**: a layout is legal only if the placed-and-routed circuit still computes the same function (golden-hash + reference-vs-tile differential), making the learned reward un-hackable.
+- The deterministic **simulated-annealing baseline** reduces routed wirelength by 21–45% versus row-major placement.
+- **Correctness oracle**: a layout is accepted only after placed-and-routed execution matches the AIG reference on real simulated tiles — exhaustively through 12 inputs and with a deterministic 1,024-vector check above that.
 
 ### Multi-Backend Execution
 
