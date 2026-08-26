@@ -48,7 +48,7 @@ impl NeuromorphicSubstrate {
         // Neuron positions stay as Const: injecting a value into Const persists
         // across evaluation (Wire would overwrite it with left|right|up|down).
         let mut is_route_tile = vec![false; w * h];
-        for (_, (_, path)) in mesh.all_routes() {
+        for (_, path) in mesh.all_routes().values() {
             for &(px, py) in path.iter() {
                 if !is_neuron_tile[py * w + px] {
                     is_route_tile[py * w + px] = true;
@@ -96,33 +96,33 @@ impl NeuromorphicSubstrate {
 
     /// Inject a spike at a neuron's home tile (Const tile: set value, mark neighbors dirty).
     pub fn inject_spike(&mut self, neuron_id: usize) {
-        if let Some(&(x, y)) = self.mesh.all_positions().get(&neuron_id) {
-            if let Some(idx) = self.sim.tilemap.index_3d(x, y, 0) {
-                self.sim.set_logic_value_by_idx(idx, u64::MAX);
-                // Const tiles preserve their value — mark neighbors dirty so
-                // adjacent Wire tiles pick up the changed output.
-                let w = self.mesh.width;
-                let h = self.mesh.height;
-                if x > 0 {
-                    if let Some(n) = self.sim.tilemap.index_3d(x - 1, y, 0) {
-                        self.sim.dirty.mark_dirty(n);
-                    }
-                }
-                if x + 1 < w {
-                    if let Some(n) = self.sim.tilemap.index_3d(x + 1, y, 0) {
-                        self.sim.dirty.mark_dirty(n);
-                    }
-                }
-                if y > 0 {
-                    if let Some(n) = self.sim.tilemap.index_3d(x, y - 1, 0) {
-                        self.sim.dirty.mark_dirty(n);
-                    }
-                }
-                if y + 1 < h {
-                    if let Some(n) = self.sim.tilemap.index_3d(x, y + 1, 0) {
-                        self.sim.dirty.mark_dirty(n);
-                    }
-                }
+        if let Some(&(x, y)) = self.mesh.all_positions().get(&neuron_id)
+            && let Some(idx) = self.sim.tilemap.index_3d(x, y, 0)
+        {
+            self.sim.set_logic_value_by_idx(idx, u64::MAX);
+            // Const tiles preserve their value — mark neighbors dirty so
+            // adjacent Wire tiles pick up the changed output.
+            let w = self.mesh.width;
+            let h = self.mesh.height;
+            if x > 0
+                && let Some(n) = self.sim.tilemap.index_3d(x - 1, y, 0)
+            {
+                self.sim.dirty.mark_dirty(n);
+            }
+            if x + 1 < w
+                && let Some(n) = self.sim.tilemap.index_3d(x + 1, y, 0)
+            {
+                self.sim.dirty.mark_dirty(n);
+            }
+            if y > 0
+                && let Some(n) = self.sim.tilemap.index_3d(x, y - 1, 0)
+            {
+                self.sim.dirty.mark_dirty(n);
+            }
+            if y + 1 < h
+                && let Some(n) = self.sim.tilemap.index_3d(x, y + 1, 0)
+            {
+                self.sim.dirty.mark_dirty(n);
             }
         }
     }
@@ -145,10 +145,10 @@ impl NeuromorphicSubstrate {
                 if y + 1 < h { Some((x, y + 1)) } else { None },
             ];
             for pos in &neighbors {
-                if let Some((nx, ny)) = pos {
-                    if let Some(idx) = self.sim.tilemap.index_3d(*nx, *ny, 0) {
-                        val |= self.sim.get_logic_value_by_idx(idx);
-                    }
+                if let Some((nx, ny)) = pos
+                    && let Some(idx) = self.sim.tilemap.index_3d(*nx, *ny, 0)
+                {
+                    val |= self.sim.get_logic_value_by_idx(idx);
                 }
             }
             val
@@ -240,7 +240,7 @@ mod tests {
         let d = sub.measure_delay(0, 1);
         // Manhattan = 62. Measured = 61 (first hop from Const→Wire is 0-cost).
         assert!(
-            d >= 59 && d <= 63,
+            (59..=63).contains(&d),
             "corner delay should be ~61 deltas (Manhattan=62), got {}",
             d
         );

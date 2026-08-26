@@ -307,3 +307,197 @@ fn advance(pos: &mut usize, col: &mut usize) {
     *pos += 1;
     *col += 1;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Tokenize and drop spans, returning just the token kinds (trailing `Eof` included).
+    fn kinds(src: &str) -> Vec<Token> {
+        tokenize(src)
+            .expect("expected successful tokenize")
+            .into_iter()
+            .map(|(t, _)| t)
+            .collect()
+    }
+
+    #[test]
+    fn empty_source_is_just_eof() {
+        assert_eq!(kinds(""), vec![Token::Eof]);
+        // Whitespace-only input is likewise empty.
+        assert_eq!(kinds("  \n\t "), vec![Token::Eof]);
+    }
+
+    #[test]
+    fn keywords_lex_to_keyword_tokens() {
+        assert_eq!(
+            kinds("module input output tile wire const inst asm"),
+            vec![
+                Token::Module,
+                Token::Input,
+                Token::Output,
+                Token::Tile,
+                Token::Wire,
+                Token::Const,
+                Token::Inst,
+                Token::Asm,
+                Token::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn tile_type_names_stay_idents() {
+        // Tile type names (And/Or/...) are NOT keywords — they resolve later in semantic analysis.
+        assert_eq!(
+            kinds("And Or Xor foo_bar _x1"),
+            vec![
+                Token::Ident("And".to_string()),
+                Token::Ident("Or".to_string()),
+                Token::Ident("Xor".to_string()),
+                Token::Ident("foo_bar".to_string()),
+                Token::Ident("_x1".to_string()),
+                Token::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn all_symbols_lex() {
+        assert_eq!(
+            kinds("( ) { } , ; : = -> @ ."),
+            vec![
+                Token::LParen,
+                Token::RParen,
+                Token::LBrace,
+                Token::RBrace,
+                Token::Comma,
+                Token::Semicolon,
+                Token::Colon,
+                Token::Eq,
+                Token::Arrow,
+                Token::At,
+                Token::Dot,
+                Token::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn decimal_and_hex_int_literals() {
+        assert_eq!(
+            kinds("0 42 255 0xff 0xFF 0X10 0x0"),
+            vec![
+                Token::IntLiteral(0),
+                Token::IntLiteral(42),
+                Token::IntLiteral(255),
+                Token::IntLiteral(0xff),
+                Token::IntLiteral(0xff),
+                Token::IntLiteral(0x10),
+                Token::IntLiteral(0),
+                Token::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn line_and_block_comments_are_skipped() {
+        assert_eq!(
+            kinds("wire // trailing comment\n tile /* inline */ input"),
+            vec![Token::Wire, Token::Tile, Token::Input, Token::Eof]
+        );
+        // A block comment spanning newlines is fully consumed.
+        assert_eq!(kinds("/* a\n b\n c */ wire"), vec![Token::Wire, Token::Eof]);
+    }
+
+    #[test]
+    fn asm_block_body_is_a_single_string_literal() {
+        // `asm IDENT = { ... }` captures the (trimmed) body verbatim as one StringLiteral.
+        assert_eq!(
+            kinds("asm blk = {  LDI R0, 5  }"),
+            vec![
+                Token::Asm,
+                Token::Ident("blk".to_string()),
+                Token::Eq,
+                Token::LBrace,
+                Token::StringLiteral("LDI R0, 5".to_string()),
+                Token::RBrace,
+                Token::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn asm_block_body_keeps_nested_braces() {
+        // Nested braces inside the asm body do not terminate it early.
+        assert_eq!(
+            kinds("asm b = { a { x } c }"),
+            vec![
+                Token::Asm,
+                Token::Ident("b".to_string()),
+                Token::Eq,
+                Token::LBrace,
+                Token::StringLiteral("a { x } c".to_string()),
+                Token::RBrace,
+                Token::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn braces_outside_asm_stay_structural() {
+        // A `{` not preceded by `asm IDENT =` is a plain LBrace, and its contents are lexed normally.
+        assert_eq!(
+            kinds("module m { wire }"),
+            vec![
+                Token::Module,
+                Token::Ident("m".to_string()),
+                Token::LBrace,
+                Token::Wire,
+                Token::RBrace,
+                Token::Eof,
+            ]
+        );
+    }
+
+    #[test]
+    fn spans_track_line_and_column() {
+        let toks = tokenize("module\n  tile").expect("ok");
+        // module @ 1:1, tile @ 2:3 (two leading spaces), Eof @ 2:7.
+        assert_eq!(toks[0], (Token::Module, Span { line: 1, col: 1 }));
+        assert_eq!(toks[1], (Token::Tile, Span { line: 2, col: 3 }));
+        assert_eq!(toks[2].0, Token::Eof);
+        assert_eq!(toks[2].1, Span { line: 2, col: 7 });
+    }
+
+    #[test]
+    fn unexpected_char_is_reported_with_location() {
+        let errs = tokenize("wire $").expect_err("expected lex error");
+        assert_eq!(errs.len(), 1);
+        assert!(errs[0].message.contains("unexpected character"));
+        assert_eq!((errs[0].line, errs[0].col), (1, 6));
+    }
+
+    #[test]
+    fn unterminated_block_comment_is_an_error() {
+        let errs = tokenize("wire /* never closes").expect_err("expected lex error");
+        assert_eq!(errs.len(), 1);
+        assert!(errs[0].message.contains("unterminated block comment"));
+        assert_eq!((errs[0].line, errs[0].col), (1, 6));
+    }
+
+    #[test]
+    fn unterminated_asm_block_is_an_error() {
+        let errs = tokenize("asm b = { body without close").expect_err("expected lex error");
+        assert!(
+            errs.iter()
+                .any(|e| e.message.contains("unterminated asm block"))
+        );
+    }
+
+    #[test]
+    fn bare_hex_prefix_is_an_error() {
+        let errs = tokenize("0x").expect_err("expected lex error");
+        assert!(errs[0].message.contains("expected hex digits after 0x"));
+    }
+}

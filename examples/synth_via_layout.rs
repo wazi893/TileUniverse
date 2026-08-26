@@ -18,7 +18,7 @@ fn dump(name: &str, circuit: &ViaCircuit, labels: &[&str]) {
         circuit.max_depth(),
         phys.tile_count()
     );
-    let header: String = (0..n).map(|i| ((b'a' + i as u8) as char)).collect();
+    let header: String = (0..n).map(|i| (b'a' + i as u8) as char).collect();
     println!("   {}   {:<24} (ref vs tile)", header, labels.join(" "));
     let mut all_ok = true;
     for combo in 0u32..(1u32 << n) {

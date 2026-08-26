@@ -1341,7 +1341,7 @@ fn test_physical_writeback_bus_debug() {
     );
 
     // Check L1 ViaDown at same position
-    let viadown_l1_idx = 1 * layer_size + (oy + 54) * gw + (ox + 20);
+    let viadown_l1_idx = layer_size + (oy + 54) * gw + (ox + 20);
     let viadown_val = sim.get_logic_value_by_idx(viadown_l1_idx);
     eprintln!(
         "After tick 2: ViaDown L1@({},{}) = {}",
@@ -1351,7 +1351,7 @@ fn test_physical_writeback_bus_debug() {
     );
 
     // Check L1 WireLeft at (ox+4, oy+54)
-    let wl_l1_idx = 1 * layer_size + (oy + 54) * gw + (ox + 4);
+    let wl_l1_idx = layer_size + (oy + 54) * gw + (ox + 4);
     let wl_val = sim.get_logic_value_by_idx(wl_l1_idx);
     eprintln!(
         "After tick 2: WireLeft L1@({},{}) = {}",
@@ -1361,7 +1361,7 @@ fn test_physical_writeback_bus_debug() {
     );
 
     // Check L1 WireUp spine at (ox+4, oy+28)
-    let wu_spine_idx = 1 * layer_size + (oy + 28) * gw + (ox + 4);
+    let wu_spine_idx = layer_size + (oy + 28) * gw + (ox + 4);
     let wu_spine_val = sim.get_logic_value_by_idx(wu_spine_idx);
     eprintln!(
         "After tick 2: WireUp spine L1@({},{}) = {}",
@@ -1371,7 +1371,7 @@ fn test_physical_writeback_bus_debug() {
     );
 
     // Check L1 WireRight at (ox+39, oy+28)
-    let wr_l1_idx = 1 * layer_size + (oy + 28) * gw + (ox + 39);
+    let wr_l1_idx = layer_size + (oy + 28) * gw + (ox + 39);
     let wr_val = sim.get_logic_value_by_idx(wr_l1_idx);
     eprintln!(
         "After tick 2: WireRight L1@({},{}) = {}",
@@ -1381,7 +1381,7 @@ fn test_physical_writeback_bus_debug() {
     );
 
     // Check Reg0 WireUp branch at (ox+39, oy+21)
-    let reg0_wu_idx = 1 * layer_size + (oy + 21) * gw + (ox + 39);
+    let reg0_wu_idx = layer_size + (oy + 21) * gw + (ox + 39);
     let reg0_wu_val = sim.get_logic_value_by_idx(reg0_wu_idx);
     eprintln!(
         "After tick 2: Reg0 WireUp L1@({},{}) = {}",
@@ -1391,7 +1391,7 @@ fn test_physical_writeback_bus_debug() {
     );
 
     // Check L1 merge Mux at (ox+40, oy+21)
-    let merge_mux_idx = 1 * layer_size + (oy + 21) * gw + (ox + 40);
+    let merge_mux_idx = layer_size + (oy + 21) * gw + (ox + 40);
     let merge_mux_val = sim.get_logic_value_by_idx(merge_mux_idx);
     eprintln!(
         "After tick 2: Merge Mux L1@({},{}) = {}",
@@ -1401,7 +1401,7 @@ fn test_physical_writeback_bus_debug() {
     );
 
     // Check L1 mem_read selector at (ox+40, oy+20)
-    let mem_read_idx = 1 * layer_size + (oy + 20) * gw + (ox + 40);
+    let mem_read_idx = layer_size + (oy + 20) * gw + (ox + 40);
     let mem_read_val = sim.get_logic_value_by_idx(mem_read_idx);
     eprintln!(
         "After tick 2: mem_read L1@({},{}) = {}",
@@ -1462,7 +1462,7 @@ fn test_physical_writeback_bus_debug() {
     );
 
     // Check L1 ViaDown for alu_sel2 at L1@(ox+14, oy+15)
-    let asel2_vd_idx = 1 * layer_size + (oy + 15) * gw + (ox + 14);
+    let asel2_vd_idx = layer_size + (oy + 15) * gw + (ox + 14);
     let asel2_vd_val = sim.get_logic_value_by_idx(asel2_vd_idx);
     eprintln!(
         "After tick 2: alu_sel2 ViaDown L1@({},{}) = {}",
@@ -1472,7 +1472,7 @@ fn test_physical_writeback_bus_debug() {
     );
 
     // Check top of alu_sel2 WD chain at L1@(ox+55, oy+16)
-    let asel2_wd_top_idx = 1 * layer_size + (oy + 16) * gw + (ox + 55);
+    let asel2_wd_top_idx = layer_size + (oy + 16) * gw + (ox + 55);
     let asel2_wd_top_val = sim.get_logic_value_by_idx(asel2_wd_top_idx);
     eprintln!(
         "After tick 2: alu_sel2 WD top L1@({},{}) = {}",
@@ -1482,7 +1482,7 @@ fn test_physical_writeback_bus_debug() {
     );
 
     // Check end of alu_sel2 WD chain at L1@(ox+55, oy+52)
-    let asel2_wd_bot_idx = 1 * layer_size + (oy + 52) * gw + (ox + 55);
+    let asel2_wd_bot_idx = layer_size + (oy + 52) * gw + (ox + 55);
     let asel2_wd_bot_val = sim.get_logic_value_by_idx(asel2_wd_bot_idx);
     eprintln!(
         "After tick 2: alu_sel2 WD bottom L1@({},{}) = {}",
@@ -1502,7 +1502,7 @@ fn test_physical_writeback_bus_debug() {
     );
 
     // Check L1@(ox+20, oy+52) — should be WireLeft
-    let s2_l1_idx = 1 * layer_size + (oy + 52) * gw + (ox + 20);
+    let s2_l1_idx = layer_size + (oy + 52) * gw + (ox + 20);
     let s2_l1_val = sim.get_logic_value_by_idx(s2_l1_idx);
     eprintln!(
         "After tick 2: L1@({},{}) (S2 source) = {}",
@@ -1512,7 +1512,7 @@ fn test_physical_writeback_bus_debug() {
     );
 
     // Check what's at intermediate WL position on the alu_sel2 WL chain
-    let wl_mid_idx = 1 * layer_size + (oy + 52) * gw + (ox + 40);
+    let wl_mid_idx = layer_size + (oy + 52) * gw + (ox + 40);
     let wl_mid_val = sim.get_logic_value_by_idx(wl_mid_idx);
     eprintln!(
         "After tick 2: alu_sel2 WL mid L1@({},{}) = {}",

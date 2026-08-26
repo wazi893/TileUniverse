@@ -290,9 +290,7 @@ impl Scheduler {
             let end_cycle = start_cycle + duration;
             if qubits.is_empty() {
                 // Global operation blocks all qubits
-                for t in &mut qubit_available_at {
-                    *t = end_cycle;
-                }
+                qubit_available_at.fill(end_cycle);
             } else {
                 for &q in &qubits {
                     qubit_available_at[q] = end_cycle;
@@ -312,9 +310,7 @@ impl Scheduler {
                 let qec_duration = self.costs.qec_round;
                 ops.push(TimedOp::new(LogicalGate::QECRound, qec_start, qec_duration));
                 let qec_end = qec_start + qec_duration;
-                for t in &mut qubit_available_at {
-                    *t = qec_end;
-                }
+                qubit_available_at.fill(qec_end);
                 gates_since_qec = 0;
             }
         }
@@ -442,9 +438,7 @@ impl Scheduler {
 
             // Update qubit availability
             if qubits.is_empty() {
-                for t in &mut qubit_available_at {
-                    *t = end_cycle;
-                }
+                qubit_available_at.fill(end_cycle);
             } else {
                 for &q in &qubits {
                     qubit_available_at[q] = end_cycle;
@@ -999,7 +993,7 @@ mod tests {
         // ACCEPTANCE TEST 1: 100 independent gates on 100 qubits
         // Should schedule in ~1 gate duration, NOT 100×
         let scheduler = Scheduler::new();
-        let circuit: Vec<_> = (0..100).map(|q| LogicalGate::H(q)).collect();
+        let circuit: Vec<_> = (0..100).map(LogicalGate::H).collect();
 
         let schedule = scheduler.schedule_parallel(&circuit);
 
@@ -1028,7 +1022,7 @@ mod tests {
         let scheduler = Scheduler::new();
 
         // 10 parallel T-gates on different qubits
-        let circuit: Vec<_> = (0..10).map(|q| LogicalGate::T(q)).collect();
+        let circuit: Vec<_> = (0..10).map(LogicalGate::T).collect();
 
         let schedule = scheduler.schedule_parallel(&circuit);
 
@@ -1140,7 +1134,7 @@ mod tests {
         let scheduler = Scheduler::new();
 
         // 10 T-gates all parallel (instant burst)
-        let burst_circuit: Vec<_> = (0..10).map(|q| LogicalGate::T(q)).collect();
+        let burst_circuit: Vec<_> = (0..10).map(LogicalGate::T).collect();
         let burst_schedule = scheduler.schedule_parallel(&burst_circuit);
 
         // 10 T-gates sequential on one qubit (spread over time)

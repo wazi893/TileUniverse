@@ -16,9 +16,10 @@ use std::collections::HashMap;
 // =============================================================================
 
 /// Routing algorithm selection
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum RoutingAlgorithm {
     /// Dijkstra shortest path (guaranteed optimal)
+    #[default]
     Dijkstra,
 
     /// A* with heuristic (faster for grids)
@@ -26,12 +27,6 @@ pub enum RoutingAlgorithm {
 
     /// Greedy SWAP insertion
     GreedySwap,
-}
-
-impl Default for RoutingAlgorithm {
-    fn default() -> Self {
-        RoutingAlgorithm::Dijkstra
-    }
 }
 
 // =============================================================================

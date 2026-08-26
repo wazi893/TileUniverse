@@ -453,17 +453,15 @@ pub fn expected_success_probability(circuit: &[QGate], config: &NoiseConfig) -> 
     };
 
     let multi_fidelity = if config.noise_two_qubit {
-        let base = (1.0 - config.phase_error_rate * config.two_qubit_noise_multiplier)
+        (1.0 - config.phase_error_rate * config.two_qubit_noise_multiplier)
             * (1.0 - config.bit_flip_rate * config.two_qubit_noise_multiplier)
             * (1.0 - config.depolarizing_rate * config.two_qubit_noise_multiplier)
-            * config.gate_fidelity.powf(config.two_qubit_noise_multiplier);
-        base
+            * config.gate_fidelity.powf(config.two_qubit_noise_multiplier)
     } else {
         1.0
     };
 
-    let circuit_fidelity =
-        single_fidelity.powi(n_single as i32) * multi_fidelity.powi((n_two + n_three) as i32);
+    let circuit_fidelity = single_fidelity.powi(n_single) * multi_fidelity.powi(n_two + n_three);
 
     let measurement_fidelity = (1.0 - config.measurement_error_rate).powi(4); // Assuming 4 qubits
 

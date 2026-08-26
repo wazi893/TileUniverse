@@ -31,7 +31,6 @@ fn main() {
         println!(
             "Build with: cargo run --example epic96_v2_correctness_test --features cuda --release"
         );
-        return;
     }
 
     #[cfg(feature = "cuda")]

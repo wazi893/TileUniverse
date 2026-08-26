@@ -17,7 +17,7 @@ use std::collections::HashMap;
 // =============================================================================
 
 /// Factory placement optimization strategy
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub enum PlacementStrategy {
     /// Place factories near most-used qubits (fast, reasonable quality)
     MinimizeAverageDistance,
@@ -26,6 +26,7 @@ pub enum PlacementStrategy {
     MinimizeMaxDistance,
 
     /// Minimize total SWAP cost across all T-gates
+    #[default]
     MinimizeTotalSwapCost,
 
     /// Simulated annealing for better solutions
@@ -41,12 +42,6 @@ pub enum PlacementStrategy {
         generations: usize,
         mutation_rate: f64,
     },
-}
-
-impl Default for PlacementStrategy {
-    fn default() -> Self {
-        PlacementStrategy::MinimizeTotalSwapCost
-    }
 }
 
 // =============================================================================

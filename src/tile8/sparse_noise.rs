@@ -279,9 +279,7 @@ fn apply_pauli_x(state: &mut SparseQuantumGridSmall, qubit: usize) {
             }
 
             if let Some(amps) = src_amps {
-                if !state.blocks.contains_key(&partner_id) {
-                    state.blocks.insert(partner_id, SparseBlock::new());
-                }
+                state.blocks.entry(partner_id).or_default();
                 if let Some(block) = state.blocks.get_mut(&partner_id) {
                     for (i, amp) in amps.iter().enumerate() {
                         block.set(i, *amp);
@@ -591,7 +589,7 @@ impl SparseNoisyState {
     /// * `qubit` - The qubit to apply noise to
     /// * `p` - Total error probability (X, Y, Z each have probability p/3)
     pub fn apply_noise(&mut self, qubit: usize, p: f64) {
-        assert!(p >= 0.0 && p <= 1.0, "Probability must be in [0, 1]");
+        assert!((0.0..=1.0).contains(&p), "Probability must be in [0, 1]");
 
         self.stats.noise_applications += 1;
 

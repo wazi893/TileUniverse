@@ -107,12 +107,12 @@ fn demo_nonblocking_jobs() {
             };
             println!("Job {} ({}): {}", i + 1, i + 2, state);
 
-            if let Some(stage) = res.stage_results.first() {
-                if let StageOutputs::MeasurementCounts(counts) = &stage.outputs {
-                    let total: usize = counts.values().sum();
-                    println!("  Total measurements: {}", total);
-                    println!("  Unique outcomes: {}", counts.len());
-                }
+            if let Some(stage) = res.stage_results.first()
+                && let StageOutputs::MeasurementCounts(counts) = &stage.outputs
+            {
+                let total: usize = counts.values().sum();
+                println!("  Total measurements: {}", total);
+                println!("  Unique outcomes: {}", counts.len());
             }
         }
     }
@@ -168,16 +168,16 @@ fn demo_parallel_jobs() {
 
     // Show outcome distribution for each angle
     println!("\nOutcome distributions by rotation angle:\n");
-    for (_i, (angle, result)) in angles.iter().zip(results.iter()).enumerate() {
+    for (angle, result) in angles.iter().zip(results.iter()) {
         print!("  θ = {:.1}: ", angle);
-        if let Some(stage) = result.stage_results.first() {
-            if let StageOutputs::MeasurementCounts(counts) = &stage.outputs {
-                let mut sorted: Vec<_> = counts.iter().collect();
-                sorted.sort_by(|a, b| b.1.cmp(a.1));
-                let top: Vec<_> = sorted.iter().take(2).collect();
-                for (bitstring, count) in top {
-                    print!("|{}⟩:{} ", bitstring, count);
-                }
+        if let Some(stage) = result.stage_results.first()
+            && let StageOutputs::MeasurementCounts(counts) = &stage.outputs
+        {
+            let mut sorted: Vec<_> = counts.iter().collect();
+            sorted.sort_by(|a, b| b.1.cmp(a.1));
+            let top: Vec<_> = sorted.iter().take(2).collect();
+            for (bitstring, count) in top {
+                print!("|{}⟩:{} ", bitstring, count);
             }
         }
         println!();
@@ -290,31 +290,30 @@ fn demo_vqe_optimization() {
         let handle = scheduler.submit_nonblocking(JobSpec::Quantum(spec));
 
         // Wait for result
-        if let Some(result) = handle.wait() {
-            if let Some(stage) = result.stage_results.first() {
-                if let StageOutputs::MeasurementCounts(counts) = &stage.outputs {
-                    // Compute simple cost: expectation of Z on first qubit
-                    let cost = compute_z_expectation(counts);
+        if let Some(result) = handle.wait()
+            && let Some(stage) = result.stage_results.first()
+            && let StageOutputs::MeasurementCounts(counts) = &stage.outputs
+        {
+            // Compute simple cost: expectation of Z on first qubit
+            let cost = compute_z_expectation(counts);
 
-                    if cost < best_cost {
-                        best_cost = cost;
-                        best_params = params.clone();
-                    }
+            if cost < best_cost {
+                best_cost = cost;
+                best_params = params.clone();
+            }
 
-                    if iter % 5 == 0 || iter == n_iterations - 1 {
-                        println!(
-                            "  Iteration {:>2}: cost = {:>7.4}, best = {:>7.4}",
-                            iter + 1,
-                            cost,
-                            best_cost
-                        );
-                    }
+            if iter % 5 == 0 || iter == n_iterations - 1 {
+                println!(
+                    "  Iteration {:>2}: cost = {:>7.4}, best = {:>7.4}",
+                    iter + 1,
+                    cost,
+                    best_cost
+                );
+            }
 
-                    // Simple gradient-free parameter update
-                    for (i, p) in params.iter_mut().enumerate() {
-                        *p += 0.1 * (0.5 - simple_random(iter as u64 + i as u64));
-                    }
-                }
+            // Simple gradient-free parameter update
+            for (i, p) in params.iter_mut().enumerate() {
+                *p += 0.1 * (0.5 - simple_random(iter as u64 + i as u64));
             }
         }
     }

@@ -338,13 +338,12 @@ pub fn inject_tdg(
     budget: &mut LogicalErrorBudget,
 ) -> InjectionResult {
     // T† injection is similar to T but with conjugated correction
-    let result = model.inject(qubit, rng, budget);
 
     // T† correction: S† instead of S
     // S† adds -Z to frame (which is same as Z in mod-2 arithmetic)
     // So the frame update is the same
 
-    result
+    model.inject(qubit, rng, budget)
 }
 
 // ============================================================================
@@ -402,7 +401,7 @@ pub fn inject_batch(
     let mut results = Vec::with_capacity(qubits.len());
 
     for qubit in qubits {
-        results.push(model.inject(*qubit, rng, budget));
+        results.push(model.inject(qubit, rng, budget));
     }
 
     // Parallel execution: max cycle cost, not sum

@@ -429,6 +429,7 @@ fn main() {
                 );
                 println!("  run_script NAME");
                 println!("  demo PRESET [ticks N] [record DIR]");
+                println!("  control_eval [secret HEX] [ticks N] [record DIR]");
                 println!("  set_clock x y");
                 println!("  set_logic x y VALUE");
                 println!("  set_tile x y TYPE");
@@ -565,6 +566,97 @@ fn main() {
                     "Demo OK: ticks={} replay=na drift=0 checksum=0x00000000",
                     ticks
                 );
+            }
+            "control_eval" => {
+                // Deterministic datacenter control evaluation: thermal covert-channel red-team.
+                let mut secret: u8 = 0xB4;
+                let mut ticks: u32 = engine::control_eval::ControlEvalConfig::default().ticks;
+                let mut record_dir: Option<String> = None;
+                let mut args: Vec<&str> = parts.collect();
+                while let Some(flag) = args.first().cloned() {
+                    match flag {
+                        "secret" => {
+                            if args.len() >= 2 {
+                                secret = u8::from_str_radix(args[1].trim_start_matches("0x"), 16)
+                                    .unwrap_or(0xB4);
+                                args.drain(0..2);
+                                continue;
+                            }
+                        }
+                        "ticks" => {
+                            if args.len() >= 2 {
+                                ticks = args[1].parse::<u32>().unwrap_or(ticks);
+                                args.drain(0..2);
+                                continue;
+                            }
+                        }
+                        "record" => {
+                            if args.len() >= 2 {
+                                record_dir = Some(args[1].to_string());
+                                args.drain(0..2);
+                                continue;
+                            }
+                        }
+                        _ => {}
+                    }
+                    args.drain(0..1);
+                }
+                let cfg = engine::control_eval::ControlEvalConfig {
+                    secret,
+                    adversary_enabled: true,
+                    ticks,
+                };
+                let report = engine::control_eval::run(cfg.clone());
+                print!("{}", report.summary());
+
+                if let Some(dir) = record_dir {
+                    use std::path::PathBuf;
+                    let region = engine::control_eval::REGION;
+                    let base = PathBuf::from(dir);
+                    let dir_a = base.clone();
+                    let mut sim_a = Simulation::new();
+                    engine::control_eval::build_scenario(&mut sim_a);
+                    let mut st_a = engine::control_eval::ControlEvalState::new(cfg.clone());
+                    let _ = engine::recorder::record_region_with(
+                        &mut sim_a,
+                        region.x0,
+                        region.y0,
+                        region.w,
+                        region.h,
+                        ticks,
+                        &dir_a,
+                        |s, i| engine::control_eval::step(s, &mut st_a, i),
+                        "control_eval",
+                    );
+                    let dir_b = base.with_extension("replay");
+                    let mut sim_b = Simulation::new();
+                    engine::control_eval::build_scenario(&mut sim_b);
+                    let mut st_b = engine::control_eval::ControlEvalState::new(cfg.clone());
+                    let _ = engine::recorder::record_region_with(
+                        &mut sim_b,
+                        region.x0,
+                        region.y0,
+                        region.w,
+                        region.h,
+                        ticks,
+                        &dir_b,
+                        |s, i| engine::control_eval::step(s, &mut st_b, i),
+                        "control_eval",
+                    );
+                    match engine::recorder::diff_runs(&dir_a, &dir_b) {
+                        Ok((mismatches, len_diff)) => {
+                            let drift = mismatches + len_diff;
+                            let replay = if drift == 0 { "ok" } else { "fail" };
+                            println!(
+                                "  determinism        : replay={} drift={} (frame diff = {})",
+                                replay,
+                                drift,
+                                if drift == 0 { "BLACK" } else { "NONZERO" }
+                            );
+                        }
+                        Err(e) => println!("  determinism        : diff error: {}", e),
+                    }
+                }
             }
             "quantum_demo" => {
                 // Build a fresh sim and register a 2-qubit Bell program on a QDemo tile
@@ -1327,18 +1419,11 @@ fn main() {
                 let mut allow_overwrite = false;
                 let mut args: Vec<&str> = parts.collect();
                 while let Some(flag) = args.first().cloned() {
-                    match flag {
-                        "allow_overwrite" => {
-                            if args.len() >= 2 {
-                                allow_overwrite = matches!(
-                                    args[1].to_ascii_lowercase().as_str(),
-                                    "on" | "true" | "1"
-                                );
-                                args.drain(0..2);
-                                continue;
-                            }
-                        }
-                        _ => {}
+                    if flag == "allow_overwrite" && args.len() >= 2 {
+                        allow_overwrite =
+                            matches!(args[1].to_ascii_lowercase().as_str(), "on" | "true" | "1");
+                        args.drain(0..2);
+                        continue;
                     }
                     args.drain(0..1);
                 }
@@ -1396,18 +1481,11 @@ fn main() {
                 let mut dry_run = false;
                 let mut args: Vec<&str> = parts.collect();
                 while let Some(flag) = args.first().cloned() {
-                    match flag {
-                        "dry_run" => {
-                            if args.len() >= 2 {
-                                dry_run = matches!(
-                                    args[1].to_ascii_lowercase().as_str(),
-                                    "on" | "true" | "1"
-                                );
-                                args.drain(0..2);
-                                continue;
-                            }
-                        }
-                        _ => {}
+                    if flag == "dry_run" && args.len() >= 2 {
+                        dry_run =
+                            matches!(args[1].to_ascii_lowercase().as_str(), "on" | "true" | "1");
+                        args.drain(0..2);
+                        continue;
                     }
                     args.drain(0..1);
                 }
@@ -1456,18 +1534,11 @@ fn main() {
                 let mut allow_overwrite = false;
                 let mut args: Vec<&str> = parts.collect();
                 while let Some(flag) = args.first().cloned() {
-                    match flag {
-                        "allow_overwrite" => {
-                            if args.len() >= 2 {
-                                allow_overwrite = matches!(
-                                    args[1].to_ascii_lowercase().as_str(),
-                                    "on" | "true" | "1"
-                                );
-                                args.drain(0..2);
-                                continue;
-                            }
-                        }
-                        _ => {}
+                    if flag == "allow_overwrite" && args.len() >= 2 {
+                        allow_overwrite =
+                            matches!(args[1].to_ascii_lowercase().as_str(), "on" | "true" | "1");
+                        args.drain(0..2);
+                        continue;
                     }
                     args.drain(0..1);
                 }
@@ -2245,12 +2316,11 @@ fn main() {
                         "spread" => {
                             if args.len() >= 2 {
                                 let frac = args[1];
-                                if let Some((num, den)) = frac.split_once('/') {
-                                    if let (Ok(n), Ok(d)) = (num.parse::<u32>(), den.parse::<u32>())
-                                    {
-                                        params.spread_numerator = n.min(d);
-                                        params.spread_denominator = d.max(1);
-                                    }
+                                if let Some((num, den)) = frac.split_once('/')
+                                    && let (Ok(n), Ok(d)) = (num.parse::<u32>(), den.parse::<u32>())
+                                {
+                                    params.spread_numerator = n.min(d);
+                                    params.spread_denominator = d.max(1);
                                 }
                                 args.drain(0..2);
                                 continue;
@@ -2302,12 +2372,11 @@ fn main() {
                         "spread" => {
                             if args.len() >= 2 {
                                 let frac = args[1];
-                                if let Some((num, den)) = frac.split_once('/') {
-                                    if let (Ok(n), Ok(d)) = (num.parse::<u32>(), den.parse::<u32>())
-                                    {
-                                        params.spread_numerator = n.min(d);
-                                        params.spread_denominator = d.max(1);
-                                    }
+                                if let Some((num, den)) = frac.split_once('/')
+                                    && let (Ok(n), Ok(d)) = (num.parse::<u32>(), den.parse::<u32>())
+                                {
+                                    params.spread_numerator = n.min(d);
+                                    params.spread_denominator = d.max(1);
                                 }
                                 args.drain(0..2);
                                 continue;
@@ -2698,7 +2767,7 @@ fn main() {
                 let preset = name.and_then(|n| {
                     engine::scripts::preset_scripts()
                         .into_iter()
-                        .find(|p| p.name.eq_ignore_ascii_case(&n))
+                        .find(|p| p.name.eq_ignore_ascii_case(n))
                 });
                 if let Some(preset) = preset {
                     println!("Script: {}", preset.name);

@@ -524,7 +524,7 @@ pub const fn v2_jnc_w(target16: u16) -> u32 {
 /// Sprint 174: Encode a wide-immediate instruction with 16-bit constant.
 /// Low byte in base imm8; high byte in extension bits [15:8]; EXT_WIDE_IMM flag at bit 2.
 const fn wide_imm_ext(rd: u8, imm16: u16) -> u16 {
-    let hi = ((imm16 >> 8) & 0xFF) as u16;
+    let hi = (imm16 >> 8) & 0xFF;
     let mut ext = EXT_WIDE_IMM | (hi << 8);
     if rd >= 8 {
         ext |= EXT_RD_HI;

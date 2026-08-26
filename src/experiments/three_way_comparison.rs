@@ -248,8 +248,8 @@ impl BrainPopulation {
             let new_y = (forager.y as i32 + dy).max(0) as u32;
             let (cx, cy) = self.config.region.clamp(new_x as i32, new_y as i32);
 
-            forager.x = cx as u32;
-            forager.y = cy as u32;
+            forager.x = cx;
+            forager.y = cy;
             forager.energy -= self.config.movement_cost;
 
             if forager.energy <= 0.0 {

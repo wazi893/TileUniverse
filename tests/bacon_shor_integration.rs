@@ -479,7 +479,7 @@ fn test_x_error_detection() {
 
     // X error should flip ZZ gauges that include qubit 4 (column 1)
     assert!(
-        zz_outcomes.iter().any(|&s| s == -1),
+        zz_outcomes.contains(&-1),
         "X error should flip some ZZ gauges"
     );
 
@@ -503,7 +503,7 @@ fn test_z_error_detection() {
 
     // Z error should flip XX gauges that include qubit 4 (row 1)
     assert!(
-        xx_outcomes.iter().any(|&s| s == -1),
+        xx_outcomes.contains(&-1),
         "Z error should flip some XX gauges"
     );
 
@@ -527,11 +527,11 @@ fn test_y_error_detection() {
 
     // Y = XZ should flip both types of gauges
     assert!(
-        xx_outcomes.iter().any(|&s| s == -1),
+        xx_outcomes.contains(&-1),
         "Y error should flip some XX gauges (from Z component)"
     );
     assert!(
-        zz_outcomes.iter().any(|&s| s == -1),
+        zz_outcomes.contains(&-1),
         "Y error should flip some ZZ gauges (from X component)"
     );
 }

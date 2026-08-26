@@ -624,7 +624,7 @@ mod tests {
 
         // |0⟩ should be unchanged
         let re = cpu.get_mem(&sim, 0) as i8;
-        let im = cpu.get_mem(&sim, IMAG_BASE + 0) as i8;
+        let im = cpu.get_mem(&sim, IMAG_BASE) as i8;
 
         assert_eq!(re, 127, "|0⟩ should be unchanged by phase gate");
         assert_eq!(im, 0, "Imaginary part should be 0");

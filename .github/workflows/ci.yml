@@ -3,8 +3,23 @@ name: CI
 on:
   push:
     branches: [ master, main ]
+    paths-ignore:
+      - '**.md'
+      - 'User notes/**'
+      - 'blog/**'
+      - 'docs/**'
   pull_request:
     branches: [ master, main ]
+    paths-ignore:
+      - '**.md'
+      - 'User notes/**'
+      - 'blog/**'
+      - 'docs/**'
+
+# A superseded run (new push to the same ref) is pure billed waste — cancel it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -12,6 +27,8 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Full-suite master runs measure ~105 min; PR runs (no test suite) ~15 min.
+    timeout-minutes: 150
 
     steps:
     - uses: actions/checkout@v4
@@ -19,7 +36,9 @@ jobs:
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@v1
       with:
-        toolchain: stable
+        # Pinned to the dev box's toolchain. An unpinned `stable` let rustfmt
+        # drift break the fmt gate with no repo change; bump deliberately.
+        toolchain: 1.92.0
         components: rustfmt, clippy
 
     - name: Install nextest
@@ -48,21 +67,34 @@ jobs:
     - name: Build (release, with perf-bench)
       run: cargo build --release --verbose --features perf-bench
 
-    - name: Run tests (nextest)
+    - name: Clippy (workspace gate)
+      # Satellite crates (crates/*, python) and examples/benches have no other
+      # compile gate — they break silently on ISA/API changes without this.
+      # Errors fail CI; warnings stay allowed (~625 deferred style lints).
+      run: cargo clippy --workspace --all-targets
+
+    # The full suite is ~100 min of runner time — 97% of this job's cost. PRs
+    # get the cheap gates above (fmt/build/clippy); the suite runs where it is
+    # the real safety net: every push to master, the sole working branch.
+    - name: Run tests (nextest, master only)
+      if: github.event_name == 'push'
       # nextest runs each test in its own process, so it parallelizes safely
       # without the resource-exhaustion SIGABRT that forced --test-threads=1.
       run: cargo nextest run --release --profile ci
 
-    - name: Doctests
+    - name: Doctests (master only)
+      if: github.event_name == 'push'
       # nextest does not run doctests; run them separately.
       run: cargo test --release --doc
 
-    - name: Clippy
-      run: cargo clippy -- -D warnings
-      continue-on-error: true  # Don't fail CI on clippy warnings initially
-
   build-windows:
+    # Compile gate only, and only on master pushes: the dev box is Windows, so
+    # every local test run already covers this platform. The full suite here
+    # cost ~150 min at the 2x Windows billing multiplier per run — the single
+    # largest burn in the repo — for coverage the box provides for free.
+    if: github.event_name == 'push'
     runs-on: windows-latest
+    timeout-minutes: 45
 
     steps:
     - uses: actions/checkout@v4
@@ -70,21 +102,7 @@ jobs:
     - name: Install Rust toolchain
       uses: dtolnay/rust-toolchain@v1
       with:
-        toolchain: stable
-
-    - name: Install nextest
-      uses: taiki-e/install-action@nextest
-
-    - name: Clean build artifacts
-      run: cargo clean
+        toolchain: 1.92.0
 
     - name: Build
       run: cargo build --release --verbose
-
-    - name: Run tests (nextest)
-      # Release mode avoids debug-mode heap corruption issues; nextest's
-      # process-per-test isolation keeps parallel runs stable.
-      run: cargo nextest run --release --profile ci
-
-    - name: Doctests
-      run: cargo test --release --doc

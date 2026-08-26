@@ -277,13 +277,12 @@ impl NaturalGradientEstimator {
         params_ij_plus[j] += s;
 
         // Approximation using overlaps
-        let f_ij = (overlap_fn(&params_i_plus, &params_j_plus)
+
+        (overlap_fn(&params_i_plus, &params_j_plus)
             - overlap_fn(params, &params_j_plus)
             - overlap_fn(&params_i_plus, params)
             + overlap_fn(params, params))
-            / (s * s);
-
-        f_ij
+            / (s * s)
     }
 }
 

@@ -270,32 +270,32 @@ impl Codegen {
         // RESULT triggers evaluation of the synthesized tile datapath and returns the
         // answer in R0. No LR/stack-frame involvement — the "call" is three stores and
         // a load per argument, like the putchar builtin but with a result.
-        if let Some((accel_name, accel_arity)) = self.accel.clone() {
-            if name == accel_name {
-                if args.len() != accel_arity {
-                    return Err(CompileError(format!(
-                        "accel function '{accel_name}' expects {accel_arity} argument(s), got {}",
-                        args.len()
-                    )));
-                }
-                // Stage every argument on the eval stack first: an argument expression
-                // may itself contain calls (including nested accel calls) that would
-                // clobber the device's operand latches mid-sequence.
-                for arg in args {
-                    self.gen_expr(ctx, arg)?;
-                    self.emit(format!("PUSH {RESULT}"));
-                }
-                self.emit(format!("LDI {ADDR}, 0")); // base 0 for [R5+addr] MMIO access
-                for i in (0..args.len()).rev() {
-                    self.emit(format!("POP {RESULT}")); // arg i value
-                    self.emit(format!("LDI {LEFT}, {i}"));
-                    self.emit(format!("ST [{ADDR}+{MMIO_ACCEL_ARG_SELECT}], {LEFT}"));
-                    self.emit(format!("ST [{ADDR}+{MMIO_ACCEL_ARG_DATA}], {RESULT}"));
-                }
-                // Read RESULT: the device evaluates the tile datapath on this access.
-                self.emit(format!("LD {RESULT}, [{ADDR}+{MMIO_ACCEL_RESULT}]"));
-                return Ok(());
+        if let Some((accel_name, accel_arity)) = self.accel.clone()
+            && name == accel_name
+        {
+            if args.len() != accel_arity {
+                return Err(CompileError(format!(
+                    "accel function '{accel_name}' expects {accel_arity} argument(s), got {}",
+                    args.len()
+                )));
             }
+            // Stage every argument on the eval stack first: an argument expression
+            // may itself contain calls (including nested accel calls) that would
+            // clobber the device's operand latches mid-sequence.
+            for arg in args {
+                self.gen_expr(ctx, arg)?;
+                self.emit(format!("PUSH {RESULT}"));
+            }
+            self.emit(format!("LDI {ADDR}, 0")); // base 0 for [R5+addr] MMIO access
+            for i in (0..args.len()).rev() {
+                self.emit(format!("POP {RESULT}")); // arg i value
+                self.emit(format!("LDI {LEFT}, {i}"));
+                self.emit(format!("ST [{ADDR}+{MMIO_ACCEL_ARG_SELECT}], {LEFT}"));
+                self.emit(format!("ST [{ADDR}+{MMIO_ACCEL_ARG_DATA}], {RESULT}"));
+            }
+            // Read RESULT: the device evaluates the tile datapath on this access.
+            self.emit(format!("LD {RESULT}, [{ADDR}+{MMIO_ACCEL_RESULT}]"));
+            return Ok(());
         }
         if args.len() > 4 {
             return Err(CompileError(format!(

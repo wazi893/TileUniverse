@@ -173,7 +173,7 @@ impl LaneKernel {
             if op.op == COP_THRESHOLD_VIA {
                 let idx = op.idx as usize;
                 let sim = sim.expect("COP_THRESHOLD_VIA preflight requires simulation metadata");
-                let neighbors = (*sim.neighbors4_at(idx)).map(|n| remap(n));
+                let neighbors = (*sim.neighbors4_at(idx)).map(remap);
                 threshold_via.push(ThresholdViaParams {
                     neighbors,
                     threshold: sim.get_tile_threshold(idx),

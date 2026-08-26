@@ -127,7 +127,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         ticks += 1;
 
         // Capture a viz frame every few ticks so we can see the signals move
-        if ticks % 8 == 0 || cpu.is_halted() {
+        if ticks.is_multiple_of(8) || cpu.is_halted() {
             let frame = viz.capture_frame(&sim, &viz_params);
             let frame_path = out_dir.join(format!("redstone_frame_{:03}.ppm", ticks));
             let mut f = File::create(&frame_path)?;

@@ -184,10 +184,10 @@ fn grover_search(
     let mut address = 0usize;
     for i in 0..depth {
         let outcome = apply_gate_scalar(&mut state, &QGate::Measure(i as u8), &mut rng);
-        if let GateOutcome::Measured { qubit: _, bit } = outcome {
-            if bit != 0 {
-                address |= 1 << i;
-            }
+        if let GateOutcome::Measured { qubit: _, bit } = outcome
+            && bit != 0
+        {
+            address |= 1 << i;
         }
     }
 

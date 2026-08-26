@@ -10,6 +10,12 @@
 //! This format is optimized for quantum amplitudes which must satisfy |α|² + |β|² = 1,
 //! meaning individual amplitudes are typically in the range [-1, 1].
 
+// The fixed-point and complex types deliberately expose inherent `add`/`sub`/`mul`/`neg`
+// methods (saturating, value-semantics) instead of the `std::ops` traits, so call sites
+// read explicitly (`a.mul(b)`) and avoid operator-overload ambiguity. Silence the
+// trait-shadowing lint for the whole module rather than per method.
+#![allow(clippy::should_implement_trait)]
+
 use std::fmt;
 
 /// 8-bit signed fixed-point number: s.fffffff
@@ -171,7 +177,7 @@ impl Fixed8 {
         }
 
         // We need to compute sqrt(128 * raw_a)
-        let scaled_val = (self.raw as i32 * 128) as i32; // 128 * raw_a
+        let scaled_val = self.raw as i32 * 128; // 128 * raw_a
 
         // Integer square root using Newton-Raphson
         // Better initial guess based on magnitude

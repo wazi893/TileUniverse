@@ -193,7 +193,7 @@ fn main() {
     println!("\n");
     println!("Summary");
     println!("═══════");
-    println!("Test 1 (PC only):     {}", "PASS - converges in 1-2 deltas");
+    println!("Test 1 (PC only):     PASS - converges in 1-2 deltas");
     println!("Test 2 (PC + IR):     Check output above");
     println!("Test 3 (Add):         Check output above");
     println!("Test 4 (Minimal CPU): Check output above");

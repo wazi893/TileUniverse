@@ -197,7 +197,7 @@ fn scale_input_weights(net: &mut SNNNetwork, d_ch0_norm: &[f32], d_ch1_norm: &[f
     let n_inputs = k * 2;
     let npcu = net.config.neurons_per_cpu;
     for i in 0..n_inputs {
-        let local_i = net.topology.local_index(i, npcu) as usize;
+        let local_i = net.topology.local_index(i, npcu);
         let d = if i < k {
             d_ch0_norm[i]
         } else {
@@ -216,7 +216,7 @@ fn set_hidden_threshold(net: &mut SNNNetwork, t_hidden: i16) {
     let npcu = net.config.neurons_per_cpu;
     for i in h_start..h_end {
         let cpu = net.topology.neuron_to_cpu[i];
-        let local = net.topology.local_index(i, npcu) as usize;
+        let local = net.topology.local_index(i, npcu);
         net.populations[cpu].neurons[local].threshold = t_hidden;
     }
 }
@@ -336,7 +336,7 @@ fn build_network(seed: u64, n_inputs: usize) -> SNNNetwork {
     let npcu = net.config.neurons_per_cpu;
     for i in out_start..out_end {
         let cpu = net.topology.neuron_to_cpu[i];
-        let local = net.topology.local_index(i, npcu) as usize;
+        let local = net.topology.local_index(i, npcu);
         net.populations[cpu].neurons[local].threshold = 2000;
     }
 
@@ -634,17 +634,8 @@ fn print_kscan(zeros: &[Vec<u8>], ones: &[Vec<u8>], full_order: &[usize]) {
         t_scan
     );
     println!(
-        "{:>5}  {:>8} {:>8} {:>8} {:>8}  {:>8} {:>8} {:>8} {:>8}  {}",
-        "K",
-        "d0_ch0",
-        "d0_ch1",
-        "d1_ch0",
-        "d1_ch1",
-        "ch0h_d0",
-        "ch0h_d1",
-        "ch1h_d0",
-        "ch1h_d1",
-        "Status"
+        "{:>5}  {:>8} {:>8} {:>8} {:>8}  {:>8} {:>8} {:>8} {:>8}  Status",
+        "K", "d0_ch0", "d0_ch1", "d1_ch0", "d1_ch1", "ch0h_d0", "ch0h_d1", "ch1h_d0", "ch1h_d1"
     );
     let n = full_order.len();
     for &k in &[3usize, 5, 7, 10, 15, 20, 30, 50, 100, 200] {
@@ -927,7 +918,10 @@ fn main() {
     println!("════════════════════════════════════════════");
     let avg = all_best.iter().sum::<f32>() / all_best.len() as f32;
     let pass_count = all_best.iter().filter(|&&a| a >= 0.95).count();
-    let partial_count = all_best.iter().filter(|&&a| a >= 0.80 && a < 0.95).count();
+    let partial_count = all_best
+        .iter()
+        .filter(|&&a| (0.80..0.95).contains(&a))
+        .count();
 
     for (&seed, &best) in seeds.iter().zip(all_best.iter()) {
         println!(

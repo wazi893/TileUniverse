@@ -1278,10 +1278,10 @@ impl StabilizerTableau {
     ) -> Result<Vec<GateError>, StabilizerError> {
         let mut errors = Vec::new();
         for gate in circuit {
-            if let Some(error) = self.execute_gate_noisy(gate, error_model, rng)? {
-                if !matches!(error, GateError::None) {
-                    errors.push(error);
-                }
+            if let Some(error) = self.execute_gate_noisy(gate, error_model, rng)?
+                && !matches!(error, GateError::None)
+            {
+                errors.push(error);
             }
         }
         Ok(errors)

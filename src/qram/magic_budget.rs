@@ -245,7 +245,7 @@ impl MagicStateBudget {
     /// Create summary string for display
     pub fn summary(&self) -> String {
         let mut s = String::new();
-        s.push_str(&format!("=== Magic State Budget ===\n"));
+        s.push_str("=== Magic State Budget ===\n");
         s.push_str(&format!("Toffoli gates: {}\n", self.toffoli_count));
         s.push_str(&format!(
             "Direct T/T†: {}/{}\n",
@@ -255,7 +255,7 @@ impl MagicStateBudget {
         s.push_str(&format!("T-depth: {}\n", self.t_depth));
 
         if self.is_ft_configured() {
-            s.push_str(&format!("\n--- Fault-Tolerant Overhead ---\n"));
+            s.push_str("\n--- Fault-Tolerant Overhead ---\n");
             s.push_str(&format!("Code distance: {}\n", self.code_distance));
             s.push_str(&format!(
                 "Target error: {:.0e}\n",
@@ -434,7 +434,7 @@ impl DistillationConfig {
 
         FactoryEstimate {
             qubits: factory_qubits,
-            cycles_per_state: cycles_per_state,
+            cycles_per_state,
             total_cycles,
             noisy_states_consumed: total_noisy,
         }
@@ -571,7 +571,7 @@ mod tests {
     fn test_code_distance_calculation() {
         // 10^-10 target should give ~d=23 or so
         let d = DistillationConfig::calculate_code_distance(1e-10);
-        assert!(d >= 21 && d <= 25);
+        assert!((21..=25).contains(&d));
         assert!(d % 2 == 1); // Must be odd
     }
 

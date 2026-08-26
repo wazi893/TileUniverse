@@ -205,21 +205,16 @@ impl PopulationEncoder {
 }
 
 /// Configuration for population-coded outputs
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum OutputEncoding {
     /// One-hot basis states |2^i⟩ (current default)
+    #[default]
     OneHot,
     /// Population code with Gaussian tuning curves
     Population {
         neurons_per_action: usize,
         sigma: f32,
     },
-}
-
-impl Default for OutputEncoding {
-    fn default() -> Self {
-        OutputEncoding::OneHot
-    }
 }
 
 impl OutputEncoding {

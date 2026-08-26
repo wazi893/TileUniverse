@@ -133,7 +133,7 @@ impl FactoryPool {
         // Add to protocol map
         self.factories_by_protocol
             .entry(protocol.name.to_string())
-            .or_insert_with(Vec::new)
+            .or_default()
             .push(factory_id);
 
         factory_id

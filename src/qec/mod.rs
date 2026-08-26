@@ -57,14 +57,16 @@ pub mod gpu_stabilizer;
 // Core QEC exports
 pub use bacon_shor::{BaconShorCode, BaconShorDecoder, GaugeOperator, GaugePauliType};
 pub use codes::{RepetitionCode, SteaneCode, SurfaceCode};
-pub use decoder::UnionFindDecoder;
+pub use decoder::{GreedyMatchingDecoder, UnionFindDecoder, greedy_match_channel};
 pub use gate_noise::{
     GateError, GateErrorModel, Pauli, sample_measurement_error, sample_preparation_error,
     sample_single_qubit_error, sample_two_qubit_error,
 };
 pub use noise::SimpleRng;
 pub use stabilizer::{PauliOperator, StabilizerError, StabilizerTableau};
+#[allow(deprecated)]
 pub use union_find::UnionFindDecoderV2;
+#[allow(deprecated)]
 pub use union_find_dn::UnionFindDecoderDN;
 
 // MWPM decoder exports (Phase 78.1)

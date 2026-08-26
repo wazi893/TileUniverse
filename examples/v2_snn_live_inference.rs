@@ -345,7 +345,7 @@ done:
         "  [{}] Live accuracy >= 75% ({direct_acc:.1}%)",
         if acc_gate { "PASS" } else { "FAIL" }
     );
-    let rate_ok = mean_spike_rate >= 0.01 && mean_spike_rate <= 0.30;
+    let rate_ok = (0.01..=0.30).contains(&mean_spike_rate);
     println!(
         "  [{}] Spike rate in [0.01, 0.30] ({mean_spike_rate:.4})",
         if rate_ok { "PASS" } else { "FAIL" }

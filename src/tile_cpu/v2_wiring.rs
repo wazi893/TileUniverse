@@ -200,6 +200,16 @@ pub(crate) struct V2CpuIndices {
     // Sprint 168: Pre-filtered clock-sensitive tiles within clock_scope_mask.
     pub in_scope_clock_cache: Vec<usize>,
 
+    /// Sprint 396: MUL island tile indices (empty = island not placed). The island
+    /// tiles are seeded into `commit_dirty_indices` + `placed_mask` at wiring time,
+    /// so the commit closure, clock scope, in-scope clock cache (the three island
+    /// Register64s are clock-sensitive), and eval orders all derive automatically.
+    pub mul_island_indices: Vec<usize>,
+    pub mul_island_p_idx: usize,
+    pub mul_island_a_idx: usize,
+    pub mul_island_b_idx: usize,
+    pub mul_island_act_idx: usize,
+
     // Sprint 147: bitset of all tiles placed during wiring (for restricted BFS)
     pub placed_mask: Vec<u64>,
 }
@@ -375,6 +385,7 @@ pub(crate) fn wire_v2_cpu(
     rom_size: usize,
     _ram_size: usize,
     pc_addr_bits: u8,
+    mul_island: bool,
 ) -> V2CpuIndices {
     assert!(
         sim.num_layers() >= 4,
@@ -388,7 +399,7 @@ pub(crate) fn wire_v2_cpu(
     let idx3d = |x: usize, y: usize, z: usize| -> usize { z * layer_size + y * grid_width + x };
 
     // Sprint 147: track all placed tile indices for restricted BFS.
-    let num_segments = (sim.tile_count() + 63) / 64;
+    let num_segments = sim.tile_count().div_ceil(64);
     let mut placed_mask = vec![0u64; num_segments];
 
     macro_rules! place {
@@ -1524,10 +1535,10 @@ pub(crate) fn wire_v2_cpu(
         // Original path through L2(2,3..6) is broken at L2(2,4) ViaUp.
         // New path: L2(1,2) → L2(0,2) WireLeft → L2(0,3..6) WireDown
         //         → L2(1,6) WireRight → L2(2,6) WireRight → existing east trunk.
-        let _s151_b0_bypass_entry = place_l2_route!(ox + 0, oy + 2, TileType::WireLeft);
+        let _s151_b0_bypass_entry = place_l2_route!(ox, oy + 2, TileType::WireLeft);
         push_pipeline!(_s151_b0_bypass_entry);
         for y_off in 3..=6 {
-            let idx = place_l2_route!(ox + 0, oy + y_off, TileType::WireDown);
+            let idx = place_l2_route!(ox, oy + y_off, TileType::WireDown);
             push_pipeline!(idx);
         }
         let _s151_b0_bypass_exit = place_l2_route!(ox + 1, oy + 6, TileType::WireRight);
@@ -1861,15 +1872,15 @@ pub(crate) fn wire_v2_cpu(
         // L1 north from (28,2) to (28,0)
         let l1_wu1 = place_l1_route!(ox + 28, oy + 1, TileType::WireUp);
         push_pipeline!(l1_wu1);
-        let l1_wu2 = place_l1_route!(ox + 28, oy + 0, TileType::WireUp);
+        let l1_wu2 = place_l1_route!(ox + 28, oy, TileType::WireUp);
         push_pipeline!(l1_wu2);
         // L1 east at y=0 from x=29 to x=71
         for x in (ox + 29)..=(ox + 71) {
-            let idx = place_l1_route!(x, oy + 0, TileType::WireRight);
+            let idx = place_l1_route!(x, oy, TileType::WireRight);
             push_pipeline!(idx);
         }
         // Drop to L2 for south descent (avoids L1 east run collisions at y=2,4)
-        let l2_vd = place_l2_route!(ox + 71, oy + 0, TileType::ViaDown);
+        let l2_vd = place_l2_route!(ox + 71, oy, TileType::ViaDown);
         push_pipeline!(l2_vd);
         // L2 south descent from (71,1) to (71,7)
         for y_off in 1..=7 {
@@ -5265,7 +5276,7 @@ pub(crate) fn wire_v2_cpu(
 
     // Root selector (ViaUp from L1 inverted bit 2), fan-in shims, and root mux.
     let _sel_root = place!(ox + 77, oy + 61, TileType::ViaUp);
-    for x in (74usize)..=(76usize) {
+    for x in 74usize..=76usize {
         let _idx = place!(ox + x, oy + 62, TileType::WireRight);
     }
     for &x in &[80usize, 79usize, 78usize] {
@@ -5860,6 +5871,806 @@ pub(crate) fn wire_v2_cpu(
     // so we push directly to commit_dirty_indices.
     commit_dirty_indices.extend_from_slice(&lr_dirty_indices);
 
+    // -------------------------------------------------------------------------
+    // Sprint 392: second Target Selection Mux (Mux2) — register-indirect targets
+    // -------------------------------------------------------------------------
+    // JMPR/CALLR (branch_kind 1/6 + EXT_REG_INDIRECT) targets are the last
+    // software-written control-transfer target. Mux2 selects regs[rd] (LEFT)
+    // vs the S125 Target-Mux output (RIGHT) under is_reg_indirect (UP) and
+    // re-heads the existing L2/L1 (ox+1, oy+1) ViaUp tail into pc_next_mux.
+    //
+    // Mux2 lives in the ANNEX at z=4 (near-empty — occupancy-dumped, see
+    // SPRINT_392_REPORT.md). Layout (all (ox+x, oy+y) at z=4 unless noted):
+    //   (2,1) Mux2:  UP=(2,0) is_reg_indirect, LEFT=(1,1) regs[rd],
+    //                RIGHT=(3,1) S125out; output read by L3(2,1) ViaUp.
+    //   S125out arrival: L3(5,1) WireLeft (fanout wire-read of the L3(6,1)
+    //     ViaDown route head — vias are one-per-source, wire reads are not)
+    //     → z4(5,1) ViaDown → (4,1)/(3,1) WireLeft.
+    //   Output splice: L3(2,1) ViaUp (reads Mux2) → L3(1,1) WireLeft
+    //     (OVERWRITES the Phase 11 WireUp tail head; the old L3(1,2..4) run
+    //     dead-ends, harmless) → existing L2(1,1)/L1(1,1) ViaUp → pc_next_mux.
+    //
+    // Phase C1 delivers UP = physical byte2 bit 4 (EXT_REG_INDIRECT — set only
+    // by JMPR/CALLR). LEFT (regs[rd]) is DEFERRED to S393: the S392 trunk-
+    // survival probe falsified the op_a_root tap premise — the operand network
+    // does not hold regs[rd] to the clock edge (see SPRINT_392_REPORT.md). The
+    // executor keeps the software PC write for reg-indirect targets, so on
+    // JMPR/CALLR cycles the Mux2 output (LEFT stub 0 once C1 selects it) is
+    // captured and immediately corrected by write_pc — trust-verify semantics.
+    //
+    // Gated on pc_addr_bits > 7: the default 7-bit fabric is untouched and the
+    // 45 goldens stay byte-identical by construction.
+    if pc_addr_bits > 7 {
+        let mut s392_dirty_indices: Vec<usize> = Vec::new();
+        // Annex placement (z ≥ 4): raw set_tile_3d does NOT update placed_mask —
+        // set it manually or the commit-scope closure skips the tile and the
+        // route goes inert (differential silently falls back to software).
+        macro_rules! place_annex {
+            ($x:expr, $y:expr, $z:expr, $tt:expr) => {{
+                sim.set_tile_3d($x, $y, $z, $tt);
+                tile_count += 1;
+                let _idx = idx3d($x, $y, $z);
+                placed_mask[_idx / 64] |= 1u64 << (_idx % 64);
+                s392_dirty_indices.push(_idx);
+                _idx
+            }};
+        }
+
+        // S125out arrival: L3 fanout read + z4 hop east of Mux2.
+        let s392_tap = place_l3!(ox + 5, oy + 1, TileType::WireLeft);
+        s392_dirty_indices.push(s392_tap);
+        let _ = place_annex!(ox + 5, oy + 1, 4, TileType::ViaDown);
+        let _ = place_annex!(ox + 4, oy + 1, 4, TileType::WireLeft);
+        let _ = place_annex!(ox + 3, oy + 1, 4, TileType::WireLeft);
+
+        // Mux2 + LEFT stub (regs[rd] value path reserved for S393).
+        let _s392_left_stub = place_annex!(ox + 1, oy + 1, 4, TileType::Const);
+        sim.set_logic_value_3d(ox + 1, oy + 1, 4, 0);
+        let _s392_mux2 = place_annex!(ox + 2, oy + 1, 4, TileType::Mux);
+
+        // Output splice into the existing pc ingress tail.
+        let s392_out_l3 = place_l3!(ox + 2, oy + 1, TileType::ViaUp);
+        s392_dirty_indices.push(s392_out_l3);
+        let s392_rehead = place_l3!(ox + 1, oy + 1, TileType::WireLeft);
+        s392_dirty_indices.push(s392_rehead);
+
+        // --- Phase C1: is_reg_indirect select-bit delivery → Mux2.UP ---
+        // byte2 (ir_ext low byte) = Super Mux lane 2 at L0(ox+89, oy+11); bit 4
+        // is EXT_REG_INDIRECT (set only by JMPR/CALLR). The (89,11) column is
+        // via-free up through the annex (occupancy dump), so stack straight up
+        // and extract at z4, mirroring the S125 is_ret BitSelect pattern:
+        // BitSelect reads LEFT = value, RIGHT = Const(bit index).
+        // Route: WireUp col 90 (rows 10..0) → WireLeft row 0 (x 89..2) ending
+        // at (2,0) = Mux2.UP neighbor. Annex row 0 is empty per the dump.
+        let s392_sel_l1 = place_l1_route!(ox + 89, oy + 11, TileType::ViaDown);
+        s392_dirty_indices.push(s392_sel_l1);
+        let s392_sel_l2 = place_l2_route!(ox + 89, oy + 11, TileType::ViaDown);
+        s392_dirty_indices.push(s392_sel_l2);
+        let s392_sel_l3 = place_l3!(ox + 89, oy + 11, TileType::ViaDown);
+        s392_dirty_indices.push(s392_sel_l3);
+        let _ = place_annex!(ox + 89, oy + 11, 4, TileType::ViaDown);
+        let _ = place_annex!(ox + 90, oy + 11, 4, TileType::BitSelect);
+        let _ = place_annex!(ox + 91, oy + 11, 4, TileType::Const);
+        sim.set_logic_value_3d(ox + 91, oy + 11, 4, 4);
+        for y in oy..=(oy + 10) {
+            let _ = place_annex!(ox + 90, y, 4, TileType::WireUp);
+        }
+        for x in ((ox + 2)..=(ox + 89)).rev() {
+            let _ = place_annex!(x, oy, 4, TileType::WireLeft);
+        }
+
+        commit_dirty_indices.extend_from_slice(&s392_dirty_indices);
+    }
+
+    // -------------------------------------------------------------------------
+    // Sprint 393: physical register read port — regs[rd] → Mux2.LEFT
+    // -------------------------------------------------------------------------
+    // Completes S392: 16 taps of the permanent Register64 file (edge-stable,
+    // unlike the executor-managed operand trees — see SPRINT_392/393 reports)
+    // → per-register via stacks into the annex → 16 private z4 lanes → 4-level
+    // 16:1 mux ladder (rd0/rd1/rd2/rd_hi, odd/high half on LEFT since the Mux
+    // law is `up != 0 → LEFT`) → Mux2.LEFT. Select bits: rd0 extends the L0
+    // BitSelect (12,6) stack; rd1/rd2 are extracted in the annex from the
+    // existing byte1 (ir_high) ViaDown stack at (86,11) (lateral wire read);
+    // rd_hi = byte2 bit 0 off the S392 C1 via at z4(89,11). The full floorplan
+    // was machine-validated against the live fabric (SPRINT_393_REPORT.md):
+    // spread layers col a/b/c/d = z6/z5/z7/z8 (one row per register per layer,
+    // collision-free by construction), tree at z4 rows 26-38, x 54-77.
+    //
+    // Gated on pc_addr_bits > 7: default 7-bit fabric untouched, 45 goldens
+    // byte-identical by construction.
+    if pc_addr_bits > 7 {
+        let mut s393_dirty_indices: Vec<usize> = Vec::new();
+        // Annex/any-layer placement with manual placed_mask (see S392 note).
+        macro_rules! place393 {
+            ($x:expr, $y:expr, $z:expr, $tt:expr) => {{
+                sim.set_tile_3d($x, $y, $z, $tt);
+                tile_count += 1;
+                let _idx = idx3d($x, $y, $z);
+                placed_mask[_idx / 64] |= 1u64 << (_idx % 64);
+                s393_dirty_indices.push(_idx);
+                _idx
+            }};
+        }
+        macro_rules! place393_val {
+            ($x:expr, $y:expr, $z:expr, $tt:expr, $v:expr) => {{
+                let _idx = place393!($x, $y, $z, $tt);
+                sim.set_logic_value_3d($x, $y, $z, $v);
+                _idx
+            }};
+        }
+
+        // --- Phase R1: select rails ---
+        // rd0: extend the (12,6) rd0-BitSelect L1 via stack to z5, run east on
+        // z5 row 6, south on col 78, rail west on row 26, z4 drops at the eight
+        // level-0 mux UP cells (x = 55+3s).
+        for z in 2..=5 {
+            let _ = place393!(ox + 12, oy + 6, z, TileType::ViaDown);
+        }
+        for x in (ox + 13)..=(ox + 78) {
+            let _ = place393!(x, oy + 6, 5, TileType::WireRight);
+        }
+        for y in (oy + 7)..=(oy + 26) {
+            let _ = place393!(ox + 78, y, 5, TileType::WireDown);
+        }
+        for x in (ox + 55)..=(ox + 77) {
+            let _ = place393!(x, oy + 26, 5, TileType::WireLeft);
+        }
+        for s in 0..8usize {
+            let _ = place393!(ox + 55 + 3 * s, oy + 26, 4, TileType::ViaUp);
+        }
+        // rd1: z6 lateral extraction from the byte1 stack at (86,11):
+        // WR(87,11) → BitSelect(88,11) + Const(1)(89,11) → WU(88,10) → west row
+        // 10 → south col 78 → rail west row 29 → z5+z4 drops at (57+6k, 29).
+        let _ = place393!(ox + 87, oy + 11, 6, TileType::WireRight);
+        let _ = place393!(ox + 88, oy + 11, 6, TileType::BitSelect);
+        let _ = place393_val!(ox + 89, oy + 11, 6, TileType::Const, 1);
+        let _ = place393!(ox + 88, oy + 10, 6, TileType::WireUp);
+        for x in (ox + 78)..=(ox + 87) {
+            let _ = place393!(x, oy + 10, 6, TileType::WireLeft);
+        }
+        for y in (oy + 11)..=(oy + 29) {
+            let _ = place393!(ox + 78, y, 6, TileType::WireDown);
+        }
+        for x in (ox + 57)..=(ox + 77) {
+            let _ = place393!(x, oy + 29, 6, TileType::WireLeft);
+        }
+        for k in 0..4usize {
+            let _ = place393!(ox + 57 + 6 * k, oy + 29, 5, TileType::ViaUp);
+            let _ = place393!(ox + 57 + 6 * k, oy + 29, 4, TileType::ViaUp);
+        }
+        // rd2: same extraction shape at z7 (Const bit index 2), east to col 90,
+        // south, rail west on row 32, z6+z5+z4 drops at (60,32) and (72,32).
+        let _ = place393!(ox + 87, oy + 11, 7, TileType::WireRight);
+        let _ = place393!(ox + 88, oy + 11, 7, TileType::BitSelect);
+        let _ = place393_val!(ox + 89, oy + 11, 7, TileType::Const, 2);
+        let _ = place393!(ox + 88, oy + 10, 7, TileType::WireUp);
+        let _ = place393!(ox + 89, oy + 10, 7, TileType::WireRight);
+        let _ = place393!(ox + 90, oy + 10, 7, TileType::WireRight);
+        // NOTE: the column runs one row PAST the rail row (32) — the rail's
+        // east end reads the corner cell (90,32). (R3 probe caught the corner
+        // missing: rd2 read 0 for every rd.)
+        for y in (oy + 11)..=(oy + 32) {
+            let _ = place393!(ox + 90, y, 7, TileType::WireDown);
+        }
+        for x in (ox + 60)..=(ox + 89) {
+            let _ = place393!(x, oy + 32, 7, TileType::WireLeft);
+        }
+        for &x in &[ox + 60, ox + 72] {
+            let _ = place393!(x, oy + 32, 6, TileType::ViaUp);
+            let _ = place393!(x, oy + 32, 5, TileType::ViaUp);
+            let _ = place393!(x, oy + 32, 4, TileType::ViaUp);
+        }
+        // rd_hi: byte2 bit 0 off the S392 C1 via at z4(89,11): WD copy (89,12),
+        // BitSelect (90,12) + Const(0) (91,12), WD (90,13), up to z6, west row
+        // 12, south col 80, west row 36, z5+z4 drops at (66,36) = M_final UP.
+        let _ = place393!(ox + 89, oy + 12, 4, TileType::WireDown);
+        let _ = place393!(ox + 90, oy + 12, 4, TileType::BitSelect);
+        let _ = place393_val!(ox + 91, oy + 12, 4, TileType::Const, 0);
+        let _ = place393!(ox + 90, oy + 13, 4, TileType::WireDown);
+        let _ = place393!(ox + 90, oy + 13, 5, TileType::ViaDown);
+        let _ = place393!(ox + 90, oy + 13, 6, TileType::ViaDown);
+        let _ = place393!(ox + 90, oy + 12, 6, TileType::WireUp);
+        for x in (ox + 80)..=(ox + 89) {
+            let _ = place393!(x, oy + 12, 6, TileType::WireLeft);
+        }
+        for y in (oy + 13)..=(oy + 36) {
+            let _ = place393!(ox + 80, y, 6, TileType::WireDown);
+        }
+        for x in (ox + 66)..=(ox + 79) {
+            let _ = place393!(x, oy + 36, 6, TileType::WireLeft);
+        }
+        let _ = place393!(ox + 66, oy + 36, 5, TileType::ViaUp);
+        let _ = place393!(ox + 66, oy + 36, 4, TileType::ViaUp);
+
+        // --- Phase R2: sixteen register stacks → annex lanes ---
+        // Per register: (stack col, stack row, z_lo..=z_hi vias, lane, fanout).
+        // fanout 0 = stack sits on the tap cell (extends the existing L1/L2/L3
+        // via found there); 1 = L1 wire fanout at (sc,sr) reading the S97 L1 tap
+        // one cell away; 2 = L2 WireDown fanout reading the L2 via above it.
+        // Egress + every cell machine-validated (Phase 0). Spread layer = z_hi
+        // (col a/b/c/d = z6/z5/z7/z8); descent vias at (lane,sr) z_hi-1..4;
+        // z4 lane south to row 25 + carriers rows 26/27 for the level-0 muxes.
+        struct S393Tap {
+            sc: usize,
+            sr: usize,
+            z_lo: usize,
+            z_hi: usize,
+            lane: usize,
+            fan: u8, // 0 none, 1 = L1 WireUp, 2 = L1 WireDown, 3 = L2 WireDown
+        }
+        const S393_TAPS: [S393Tap; 16] = [
+            S393Tap {
+                sc: 28,
+                sr: 13,
+                z_lo: 3,
+                z_hi: 6,
+                lane: 65,
+                fan: 0,
+            }, // R0
+            S393Tap {
+                sc: 28,
+                sr: 15,
+                z_lo: 2,
+                z_hi: 6,
+                lane: 63,
+                fan: 1,
+            }, // R1
+            S393Tap {
+                sc: 28,
+                sr: 20,
+                z_lo: 2,
+                z_hi: 6,
+                lane: 62,
+                fan: 2,
+            }, // R2
+            S393Tap {
+                sc: 28,
+                sr: 22,
+                z_lo: 3,
+                z_hi: 6,
+                lane: 60,
+                fan: 0,
+            }, // R3
+            S393Tap {
+                sc: 48,
+                sr: 14,
+                z_lo: 3,
+                z_hi: 5,
+                lane: 59,
+                fan: 3,
+            }, // R4
+            S393Tap {
+                sc: 48,
+                sr: 15,
+                z_lo: 2,
+                z_hi: 5,
+                lane: 57,
+                fan: 1,
+            }, // R5
+            S393Tap {
+                sc: 48,
+                sr: 19,
+                z_lo: 4,
+                z_hi: 5,
+                lane: 56,
+                fan: 0,
+            }, // R6
+            S393Tap {
+                sc: 48,
+                sr: 22,
+                z_lo: 4,
+                z_hi: 5,
+                lane: 54,
+                fan: 0,
+            }, // R7
+            S393Tap {
+                sc: 88,
+                sr: 14,
+                z_lo: 2,
+                z_hi: 7,
+                lane: 77,
+                fan: 2,
+            }, // R8
+            S393Tap {
+                sc: 88,
+                sr: 16,
+                z_lo: 2,
+                z_hi: 7,
+                lane: 75,
+                fan: 0,
+            }, // R9
+            S393Tap {
+                sc: 88,
+                sr: 19,
+                z_lo: 2,
+                z_hi: 7,
+                lane: 74,
+                fan: 0,
+            }, // R10
+            S393Tap {
+                sc: 88,
+                sr: 22,
+                z_lo: 2,
+                z_hi: 7,
+                lane: 72,
+                fan: 0,
+            }, // R11
+            S393Tap {
+                sc: 92,
+                sr: 14,
+                z_lo: 2,
+                z_hi: 8,
+                lane: 71,
+                fan: 2,
+            }, // R12
+            S393Tap {
+                sc: 92,
+                sr: 16,
+                z_lo: 2,
+                z_hi: 8,
+                lane: 69,
+                fan: 0,
+            }, // R13
+            S393Tap {
+                sc: 92,
+                sr: 19,
+                z_lo: 2,
+                z_hi: 8,
+                lane: 68,
+                fan: 0,
+            }, // R14
+            S393Tap {
+                sc: 92,
+                sr: 22,
+                z_lo: 2,
+                z_hi: 8,
+                lane: 66,
+                fan: 0,
+            }, // R15
+        ];
+        for t in &S393_TAPS {
+            match t.fan {
+                1 => {
+                    let _ = place393!(ox + t.sc, oy + t.sr, 1, TileType::WireUp);
+                }
+                2 if t.z_lo == 2 => {
+                    let _ = place393!(ox + t.sc, oy + t.sr, 1, TileType::WireDown);
+                }
+                3 => {
+                    let _ = place393!(ox + t.sc, oy + t.sr, 2, TileType::WireDown);
+                }
+                _ => {}
+            }
+            for z in t.z_lo..=t.z_hi {
+                let _ = place393!(ox + t.sc, oy + t.sr, z, TileType::ViaDown);
+            }
+            if t.lane > t.sc {
+                for x in (t.sc + 1)..=t.lane {
+                    let _ = place393!(ox + x, oy + t.sr, t.z_hi, TileType::WireRight);
+                }
+            } else {
+                for x in t.lane..t.sc {
+                    let _ = place393!(ox + x, oy + t.sr, t.z_hi, TileType::WireLeft);
+                }
+            }
+            for z in (4..t.z_hi).rev() {
+                let _ = place393!(ox + t.lane, oy + t.sr, z, TileType::ViaUp);
+            }
+            for y in (t.sr + 1)..=27 {
+                let _ = place393!(ox + t.lane, oy + y, 4, TileType::WireDown);
+            }
+        }
+
+        // --- Phase R3: the 16:1 mux ladder (15 Muxes) ---
+        // Level 0: 8 muxes at (55+3s, 27); UP = R1's z4 rail drop at (·,26);
+        // LEFT = odd-register lane carrier (54+3s, 27), RIGHT = even (56+3s, 27).
+        for s in 0..8usize {
+            let _ = place393!(ox + 55 + 3 * s, oy + 27, 4, TileType::Mux);
+        }
+        // Level 1: 4 muxes at (57+6k, 30); UP = drop (·,29). West-site (rd1=1
+        // pair) mux output routes to the LEFT cell (56+6k,30); east-site to the
+        // RIGHT cell (58+6k,30).
+        for k in 0..4usize {
+            let b = 6 * k;
+            for y in 28..=30usize {
+                let _ = place393!(ox + 55 + b, oy + y, 4, TileType::WireDown);
+            }
+            let _ = place393!(ox + 56 + b, oy + 30, 4, TileType::WireRight);
+            for y in 28..=30usize {
+                let _ = place393!(ox + 58 + b, oy + y, 4, TileType::WireDown);
+            }
+            let _ = place393!(ox + 57 + b, oy + 30, 4, TileType::Mux);
+        }
+        // Level 2: M_low (60,33) [LEFT <- R4-7 quad @ (57,30), RIGHT <- R0-3 @
+        // (63,30)]; M_high (72,33) [LEFT <- R12-15 @ (69,30), RIGHT <- R8-11 @
+        // (75,30)]; UP = drops (60,32)/(72,32).
+        for y in 31..=33usize {
+            let _ = place393!(ox + 57, oy + y, 4, TileType::WireDown);
+        }
+        let _ = place393!(ox + 58, oy + 33, 4, TileType::WireRight);
+        let _ = place393!(ox + 59, oy + 33, 4, TileType::WireRight);
+        for y in 31..=33usize {
+            let _ = place393!(ox + 63, oy + y, 4, TileType::WireDown);
+        }
+        let _ = place393!(ox + 62, oy + 33, 4, TileType::WireLeft);
+        let _ = place393!(ox + 61, oy + 33, 4, TileType::WireLeft);
+        let _ = place393!(ox + 60, oy + 33, 4, TileType::Mux);
+        for y in 31..=33usize {
+            let _ = place393!(ox + 69, oy + y, 4, TileType::WireDown);
+        }
+        let _ = place393!(ox + 70, oy + 33, 4, TileType::WireRight);
+        let _ = place393!(ox + 71, oy + 33, 4, TileType::WireRight);
+        for y in 31..=33usize {
+            let _ = place393!(ox + 75, oy + y, 4, TileType::WireDown);
+        }
+        let _ = place393!(ox + 74, oy + 33, 4, TileType::WireLeft);
+        let _ = place393!(ox + 73, oy + 33, 4, TileType::WireLeft);
+        let _ = place393!(ox + 72, oy + 33, 4, TileType::Mux);
+        // Level 3: M_final (66,37); UP = rd_hi drop (66,36) [R1]. LEFT <- M_high
+        // via a z5 glue (ViaDown over the mux, south, west, ViaUp at (65,37));
+        // RIGHT <- M_low via row 34 east + col 67 south.
+        let _ = place393!(ox + 72, oy + 33, 5, TileType::ViaDown);
+        for y in 34..=37usize {
+            let _ = place393!(ox + 72, oy + y, 5, TileType::WireDown);
+        }
+        for x in (ox + 65)..=(ox + 71) {
+            let _ = place393!(x, oy + 37, 5, TileType::WireLeft);
+        }
+        let _ = place393!(ox + 65, oy + 37, 4, TileType::ViaUp);
+        let _ = place393!(ox + 60, oy + 34, 4, TileType::WireDown);
+        for x in (ox + 61)..=(ox + 67) {
+            let _ = place393!(x, oy + 34, 4, TileType::WireRight);
+        }
+        for y in 35..=37usize {
+            let _ = place393!(ox + 67, oy + y, 4, TileType::WireDown);
+        }
+        let _ = place393!(ox + 66, oy + 37, 4, TileType::Mux);
+
+        // --- Phase R4: M_final → Mux2.LEFT splice ---
+        // South of the tree, west along row 38 (below everything), north up the
+        // clear col 3 (dodges the (1,33) and (2,4) all-layer vias), west two
+        // cells, and into the S392 LEFT-stub cell: z4(1,1) Const → WireUp
+        // (reads (1,2)). Mux2 at (2,1) now selects the read-port value when
+        // is_reg_indirect is high.
+        let _ = place393!(ox + 66, oy + 38, 4, TileType::WireDown);
+        for x in (ox + 3)..=(ox + 65) {
+            let _ = place393!(x, oy + 38, 4, TileType::WireLeft);
+        }
+        for y in (oy + 2)..=(oy + 37) {
+            let _ = place393!(ox + 3, y, 4, TileType::WireUp);
+        }
+        let _ = place393!(ox + 2, oy + 2, 4, TileType::WireLeft);
+        let _ = place393!(ox + 1, oy + 2, 4, TileType::WireLeft);
+        let _ = place393!(ox + 1, oy + 1, 4, TileType::WireUp);
+
+        commit_dirty_indices.extend_from_slice(&s393_dirty_indices);
+    }
+
+    // -------------------------------------------------------------------------
+    // Sprint 394: MTLR physical capture — rail-muxed rs port + annex LR cascade
+    // -------------------------------------------------------------------------
+    // Reuses the S393 ladder by muxing its four select rails:
+    //   sel_i = is_mtlr ? rs_i : rd_i
+    // so the ladder output becomes regs[is_mtlr ? rs_eff : rd_eff]. Consumers
+    // are opcode-disjoint (Mux2 only under is_reg_indirect; the LR cascade only
+    // under is_mtlr). The floorplan (817 cells) was machine-validated against
+    // the live fabric (SPRINT_394_REPORT.md).
+    //
+    // M1 (z8): is_mtlr = (opcode == 0x02) && (imm5 == 6), computed from lateral
+    // reads of the byte0/byte1 spine stacks: Shr/And field extracts, Xor+Zero
+    // equality, And combine; a Zero inversion provides not_mtlr for the rails
+    // whose rd-side arrives from the west (Mux law: up != 0 selects LEFT).
+    //
+    // Gated pc_addr_bits > 7 (matches S392/S393; default fabric untouched).
+    if pc_addr_bits > 7 {
+        let mut s394_dirty_indices: Vec<usize> = Vec::new();
+        macro_rules! place394 {
+            ($x:expr, $y:expr, $z:expr, $tt:expr) => {{
+                sim.set_tile_3d($x, $y, $z, $tt);
+                tile_count += 1;
+                let _idx = idx3d($x, $y, $z);
+                placed_mask[_idx / 64] |= 1u64 << (_idx % 64);
+                s394_dirty_indices.push(_idx);
+                _idx
+            }};
+        }
+        macro_rules! place394_val {
+            ($x:expr, $y:expr, $z:expr, $tt:expr, $v:expr) => {{
+                let _idx = place394!($x, $y, $z, $tt);
+                sim.set_logic_value_3d($x, $y, $z, $v);
+                _idx
+            }};
+        }
+
+        // --- M1: is_mtlr decode (z8) ---
+        // byte1 (ir_high) east chain off the (86,11) stack + riser to (90,8).
+        for x in (ox + 87)..=(ox + 90) {
+            let _ = place394!(x, oy + 11, 8, TileType::WireRight);
+        }
+        for y in [oy + 10, oy + 9, oy + 8] {
+            let _ = place394!(ox + 90, y, 8, TileType::WireUp);
+        }
+        // opcode = byte1 >> 3; eq_op = Zero(opcode ^ 2).
+        let _ = place394!(ox + 91, oy + 8, 8, TileType::Shr);
+        let _ = place394_val!(ox + 92, oy + 8, 8, TileType::Const, 3);
+        let _ = place394!(ox + 91, oy + 7, 8, TileType::WireUp);
+        let _ = place394!(ox + 90, oy + 7, 8, TileType::Xor);
+        let _ = place394_val!(ox + 89, oy + 7, 8, TileType::Const, 2);
+        let _ = place394!(ox + 90, oy + 6, 8, TileType::WireUp);
+        let _ = place394!(ox + 91, oy + 6, 8, TileType::Zero);
+        // byte0 (ir_low) west lateral + riser; imm5 = byte0 & 0x1F; eq_imm5 = Zero(imm5 ^ 6).
+        let _ = place394!(ox + 82, oy + 11, 8, TileType::WireLeft);
+        for y in [oy + 10, oy + 9, oy + 8] {
+            let _ = place394!(ox + 82, y, 8, TileType::WireUp);
+        }
+        let _ = place394!(ox + 81, oy + 8, 8, TileType::And);
+        let _ = place394_val!(ox + 80, oy + 8, 8, TileType::Const, 31);
+        let _ = place394!(ox + 81, oy + 7, 8, TileType::WireUp);
+        let _ = place394!(ox + 80, oy + 7, 8, TileType::Xor);
+        let _ = place394_val!(ox + 79, oy + 7, 8, TileType::Const, 6);
+        let _ = place394!(ox + 80, oy + 6, 8, TileType::WireUp);
+        let _ = place394!(ox + 81, oy + 6, 8, TileType::Zero);
+        // is_mtlr = And(eq_imm5, eq_op) at (86,5); not_mtlr = Zero(is_mtlr) at (87,4).
+        let _ = place394!(ox + 81, oy + 5, 8, TileType::WireUp);
+        for x in (ox + 82)..=(ox + 85) {
+            let _ = place394!(x, oy + 5, 8, TileType::WireRight);
+        }
+        let _ = place394!(ox + 91, oy + 5, 8, TileType::WireUp);
+        for x in (ox + 87)..=(ox + 90) {
+            let _ = place394!(x, oy + 5, 8, TileType::WireLeft);
+        }
+        let _ = place394!(ox + 86, oy + 5, 8, TileType::And);
+        let _ = place394!(ox + 86, oy + 4, 8, TileType::WireUp);
+        let _ = place394!(ox + 87, oy + 4, 8, TileType::Zero);
+        let _ = place394!(ox + 87, oy + 3, 8, TileType::WireUp);
+        // not_mtlr row 3 west run → rd0 layer-drop at (15,3) → z5 (15,4).
+        for x in (ox + 15)..=(ox + 86) {
+            let _ = place394!(x, oy + 3, 8, TileType::WireLeft);
+        }
+        for z in [7usize, 6, 5] {
+            let _ = place394!(ox + 15, oy + 3, z, TileType::ViaUp);
+        }
+        let _ = place394!(ox + 15, oy + 4, 5, TileType::WireDown);
+        // is_mtlr row 4 west run + taps: rd1 col 76, rd2 col 70, rd_hi col 67,
+        // cascade col 14 (its consumer lands in M3).
+        for x in (ox + 14)..=(ox + 85) {
+            let _ = place394!(x, oy + 4, 8, TileType::WireLeft);
+        }
+        for y in (oy + 5)..=(oy + 13) {
+            let _ = place394!(ox + 76, y, 8, TileType::WireDown);
+        }
+        let _ = place394!(ox + 76, oy + 13, 7, TileType::ViaUp);
+        let _ = place394!(ox + 76, oy + 13, 6, TileType::ViaUp);
+        for y in (oy + 14)..=(oy + 27) {
+            let _ = place394!(ox + 76, y, 6, TileType::WireDown);
+        }
+        for y in (oy + 5)..=(oy + 13) {
+            let _ = place394!(ox + 70, y, 8, TileType::WireDown);
+        }
+        let _ = place394!(ox + 70, oy + 13, 7, TileType::ViaUp);
+        for y in (oy + 14)..=(oy + 30) {
+            let _ = place394!(ox + 70, y, 7, TileType::WireDown);
+        }
+        for x in (ox + 71)..=(ox + 85) {
+            let _ = place394!(x, oy + 30, 7, TileType::WireRight);
+        }
+        for y in (oy + 5)..=(oy + 13) {
+            let _ = place394!(ox + 67, y, 8, TileType::WireDown);
+        }
+        let _ = place394!(ox + 67, oy + 13, 7, TileType::ViaUp);
+        let _ = place394!(ox + 67, oy + 13, 6, TileType::ViaUp);
+        for y in (oy + 14)..=(oy + 27) {
+            let _ = place394!(ox + 67, y, 6, TileType::WireDown);
+        }
+        // hop the rd1 rail (z6 row 29) on z7:
+        let _ = place394!(ox + 67, oy + 27, 7, TileType::ViaDown);
+        for y in (oy + 28)..=(oy + 30) {
+            let _ = place394!(ox + 67, y, 7, TileType::WireDown);
+        }
+        let _ = place394!(ox + 67, oy + 30, 6, TileType::ViaUp);
+        for y in (oy + 31)..=(oy + 34) {
+            let _ = place394!(ox + 67, y, 6, TileType::WireDown);
+        }
+        let _ = place394!(ox + 68, oy + 34, 6, TileType::WireRight);
+        for y in (oy + 5)..=(oy + 44) {
+            let _ = place394!(ox + 14, y, 8, TileType::WireDown);
+        }
+        for z in [7usize, 6, 5, 4] {
+            let _ = place394!(ox + 14, oy + 44, z, TileType::ViaUp);
+        }
+
+        // --- M2: rs extractions + the four rail muxes ---
+        // rs0 (z5): BitSelect off the byte0 stack + Const(5); riser col 84;
+        // row-5 west run; rail mux at (15,5) with not_mtlr (rd0 arrives west).
+        let _ = place394!(ox + 84, oy + 11, 5, TileType::BitSelect);
+        let _ = place394_val!(ox + 85, oy + 11, 5, TileType::Const, 5);
+        for y in [oy + 10, oy + 9, oy + 8, oy + 7, oy + 6, oy + 5] {
+            let _ = place394!(ox + 84, y, 5, TileType::WireUp);
+        }
+        for x in (ox + 16)..=(ox + 83) {
+            let _ = place394!(x, oy + 5, 5, TileType::WireLeft);
+        }
+        let _ = place394!(ox + 13, oy + 5, 5, TileType::WireUp);
+        let _ = place394!(ox + 14, oy + 5, 5, TileType::WireRight);
+        let _ = place394!(ox + 15, oy + 5, 5, TileType::Mux);
+        let _ = place394!(ox + 15, oy + 6, 5, TileType::WireDown); // re-head (was WireRight)
+        // rs1/rs2 (z8 east-side BitSelects off the byte0 stack via (84,11)):
+        let _ = place394!(ox + 84, oy + 11, 8, TileType::WireRight);
+        let _ = place394!(ox + 84, oy + 10, 8, TileType::WireUp);
+        let _ = place394!(ox + 84, oy + 9, 8, TileType::WireUp);
+        let _ = place394!(ox + 85, oy + 10, 8, TileType::BitSelect);
+        let _ = place394_val!(ox + 86, oy + 10, 8, TileType::Const, 6);
+        let _ = place394!(ox + 85, oy + 9, 8, TileType::BitSelect);
+        let _ = place394_val!(ox + 86, oy + 9, 8, TileType::Const, 7);
+        // rs1 → rd1 mux LEFT: z8 row 12 west → z7 row 12 → z6 col 73 → row 28.
+        let _ = place394!(ox + 85, oy + 11, 8, TileType::WireDown);
+        let _ = place394!(ox + 85, oy + 12, 8, TileType::WireDown);
+        for x in (ox + 79)..=(ox + 84) {
+            let _ = place394!(x, oy + 12, 8, TileType::WireLeft);
+        }
+        let _ = place394!(ox + 79, oy + 12, 7, TileType::ViaUp);
+        for x in (ox + 73)..=(ox + 78) {
+            let _ = place394!(x, oy + 12, 7, TileType::WireLeft);
+        }
+        let _ = place394!(ox + 73, oy + 12, 6, TileType::ViaUp);
+        for y in (oy + 13)..=(oy + 28) {
+            let _ = place394!(ox + 73, y, 6, TileType::WireDown);
+        }
+        let _ = place394!(ox + 74, oy + 28, 6, TileType::WireRight);
+        let _ = place394!(ox + 75, oy + 28, 6, TileType::WireRight);
+        // rd1 rail mux at z6 (76,28), east of all four drops:
+        let _ = place394!(ox + 76, oy + 28, 6, TileType::Mux);
+        let _ = place394!(ox + 77, oy + 28, 6, TileType::WireUp); // rd1 spur reads (77,29)
+        let _ = place394!(ox + 76, oy + 29, 6, TileType::WireDown); // re-head (was WireLeft)
+        // rs2 → rd2 mux LEFT: z7 row 8 east → col 91 → z8 hop over col 90 → z6 hop.
+        let _ = place394!(ox + 85, oy + 8, 8, TileType::WireUp);
+        let _ = place394!(ox + 85, oy + 8, 7, TileType::ViaUp);
+        for x in (ox + 86)..=(ox + 91) {
+            let _ = place394!(x, oy + 8, 7, TileType::WireRight);
+        }
+        for y in (oy + 9)..=(oy + 31) {
+            let _ = place394!(ox + 91, y, 7, TileType::WireDown);
+        }
+        let _ = place394!(ox + 91, oy + 31, 8, TileType::ViaDown);
+        let _ = place394!(ox + 90, oy + 31, 8, TileType::WireLeft);
+        let _ = place394!(ox + 89, oy + 31, 8, TileType::WireLeft);
+        let _ = place394!(ox + 89, oy + 31, 7, TileType::ViaUp);
+        let _ = place394!(ox + 88, oy + 31, 7, TileType::WireLeft);
+        let _ = place394!(ox + 87, oy + 31, 7, TileType::WireLeft);
+        let _ = place394!(ox + 87, oy + 31, 6, TileType::ViaUp);
+        for x in [ox + 86, ox + 85, ox + 84] {
+            let _ = place394!(x, oy + 31, 6, TileType::WireLeft);
+        }
+        let _ = place394!(ox + 84, oy + 31, 7, TileType::ViaDown);
+        // rd2 rail mux at z7 (85,31):
+        let _ = place394!(ox + 85, oy + 31, 7, TileType::Mux);
+        let _ = place394!(ox + 86, oy + 31, 7, TileType::WireUp); // rd2 spur reads (86,32)
+        let _ = place394!(ox + 85, oy + 32, 7, TileType::WireDown); // re-head (was WireLeft)
+        // rs_hi (byte2 bit 1): z5 extraction off the S393 byte2 copy cell, col 93
+        // south, z6 row 35 west with a z7 hop over col 80 and past the mux.
+        let _ = place394!(ox + 89, oy + 12, 5, TileType::ViaDown);
+        let _ = place394!(ox + 90, oy + 12, 5, TileType::BitSelect);
+        let _ = place394_val!(ox + 91, oy + 12, 5, TileType::Const, 1);
+        let _ = place394!(ox + 90, oy + 11, 5, TileType::WireUp);
+        let _ = place394!(ox + 91, oy + 11, 5, TileType::WireRight);
+        let _ = place394!(ox + 92, oy + 11, 5, TileType::WireRight);
+        let _ = place394!(ox + 93, oy + 11, 5, TileType::WireRight);
+        for y in (oy + 12)..=(oy + 35) {
+            let _ = place394!(ox + 93, y, 5, TileType::WireDown);
+        }
+        let _ = place394!(ox + 93, oy + 35, 6, TileType::ViaDown);
+        for x in (ox + 82)..=(ox + 92) {
+            let _ = place394!(x, oy + 35, 6, TileType::WireLeft);
+        }
+        let _ = place394!(ox + 82, oy + 35, 7, TileType::ViaDown);
+        for x in (ox + 66)..=(ox + 81) {
+            let _ = place394!(x, oy + 35, 7, TileType::WireLeft);
+        }
+        let _ = place394!(ox + 66, oy + 35, 6, TileType::ViaUp);
+        let _ = place394!(ox + 67, oy + 35, 6, TileType::WireRight);
+        // rd_hi rail mux at z6 (68,35), intercepting the row-36 run:
+        let _ = place394!(ox + 68, oy + 35, 6, TileType::Mux);
+        let _ = place394!(ox + 69, oy + 35, 6, TileType::WireUp); // rd_hi spur reads (69,36)
+        let _ = place394!(ox + 68, oy + 36, 6, TileType::WireDown); // re-head (was WireLeft)
+
+        // --- M3: the LR cascade (annex z4 rows 44..52) ---
+        // LR_next = is_mtlr ? (regs[rs] & pc_mask) : (is_call ? PC+1 : LR_hold).
+        // Inputs up-stack from the S125 LR corner on private z5 columns; the
+        // masked-rs spur taps the S393 tree output run (row 38) through a
+        // WeightedViaDown carrying the architectural PC mask; the output rides
+        // z5 col 7 back north and re-enters L0(7,8) — which turns from the S125
+        // M1 Mux into a ViaUp (wide fabric only; default keeps the original).
+        // is_call tap: L2(6,7) lateral off the S125 Phase 5 route.
+        let _ = place394!(ox + 6, oy + 7, 2, TileType::WireLeft);
+        let _ = place394!(ox + 6, oy + 7, 3, TileType::ViaDown);
+        let _ = place394!(ox + 6, oy + 7, 4, TileType::ViaDown);
+        let _ = place394!(ox + 6, oy + 7, 5, TileType::ViaDown);
+        let _ = place394!(ox + 5, oy + 7, 5, TileType::WireLeft);
+        let _ = place394!(ox + 4, oy + 7, 5, TileType::WireLeft);
+        for y in (oy + 8)..=(oy + 46) {
+            let _ = place394!(ox + 4, y, 5, TileType::WireDown);
+        }
+        let _ = place394!(ox + 4, oy + 46, 4, TileType::ViaUp);
+        // PC+1 tap: L3(5,9) lateral off the Phase 6 L3 route.
+        let _ = place394!(ox + 5, oy + 9, 3, TileType::WireDown);
+        let _ = place394!(ox + 5, oy + 9, 4, TileType::ViaDown);
+        let _ = place394!(ox + 5, oy + 9, 5, TileType::ViaDown);
+        for y in (oy + 10)..=(oy + 47) {
+            let _ = place394!(ox + 5, y, 5, TileType::WireDown);
+        }
+        let _ = place394!(ox + 5, oy + 47, 4, TileType::ViaUp);
+        // LR hold tap: extend the Phase 9 L1(8,8) via at L2, jog east (L3 row 8/9
+        // are occupied), stack at (9,8).
+        let _ = place394!(ox + 8, oy + 8, 2, TileType::ViaDown);
+        let _ = place394!(ox + 9, oy + 8, 2, TileType::WireRight);
+        let _ = place394!(ox + 9, oy + 8, 3, TileType::ViaDown);
+        let _ = place394!(ox + 9, oy + 8, 4, TileType::ViaDown);
+        let _ = place394!(ox + 9, oy + 8, 5, TileType::ViaDown);
+        for y in (oy + 9)..=(oy + 45) {
+            let _ = place394!(ox + 9, y, 5, TileType::WireDown);
+        }
+        let _ = place394!(ox + 9, oy + 45, 4, TileType::ViaUp);
+        // masked-rs spur: tap the tree output run at (28,38), west on row 39,
+        // mask via at the z4→z5 hop, south to the cascade.
+        let _ = place394!(ox + 28, oy + 39, 4, TileType::WireDown);
+        for x in (ox + 10)..=(ox + 27) {
+            let _ = place394!(x, oy + 39, 4, TileType::WireLeft);
+        }
+        let s394_mask_via = place394!(ox + 10, oy + 39, 5, TileType::WeightedViaDown);
+        sim.set_tile_mask(s394_mask_via, (1u64 << pc_addr_bits) - 1);
+        for y in (oy + 40)..=(oy + 50) {
+            let _ = place394!(ox + 10, y, 5, TileType::WireDown);
+        }
+        let _ = place394!(ox + 10, oy + 50, 4, TileType::ViaUp);
+        let _ = place394!(ox + 11, oy + 50, 4, TileType::WireRight);
+        // M1' (is_call ? PC+1 : LR_hold) at z4(6,47):
+        let _ = place394!(ox + 5, oy + 46, 4, TileType::WireRight);
+        let _ = place394!(ox + 6, oy + 46, 4, TileType::WireRight);
+        let _ = place394!(ox + 9, oy + 46, 4, TileType::WireDown);
+        let _ = place394!(ox + 9, oy + 47, 4, TileType::WireDown);
+        let _ = place394!(ox + 8, oy + 47, 4, TileType::WireLeft);
+        let _ = place394!(ox + 7, oy + 47, 4, TileType::WireLeft);
+        let _ = place394!(ox + 6, oy + 47, 4, TileType::Mux);
+        // M1' out → M2 RIGHT via rows 48..52:
+        for y in (oy + 48)..=(oy + 52) {
+            let _ = place394!(ox + 6, y, 4, TileType::WireDown);
+        }
+        for x in (ox + 7)..=(ox + 13) {
+            let _ = place394!(x, oy + 52, 4, TileType::WireRight);
+        }
+        let _ = place394!(ox + 13, oy + 51, 4, TileType::WireUp);
+        let _ = place394!(ox + 13, oy + 50, 4, TileType::WireUp);
+        // is_mtlr from the M1 descent at (14,44) → M2 UP:
+        for y in (oy + 45)..=(oy + 49) {
+            let _ = place394!(ox + 14, y, 4, TileType::WireDown);
+        }
+        let _ = place394!(ox + 13, oy + 49, 4, TileType::WireLeft);
+        let _ = place394!(ox + 12, oy + 49, 4, TileType::WireLeft);
+        // M2 (is_mtlr ? masked_rs : M1'out) at z4(12,50):
+        let _ = place394!(ox + 12, oy + 50, 4, TileType::Mux);
+        // Output: west on row 51, z5 col 7 north, L2 lateral re-entry, L0(7,8)
+        // Mux → ViaUp (the LR Register64 captures the cascade output).
+        let _ = place394!(ox + 12, oy + 51, 4, TileType::WireDown);
+        for x in (ox + 7)..=(ox + 11) {
+            let _ = place394!(x, oy + 51, 4, TileType::WireLeft);
+        }
+        let _ = place394!(ox + 7, oy + 51, 5, TileType::ViaDown);
+        for y in (oy + 9)..=(oy + 50) {
+            let _ = place394!(ox + 7, y, 5, TileType::WireUp);
+        }
+        let _ = place394!(ox + 6, oy + 9, 5, TileType::WireLeft);
+        let _ = place394!(ox + 6, oy + 8, 5, TileType::WireUp);
+        let _ = place394!(ox + 6, oy + 8, 4, TileType::ViaUp);
+        let _ = place394!(ox + 6, oy + 8, 3, TileType::ViaUp);
+        let _ = place394!(ox + 6, oy + 8, 2, TileType::ViaUp);
+        let _ = place394!(ox + 7, oy + 8, 2, TileType::WireRight);
+        let _ = place394!(ox + 7, oy + 8, 1, TileType::ViaUp);
+        let _ = place394!(ox + 7, oy + 8, 0, TileType::ViaUp); // was the S125 M1 Mux
+
+        commit_dirty_indices.extend_from_slice(&s394_dirty_indices);
+    }
+
     // Sprint 130: Add CarryDetect and selection Mux to flag commit dirty list.
     flag_commit_dirty_indices.push(s130_carry_add_idx);
     flag_commit_dirty_indices.push(s130_carry_sub_idx);
@@ -6030,6 +6841,34 @@ pub(crate) fn wire_v2_cpu(
         routes.dedup();
     }
 
+    // Sprint 396: MUL island placement (the Sprint 395 standalone datapath,
+    // integrated). Gated on the builder flag — default fabric untouched, goldens
+    // byte-identical by construction. Site: annex z9/z10 (virgin layers per the
+    // S392 C0 census; the placer additionally asserts every cell is default Wire).
+    // Seeding every island tile into commit_dirty_indices makes the commit closure
+    // include the island regardless of directional-BFS reachability (the S392
+    // membership lesson), which cascades into clock scope -> in_scope_clock_cache
+    // (island Register64s capture on the V2 clock edge) -> eval orders.
+    let mut mul_island_indices: Vec<usize> = Vec::new();
+    let (mut mul_island_p_idx, mut mul_island_a_idx, mut mul_island_b_idx, mut mul_island_act_idx) =
+        (0usize, 0usize, 0usize, 0usize);
+    if mul_island {
+        assert!(
+            sim.num_layers() >= 11,
+            "MUL island needs layers z9/z10 — build the sim with >= 11 layers (standard V2 grid is 16)"
+        );
+        let isl = crate::tile_cpu::v2_mul_island::place_mul_island(sim, ox + 30, oy + 20, 9);
+        for &idx in &isl.all_indices {
+            placed_mask[idx / 64] |= 1u64 << (idx % 64);
+            commit_dirty_indices.push(idx);
+        }
+        mul_island_p_idx = isl.p_idx;
+        mul_island_a_idx = isl.a_idx;
+        mul_island_b_idx = isl.b_idx;
+        mul_island_act_idx = isl.act_idx;
+        mul_island_indices = isl.all_indices;
+    }
+
     // Rebuild cross-layer via forwarding after all ViaUp/ViaDown placement.
     sim.rebuild_via_connections();
 
@@ -6141,6 +6980,12 @@ pub(crate) fn wire_v2_cpu(
         clock_eval_order: Vec::new(),
         // Sprint 168: computed by builder after scope masks are built
         in_scope_clock_cache: Vec::new(),
+        // Sprint 396: MUL island
+        mul_island_indices,
+        mul_island_p_idx,
+        mul_island_a_idx,
+        mul_island_b_idx,
+        mul_island_act_idx,
         // Sprint 147: placed tile bitset for restricted BFS
         placed_mask,
     }

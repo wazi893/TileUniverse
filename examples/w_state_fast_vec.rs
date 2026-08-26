@@ -53,7 +53,7 @@ fn main() {
         use std::io::Write;
         std::io::stdout().flush().unwrap();
 
-        let num_blocks = (n + 127) / 128;
+        let num_blocks = n.div_ceil(128);
         let memory_mb = (num_blocks * 2048) / (1024 * 1024);
 
         // Allocate

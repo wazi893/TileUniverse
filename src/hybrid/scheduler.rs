@@ -959,7 +959,7 @@ fn execute_job_standalone(job_id: JobId, spec: JobSpec) -> JobResult {
 
     let start = Instant::now();
 
-    let result = match &spec {
+    match &spec {
         JobSpec::Quantum(quantum_spec) => {
             // Create a fresh quantum substrate for this job
             let mut substrate = QuantumSubstrate::new(0, "async-quantum", 30);
@@ -1039,9 +1039,7 @@ fn execute_job_standalone(job_id: JobId, spec: JobSpec) -> JobResult {
             ));
             result
         }
-    };
-
-    result
+    }
 }
 
 #[cfg(test)]

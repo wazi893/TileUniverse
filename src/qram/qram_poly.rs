@@ -432,10 +432,10 @@ impl QRAMPoly {
         let mut measured_address = 0usize;
         for q in 0..depth {
             let outcome = apply_gate_scalar(&mut state, &QGate::Measure(q as u8), &mut rng);
-            if let GateOutcome::Measured { qubit: _, bit } = outcome {
-                if bit != 0 {
-                    measured_address |= 1 << q;
-                }
+            if let GateOutcome::Measured { qubit: _, bit } = outcome
+                && bit != 0
+            {
+                measured_address |= 1 << q;
             }
         }
 

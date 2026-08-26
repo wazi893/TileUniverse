@@ -18,9 +18,10 @@ use crate::qram::{DependencyGraph, FactoryScheduler, Schedule};
 // =============================================================================
 
 /// Schedule optimization strategies
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub enum OptimizationStrategy {
     /// Greedy: fast, reasonable quality
+    #[default]
     Greedy,
 
     /// List scheduling: priority-based assignment
@@ -51,12 +52,6 @@ pub enum PriorityRule {
 
     /// Critical path priority
     CriticalPath,
-}
-
-impl Default for OptimizationStrategy {
-    fn default() -> Self {
-        OptimizationStrategy::Greedy
-    }
 }
 
 // =============================================================================

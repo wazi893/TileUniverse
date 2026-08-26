@@ -174,7 +174,7 @@ pub fn run_organism_frames(
         )
         .map_err(|_| FrameError::InvalidManifest)?;
         let mut buf = Vec::new();
-        render::write_ppm(&img, &mut buf).map_err(|e| FrameError::Io(e))?;
+        render::write_ppm(&img, &mut buf).map_err(FrameError::Io)?;
         let checksum = fnv1a32(&buf);
         metas.push(FrameMeta {
             index: i,

@@ -209,20 +209,15 @@ impl fmt::Display for StabilizerNeuron {
 }
 
 /// Types of entangling gates for synaptic connections.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum EntanglingGate {
     /// Controlled-Z gate (symmetric)
+    #[default]
     CZ,
     /// CNOT gate (source=control, target=target)
     CNOT,
     /// SWAP gate (exchanges qubit states)
     SWAP,
-}
-
-impl Default for EntanglingGate {
-    fn default() -> Self {
-        Self::CZ // CZ is symmetric, good default
-    }
 }
 
 impl fmt::Display for EntanglingGate {

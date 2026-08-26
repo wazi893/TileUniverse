@@ -36,7 +36,7 @@ use crate::tile_meta::TileType;
 ///
 /// All coupling is deterministic - no RNG, pure threshold-based rules.
 /// Disabled by default for backward compatibility.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PhysicsCouplingConfig {
     /// Enable/disable all coupling (master switch)
     pub enabled: bool,
@@ -49,17 +49,6 @@ pub struct PhysicsCouplingConfig {
 
     /// Power → Enable coupling configuration
     pub power_coupling: PowerEnableCoupling,
-}
-
-impl Default for PhysicsCouplingConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false, // Off by default for backward compatibility
-            heat_coupling: HeatErrorCoupling::default(),
-            charge_coupling: ChargeBiasCoupling::default(),
-            power_coupling: PowerEnableCoupling::default(),
-        }
-    }
 }
 
 impl PhysicsCouplingConfig {
@@ -434,13 +423,12 @@ pub fn apply_physics_coupling(
     }
 
     // Phase 2: Heat degradation
-    let output = if config.heat_coupling.enabled && heat >= config.heat_coupling.error_threshold {
+
+    if config.heat_coupling.enabled && heat >= config.heat_coupling.error_threshold {
         apply_heat_degradation(raw_output, current, heat, &config.heat_coupling)
     } else {
         raw_output
-    };
-
-    output
+    }
 }
 
 /// Apply heat-induced degradation to output.
@@ -547,20 +535,12 @@ pub fn apply_charge_bias_to_comparison(
         }
         TileType::Eq => {
             // With bias, equality becomes "within tolerance"
-            let diff = if left >= right {
-                left - right
-            } else {
-                right - left
-            };
+            let diff = left.abs_diff(right);
             if diff <= bias as u64 { u64::MAX } else { 0 }
         }
         TileType::Neq => {
             // With bias, not-equal means "outside tolerance"
-            let diff = if left >= right {
-                left - right
-            } else {
-                right - left
-            };
+            let diff = left.abs_diff(right);
             if diff > bias as u64 { u64::MAX } else { 0 }
         }
         _ => {

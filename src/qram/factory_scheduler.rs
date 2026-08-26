@@ -71,7 +71,7 @@ impl DependencyGraph {
         let mut last_t_on_qubit: HashMap<usize, usize> = HashMap::new();
         let mut t_gate_id = 0;
 
-        for (_gate_idx, gate) in circuit.iter().enumerate() {
+        for gate in circuit.iter() {
             if let Some((qubit, gate_type)) = Self::extract_t_gate(gate) {
                 // Check if this T-gate has dependencies
                 let mut has_dependency = false;
@@ -82,10 +82,10 @@ impl DependencyGraph {
                 }
 
                 // For Toffoli, check both control qubits
-                if let TGateType::Toffoli { c1, c2 } = gate_type {
-                    if last_t_on_qubit.contains_key(&c1) || last_t_on_qubit.contains_key(&c2) {
-                        has_dependency = true;
-                    }
+                if let TGateType::Toffoli { c1, c2 } = gate_type
+                    && (last_t_on_qubit.contains_key(&c1) || last_t_on_qubit.contains_key(&c2))
+                {
+                    has_dependency = true;
                 }
 
                 // If has dependency, start new layer
@@ -422,7 +422,7 @@ impl FactoryScheduler {
         let mut factory_active_cycles = vec![0usize; n_factories];
 
         // Process layers in order (respects dependencies)
-        for (_layer_idx, layer) in dep_graph.layers.iter().enumerate() {
+        for layer in dep_graph.layers.iter() {
             // Find earliest cycle when a factory will be ready
             let min_ready_cycle = self
                 .factories
@@ -462,7 +462,7 @@ impl FactoryScheduler {
                 schedule
                     .timeline
                     .entry(production_end)
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push((factory_id, t_gate.id));
 
                 // Update factory state

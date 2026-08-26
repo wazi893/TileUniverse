@@ -300,7 +300,10 @@ mod tests {
 
         assert_eq!(outputs.len(), 5);
         for &o in &outputs {
-            assert!(o >= -1.0 && o <= 1.0, "tanh output should be in [-1, 1]");
+            assert!(
+                (-1.0..=1.0).contains(&o),
+                "tanh output should be in [-1, 1]"
+            );
         }
     }
 
@@ -313,7 +316,10 @@ mod tests {
 
         assert_eq!(outputs.len(), 8);
         for &o in &outputs {
-            assert!(o >= -1.0 && o <= 1.0, "tanh output should be in [-1, 1]");
+            assert!(
+                (-1.0..=1.0).contains(&o),
+                "tanh output should be in [-1, 1]"
+            );
         }
     }
 

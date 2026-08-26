@@ -48,6 +48,13 @@ pub struct AnnealConfig {
     /// `timing_weight` over-packs a congested block. Default false (no extra
     /// routing, legacy behavior).
     pub route_validated_best: bool,
+    /// AF7: weight on the congestion proxy ([`PlacementEnv::congestion_cost`],
+    /// Σ occupied-8-neighbor² over gates) in the SA objective. 0.0 (default)
+    /// reproduces the legacy trajectory exactly. Positive values make the search
+    /// resist over-packing — the *preventive* counterpart to the
+    /// `route_validated_best` band-aid for the aggressive-timing-weight failure
+    /// mode. Still routing-free in the inner loop.
+    pub congestion_weight: f64,
 }
 
 impl Default for AnnealConfig {
@@ -61,6 +68,7 @@ impl Default for AnnealConfig {
             start_from_current: false,
             timing_weight: 0.0,
             route_validated_best: false,
+            congestion_weight: 0.0,
         }
     }
 }
@@ -179,9 +187,9 @@ pub fn anneal(env: &mut PlacementEnv, config: &AnnealConfig) -> AnnealResult {
     }
 
     let mut rng = SplitMix64::new(config.seed);
-    // SA minimizes this objective (HPWL plus the optional timing term). With
-    // timing_weight 0 it is exactly HPWL, reproducing the legacy trajectory.
-    let mut current = objective(env, config.timing_weight);
+    // SA minimizes this objective (HPWL plus the optional timing and congestion
+    // terms). With both weights 0 it is exactly HPWL — the legacy trajectory.
+    let mut current = objective(env, config.timing_weight, config.congestion_weight);
     // Track the lowest-objective layout. When route-validating, the baseline is
     // only an eligible best if it routes; otherwise start from +inf so the first
     // routable improvement seeds the best.
@@ -203,7 +211,7 @@ pub fn anneal(env: &mut PlacementEnv, config: &AnnealConfig) -> AnnealResult {
         let mv = propose(env, &mut rng, config.relocate_prob);
         apply(env, &mv);
 
-        let cand = objective(env, config.timing_weight);
+        let cand = objective(env, config.timing_weight, config.congestion_weight);
         let delta = cand - current;
         let accept = delta <= 0.0 || rng.unit() < (-delta / t).exp();
 
@@ -253,10 +261,19 @@ pub fn anneal(env: &mut PlacementEnv, config: &AnnealConfig) -> AnnealResult {
     }
 }
 
-/// SA search objective: HPWL plus the optional criticality-weighted timing term.
-/// With `timing_weight == 0.0` this is exactly the HPWL proxy.
-fn objective(env: &PlacementEnv, timing_weight: f64) -> f64 {
-    env.hpwl() as f64 + timing_weight * env.timing_cost()
+/// SA search objective: HPWL plus the optional criticality-weighted timing and
+/// congestion terms. With both weights `0.0` this is exactly the HPWL proxy
+/// (the extra terms are skipped, not just zero-weighted, so the legacy path
+/// pays no extra cost).
+fn objective(env: &PlacementEnv, timing_weight: f64, congestion_weight: f64) -> f64 {
+    let mut obj = env.hpwl() as f64;
+    if timing_weight != 0.0 {
+        obj += timing_weight * env.timing_cost();
+    }
+    if congestion_weight != 0.0 {
+        obj += congestion_weight * env.congestion_cost();
+    }
+    obj
 }
 
 fn propose(env: &PlacementEnv, rng: &mut SplitMix64, relocate_prob: f64) -> Move {
@@ -430,6 +447,85 @@ mod tests {
         assert!(
             r.best.metrics.routable,
             "route-validated best must always route"
+        );
+    }
+
+    #[test]
+    fn congestion_weight_zero_is_byte_identical_to_legacy() {
+        // The default (congestion_weight 0) must reproduce the existing
+        // trajectory exactly — the term is skipped, not zero-weighted.
+        let c = Circuit::from_aig("eq8", build_eq_comparator(8));
+        let mut e1 = PlacementEnv::new(&c).expect("env builds");
+        let mut e2 = PlacementEnv::new(&c).expect("env builds");
+        let legacy = anneal(&mut e1, &cfg(4000));
+        let explicit_zero = anneal(
+            &mut e2,
+            &AnnealConfig {
+                congestion_weight: 0.0,
+                ..cfg(4000)
+            },
+        );
+        assert_eq!(legacy.best_assignment, explicit_zero.best_assignment);
+        assert_eq!(legacy.best_hpwl, explicit_zero.best_hpwl);
+        assert_eq!(legacy.accepted, explicit_zero.accepted);
+    }
+
+    #[test]
+    fn congestion_weight_restores_routability_on_overpacked_mul4() {
+        // AF7: at timing_weight 6 the mul4 layout over-packs and fails to route
+        // (the timing-track step-5 failure mode). A moderate congestion weight
+        // PREVENTS the over-packing in the objective itself — routing-free in
+        // the inner loop, unlike the route_validated_best band-aid — and the
+        // timing win is kept (measured at this seed: c=0 timing 1105 unroutable
+        // vs c=0.5 timing 1065 routable; baseline row-major ~1290).
+        //
+        // Multi-seed context (measured with EVAL_SEEDS, recorded in the AF6
+        // loop log): pure-HPWL SA on mul4 routes for only 2/5 seeds and t=6/c=0
+        // for 3/5 — SA-compacted mul4 routability is fragile regardless of
+        // objective; c=0.5 was the only swept config routable on ALL 5 seeds
+        // (suggestive at n=5, stated as such, not asserted).
+        use crate::synth::benchmark::build_4bit_multiplier;
+        let c = Circuit::from_aig("mul4", build_4bit_multiplier());
+        let seed = 0xA11C_E5ED;
+
+        let mut env0 = PlacementEnv::new(&c).expect("env builds");
+        let over = anneal(
+            &mut env0,
+            &AnnealConfig {
+                seed,
+                timing_weight: 6.0,
+                ..AnnealConfig::default()
+            },
+        );
+        assert!(
+            !over.best.metrics.routable,
+            "the failure mode must exist at this seed for the test to be meaningful"
+        );
+
+        let mut env = PlacementEnv::new(&c).expect("env builds");
+        let fixed = anneal(
+            &mut env,
+            &AnnealConfig {
+                seed,
+                timing_weight: 6.0,
+                congestion_weight: 0.5,
+                ..AnnealConfig::default()
+            },
+        );
+        assert!(
+            fixed.best.metrics.routable,
+            "congestion weight 0.5 should restore routability"
+        );
+        assert!(
+            fixed.best_timing <= over.best_timing,
+            "the congestion term should not cost the timing win here: \
+             c=0.5 {:.0} vs c=0 {:.0}",
+            fixed.best_timing,
+            over.best_timing
+        );
+        assert!(
+            fixed.timing_improvement() > 0.0,
+            "still a timing win over the row-major baseline"
         );
     }
 

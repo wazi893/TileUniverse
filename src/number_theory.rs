@@ -75,13 +75,7 @@ pub fn classical_order(a: u64, n: u64) -> Option<u64> {
         return None; // a and n must be coprime
     }
 
-    for r in 1..n {
-        if mod_exp(a, r, n) == 1 {
-            return Some(r);
-        }
-    }
-
-    None
+    (1..n).find(|&r| mod_exp(a, r, n) == 1)
 }
 
 /// Extract factors from period using Shor's classical post-processing

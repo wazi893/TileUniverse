@@ -297,11 +297,12 @@ impl SNNNetwork {
                     let dst_channel = dst_channel.min(n_outputs - 1);
 
                     // Only inhibit across channels, not within same channel
-                    if src != dst && src_channel != dst_channel {
-                        if self.random_float() < inhibition_prob {
-                            let weight = -(60.0 + self.random_float() * 30.0) as i8;
-                            self.add_synapse(src, dst, weight, 1);
-                        }
+                    if src != dst
+                        && src_channel != dst_channel
+                        && self.random_float() < inhibition_prob
+                    {
+                        let weight = -(60.0 + self.random_float() * 30.0) as i8;
+                        self.add_synapse(src, dst, weight, 1);
                     }
                 }
             }
@@ -486,9 +487,9 @@ impl SNNNetwork {
 
         if src_cpu == tgt_cpu {
             // Local synapse
-            let local_src =
-                self.topology
-                    .local_index(source, self.config.neurons_per_cpu) as usize;
+            let local_src = self
+                .topology
+                .local_index(source, self.config.neurons_per_cpu);
             let local_tgt = self
                 .topology
                 .local_index(target, self.config.neurons_per_cpu);
@@ -603,7 +604,7 @@ impl SNNNetwork {
             if rand < rate {
                 // Inject spike directly
                 let cpu = self.topology.neuron_to_cpu.get(i).copied().unwrap_or(0);
-                let local = self.topology.local_index(i, neurons_per_cpu) as usize;
+                let local = self.topology.local_index(i, neurons_per_cpu);
                 if cpu < self.populations.len() && local < self.populations[cpu].neurons.len() {
                     // Directly mark neuron as having fired
                     // (bypass the step function for input neurons)
@@ -1375,13 +1376,13 @@ impl SNNNetwork {
                 let cpu = self.topology.neuron_to_cpu[neuron];
                 let local = self
                     .topology
-                    .local_index(neuron, self.config.neurons_per_cpu)
-                    as usize;
+                    .local_index(neuron, self.config.neurons_per_cpu);
 
-                if cpu < self.populations.len() && local < self.populations[cpu].neurons.len() {
-                    if self.populations[cpu].neurons[local].fired() {
-                        *count += 1;
-                    }
+                if cpu < self.populations.len()
+                    && local < self.populations[cpu].neurons.len()
+                    && self.populations[cpu].neurons[local].fired()
+                {
+                    *count += 1;
                 }
             }
         }

@@ -29,12 +29,13 @@ use super::ft_types::LogicalGate;
 /// Toffoli gate decomposition strategies.
 ///
 /// Named like software versions for clarity and future extensibility.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum ToffoliExpansion {
     /// Standard Nielsen-Chuang decomposition: 7 T gates, 6 CNOTs, T-depth 4
     ///
     /// This is the canonical exact Toffoli decomposition without ancillas.
     /// Gate sequence: H-CNOT-Tdg-CNOT-T-CNOT-Tdg-CNOT-T-T-CNOT-H-T-Tdg-CNOT
+    #[default]
     SevenTv1,
 
     /// Keep as single Toffoli gate (no expansion)
@@ -77,12 +78,6 @@ impl ToffoliExpansion {
             Self::SevenTv1 => expand_toffoli_seven_t(c1, c2, target),
             Self::NoExpand => vec![LogicalGate::Toffoli(c1, c2, target)],
         }
-    }
-}
-
-impl Default for ToffoliExpansion {
-    fn default() -> Self {
-        Self::SevenTv1
     }
 }
 
@@ -131,10 +126,11 @@ fn expand_toffoli_seven_t(c1: usize, c2: usize, t: usize) -> Vec<LogicalGate> {
 // ============================================================================
 
 /// CCZ gate decomposition strategies.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum CCZExpansion {
     /// Convert to Toffoli with H gates: CCZ = H(c) · Toffoli · H(c)
     /// Uses SevenTv1 Toffoli internally.
+    #[default]
     ViaToffoliv1,
 
     /// Keep as single CCZ gate (no expansion)
@@ -156,12 +152,6 @@ impl CCZExpansion {
             Self::ViaToffoliv1 => expand_ccz_via_toffoli(a, b, c),
             Self::NoExpand => vec![LogicalGate::CCZ(a, b, c)],
         }
-    }
-}
-
-impl Default for CCZExpansion {
-    fn default() -> Self {
-        Self::ViaToffoliv1
     }
 }
 
@@ -509,16 +499,16 @@ mod tests {
         // The defining property of Toffoli: target XOR (c1 AND c2)
         for seed in 0..30 {
             // When at least one control is 0, target unchanged
-            assert_eq!(run_primitive_toffoli(false, false, false, seed).2, false);
-            assert_eq!(run_primitive_toffoli(false, false, true, seed).2, true);
-            assert_eq!(run_primitive_toffoli(false, true, false, seed).2, false);
-            assert_eq!(run_primitive_toffoli(false, true, true, seed).2, true);
-            assert_eq!(run_primitive_toffoli(true, false, false, seed).2, false);
-            assert_eq!(run_primitive_toffoli(true, false, true, seed).2, true);
+            assert!(!run_primitive_toffoli(false, false, false, seed).2);
+            assert!(run_primitive_toffoli(false, false, true, seed).2);
+            assert!(!run_primitive_toffoli(false, true, false, seed).2);
+            assert!(run_primitive_toffoli(false, true, true, seed).2);
+            assert!(!run_primitive_toffoli(true, false, false, seed).2);
+            assert!(run_primitive_toffoli(true, false, true, seed).2);
 
             // When BOTH controls are 1, target flips
-            assert_eq!(run_primitive_toffoli(true, true, false, seed).2, true);
-            assert_eq!(run_primitive_toffoli(true, true, true, seed).2, false);
+            assert!(run_primitive_toffoli(true, true, false, seed).2);
+            assert!(!run_primitive_toffoli(true, true, true, seed).2);
         }
     }
 

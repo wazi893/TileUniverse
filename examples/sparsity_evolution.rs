@@ -51,7 +51,7 @@ fn main() {
         grid.create_w_state();
         let sparsity = grid.count_nonzero_amplitudes();
         // Each block is ~2KB, estimate blocks from sparsity (128 amps/block)
-        let blocks = (sparsity + 127) / 128;
+        let blocks = sparsity.div_ceil(128);
         let mem_kb = blocks * 2; // 2KB per block
         println!(
             "{:>10} | {:>12} | {:>12} | {:>7} KB",

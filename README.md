@@ -25,18 +25,17 @@
 
 ---
 
-<!-- TODO(visibility): add a ~10s demo GIF here — the tile CPU compiling & running a program, or an AlphaFabric before/after placement. This single asset is the biggest 30-second-landing upgrade. Drop it in python/assets/ and uncomment the line below. -->
-<!-- <p align="center"><img src="python/assets/demo.gif" alt="TileUniverse demo" width="720"></p> -->
+<p align="center"><img src="python/assets/demo_tilecpu.gif" alt="TileUniverse — C source compiled and running on a CPU built from logic gates" width="720"></p>
 
 ## What is this?
 
-TileUniverse is a from-scratch, GPU-accelerated simulation engine in Rust. Three things make it worth a look:
+TileUniverse is a from-scratch, GPU-accelerated, **multi-backend** simulation engine in Rust, engineered so every execution backend agrees bit-for-bit. Three things make it worth a look:
 
+- ⚡ **Many accelerator backends, one verified result** — CPU scalar/AVX, Cranelift JIT, CUDA FP32, and Tensor-Core paths, all held to **1e-6 cross-backend parity** against a scalar reference. A register-resident packed kernel reaches **114.5 trillion tile-evals/sec on an RTX 5090 — 573× over the repo's u64-per-tile baseline**.
 - 🖥️ **A CPU built out of simulated logic gates** — plus a C-like compiler that targets it. Programs run **bit-identical** on a software reference and the physical tile fabric, across **3,000+ differential tests**. (A Brainfuck interpreter runs on it.)
 - 🤖 **A learned circuit-placement AI** (AlphaChip-style) that **generalizes to unseen circuits one-shot**, with every layout proven correct by a hardware oracle.
-- ⚡ **Petascale GPU throughput** — **115 trillion** packed tile-evaluations/sec and **15.8 TCOPS** quantum on an RTX 5090, with cross-backend parity to **1e-6**.
 
-The through-line: **if it computes, it computes in real tiles — and it's verified.**
+The through-line: **if it computes, it computes in real tiles — and it's verified.** Correctness is a hard gate (golden-hash regression + reference-vs-fabric differential), not an afterthought.
 
 ---
 
@@ -44,13 +43,13 @@ The through-line: **if it computes, it computes in real tiles — and it's verif
 
 | Metric | Value |
 |---------|---|
-| Quantum Simulation Throughput | **15.8 TCOPS** on RTX 5090 |
-| Cellular Logic | **115T tiles/sec** packed 1-bit evaluation |
-| Sparse Quantum States | **Unlimited qubits** — GHZ states with O(1) memory (2 amplitudes regardless of scale) |
-| TileCpuV2 Physical Authority | **~99.8%** of execution is physical tiles (only MUL 0.2% remains as software) |
+| Quantum Simulation Throughput | **15.56 TCOPS** on RTX 5090 (PureMMA, live 2026-08-25) |
+| Cellular Logic | **114.5T tiles/sec** packed 1-bit eval (573× over repo u64-per-tile baseline) |
+| Cross-Backend Parity | **ε ≈ 1e-6** across scalar / AVX / JIT / CUDA / Tensor-Core |
+| Sparse Quantum States | O(1) memory for *structured* states — GHZ stored as 2 amplitudes regardless of qubit count |
+| TileCpuV2 Physical Authority | Island-mode MUL computes in tiles (`with_mul_island()`); default mode keeps software MUL for goldens |
 | Tests Passed | **3,175** with zero library warnings |
-| GPU Benchmarks | **15.8 TCOPS** (CUDA) + **2.5 TCOPS** (Ada Lovelace) |
-| Packed Eval | 375× speedup over naive u64-per-tile via 64-tile-wide bit-packing |
+| Packed Eval | 573× speedup over repo u64-per-tile baseline via 64-tile-wide bit-packing |
 | Sparse Eval | O(n) memory for W-states — **billions** of stable qubits on consumer GPU |
 | TileCpuV2 ISA | 32 opcodes, 16 registers, 128 ROM entries, 128 RAM cells |
 | Synth Pipeline | AIG → NPN4 → placement → routing, fully automated |
@@ -59,15 +58,15 @@ The through-line: **if it computes, it computes in real tiles — and it's verif
 
 ## Performance
 
-Verified benchmarks (January 2026):
+Verified benchmarks (packed + PureMMA live-confirmed 2026-08-25 on RTX 5090; 2026-07-03 under-ran at 97.07T / 13.13 TCOPS — see `benchmarks/results/FELLOWSHIP_BENCH_CONFIRMATION_2026-07-03.md`):
 
 ### RTX 5090 (32GB, Blackwell)
 
 | Substrate | Metric | Value |
 |-----------|--------|-------|
-| Quantum | Peak Throughput | **15.8 TCOPS** (PureMMA, 24 qubits) |
-| Quantum | 32-qubit Simulation | **15.4 TCOPS** (full 32GB VRAM) |
-| Cellular | Logic Evaluations | **200B evals/sec** (10+ worlds) |
+| Quantum | Peak Throughput | **15.56 TCOPS** (PureMMA, 24 qubits) |
+| Quantum | 32-qubit Simulation | **14.94 TCOPS** (full 32GB VRAM) |
+| Cellular | Packed 1-bit Eval | **114.5T tiles/sec** (register-v3, 32K x 32K) |
 
 ### RTX 4070 (12GB, Ada Lovelace)
 
@@ -101,8 +100,18 @@ The flagship: a working processor whose datapath *is* simulated logic.
 An AlphaChip-style learned placement system lays out logic circuits on the fabric:
 
 - A policy trained on small circuits **generalizes one-shot to unseen circuit widths** at ~60% of the naive baseline's wirelength — zero per-instance search.
-- Beats a strong **simulated-annealing baseline** by 21–44% on wirelength.
-- **Correctness oracle**: a layout is legal only if the placed-and-routed circuit still computes the same function (golden-hash + reference-vs-tile differential), making the learned reward un-hackable.
+- The deterministic **simulated-annealing baseline** reduces routed wirelength by 21–45% versus row-major placement.
+- **Correctness oracle**: a layout is accepted only after placed-and-routed execution matches the AIG reference on real simulated tiles — exhaustively through 12 inputs and with a deterministic 1,024-vector check above that.
+
+### Scheduling Safety Frontier
+
+The `sched_eval` example turns the same verification discipline into a workload scheduler:
+real compiled tile-CPU jobs are placed onto racks, adversary/victim overlap is scored by the
+`control_eval` covert-channel oracle, and a deterministic optimizer traces the throughput-vs-safety
+frontier. The presentation snapshot is in
+[`benchmarks/results/SCHED_OPTIMIZER_FRONTIER.md`](benchmarks/results/SCHED_OPTIMIZER_FRONTIER.md):
+`balanced_backfill` reaches zero leakage at +0% makespan, while `victim_contention` measures a real
++1524-cycle safety price (+33.58%) when trusted backfill is unavailable.
 
 ### Multi-Backend Execution
 
@@ -294,7 +303,7 @@ If TileUniverse contributes to your research, please cite:
   author    = {Aziz, Waheed},
   year      = {2024},
   url       = {https://github.com/wazi893/TileUniverse},
-  note      = {15.8 TCOPS quantum and 115T packed tile-evals/sec on consumer GPU hardware}
+  note      = {15.56 TCOPS quantum and 114.5T packed tile-evals/sec on consumer GPU hardware}
 }
 ```
 

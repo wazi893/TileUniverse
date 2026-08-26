@@ -105,22 +105,13 @@ impl Default for OptConfig {
 }
 
 /// Synthesis configuration.
+#[derive(Default)]
 pub struct SynthConfig {
     pub map_config: MapConfig,
     /// Whether to run AIG optimization before mapping (default: false).
     pub optimize: bool,
     /// Optimization settings (only used when `optimize` is true).
     pub opt_config: OptConfig,
-}
-
-impl Default for SynthConfig {
-    fn default() -> Self {
-        SynthConfig {
-            map_config: MapConfig::default(),
-            optimize: false,
-            opt_config: OptConfig::default(),
-        }
-    }
 }
 
 /// Synthesis result.

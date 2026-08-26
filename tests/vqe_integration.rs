@@ -476,7 +476,7 @@ fn test_vqe_result_structure() {
 
     let result = run_vqe(h, config);
 
-    assert!(result.params.len() > 0, "Should have parameters");
+    assert!(!result.params.is_empty(), "Should have parameters");
     assert!(result.n_iterations > 0, "Should have iterations");
     assert!(result.n_evaluations > 0, "Should have evaluations");
     // Energy history may be empty depending on optimizer

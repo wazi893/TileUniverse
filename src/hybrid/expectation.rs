@@ -170,10 +170,8 @@ impl ExpectationEvaluator {
                     group.terms.push(term.clone());
                     // Merge basis
                     for (i, &b) in term_basis.iter().enumerate() {
-                        if i < group.basis.len() {
-                            if group.basis[i] == MeasurementBasisType::I {
-                                group.basis[i] = b;
-                            }
+                        if i < group.basis.len() && group.basis[i] == MeasurementBasisType::I {
+                            group.basis[i] = b;
                         }
                     }
                     // Extend if needed

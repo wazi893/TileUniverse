@@ -2706,3 +2706,260 @@ mod symbolic {
         SymbolicDickeState::infinite(k)
     }
 }
+
+// ===================================================================
+// Unit-test gate. The crate already carries doctests as usage examples;
+// this module is the regression net for the deterministic value contract
+// — endpoint amplitudes, the small-n terminal-address branch, W-state
+// fidelity/tail, size classes, materializability, and symbolic evaluation
+// — so an accidental change to any of those fails the crate build.
+// ===================================================================
+#[cfg(test)]
+mod gate_tests {
+    use super::*;
+
+    const INV_SQRT2: f64 = std::f64::consts::FRAC_1_SQRT_2;
+
+    // --- Complex64 / VecBlock core ---
+
+    #[test]
+    fn complex64_norms() {
+        assert_eq!(Complex64::zero().norm_squared(), 0.0);
+        assert_eq!(Complex64::zero().norm(), 0.0);
+        let c = Complex64::new(3.0, 4.0);
+        assert_eq!(c.norm_squared(), 25.0);
+        assert_eq!(c.norm(), 5.0);
+        // `Default` matches `zero()`.
+        assert_eq!(Complex64::default().norm_squared(), 0.0);
+    }
+
+    #[test]
+    fn vecblock_set_get_and_is_zero() {
+        let mut b = VecBlock::new();
+        assert!(b.is_zero());
+        assert!(VecBlock::default().is_zero());
+        b.set(5, Complex64::new(1.0, 2.0));
+        assert!(!b.is_zero());
+        let g = b.get(5);
+        assert_eq!((g.re, g.im), (1.0, 2.0));
+        // Untouched slots stay zero.
+        assert_eq!(b.get(6).norm(), 0.0);
+    }
+
+    // --- MinimalGhzState ---
+
+    #[test]
+    fn minimal_ghz_verify_is_unit_fidelity() {
+        let ghz = MinimalGhzState::new(42);
+        assert_eq!(ghz.n_qubits(), 42);
+        let v = ghz.verify();
+        assert!((v.fidelity - 1.0).abs() < 1e-12, "fidelity {}", v.fidelity);
+        assert!((v.amp_zero_state - INV_SQRT2).abs() < 1e-12);
+        assert!((v.amp_one_state - INV_SQRT2).abs() < 1e-12);
+        assert_eq!(v.expected_amplitude, INV_SQRT2);
+        assert_eq!(v.max_spurious, 0.0);
+        assert!(ghz.memory_bytes() > 0);
+    }
+
+    #[test]
+    fn minimal_ghz_small_n_uses_intrablock_terminal_addr() {
+        // n < BLOCK_SHIFT (7) stores |11..1> at local address 2^n - 1 rather than
+        // 127; verify() must read that same address back and still see unit fidelity.
+        for n in 1..7usize {
+            let v = MinimalGhzState::new(n).verify();
+            assert!((v.fidelity - 1.0).abs() < 1e-12, "n={n} fid={}", v.fidelity);
+            assert_eq!(v.max_spurious, 0.0, "n={n}");
+        }
+    }
+
+    #[test]
+    fn minimal_ghz_display_scales_labels() {
+        assert_eq!(format!("{}", MinimalGhzState::new(42)), "|GHZ_42>");
+        assert_eq!(format!("{}", MinimalGhzState::new(1_500)), "|GHZ_1.5K>");
+        assert_eq!(format!("{}", MinimalGhzState::new(2_000_000)), "|GHZ_2.0M>");
+        assert_eq!(
+            format!("{}", MinimalGhzState::new(3_000_000_000)),
+            "|GHZ_3.0B>"
+        );
+        assert_eq!(
+            format!("{}", MinimalGhzState::new(1_000_000_000_000)),
+            "|GHZ_1.0T>"
+        );
+    }
+
+    #[test]
+    fn create_minimal_ghz_matches_constructor() {
+        assert_eq!(
+            create_minimal_ghz(100).n_qubits(),
+            MinimalGhzState::new(100).n_qubits()
+        );
+    }
+
+    // --- SparseQuantumGridVec (materialized W-state) ---
+
+    #[test]
+    fn w_grid_block_geometry() {
+        assert_eq!(SparseQuantumGridVec::new(128).n_blocks(), 1);
+        assert_eq!(SparseQuantumGridVec::new(200).n_blocks(), 2); // ceil(200/128)
+        let g = SparseQuantumGridVec::new(7);
+        assert_eq!(g.n_qubits(), 7);
+        assert_eq!(g.n_blocks(), 1);
+    }
+
+    #[test]
+    #[should_panic(expected = "Minimum 7 qubits required")]
+    fn w_grid_rejects_fewer_than_seven_qubits() {
+        let _ = SparseQuantumGridVec::new(6);
+    }
+
+    #[test]
+    fn w_state_is_uniform_and_unit_fidelity() {
+        let mut grid = SparseQuantumGridVec::new(10);
+        grid.create_w_state();
+        let v = grid.verify_w_fidelity();
+        assert!((v.fidelity - 1.0).abs() < 1e-12, "fidelity {}", v.fidelity);
+        assert_eq!(v.correct_amplitudes, 10);
+        assert_eq!(v.expected_amplitudes, 10);
+        assert!((v.total_probability - 1.0).abs() < 1e-12);
+        assert_eq!(v.max_spurious_amplitude, 0.0);
+        let expected = 1.0 / 10f64.sqrt();
+        assert!((v.expected_amplitude - expected).abs() < 1e-12);
+        // Every excitation slot carries the uniform amplitude...
+        for q in 0..10 {
+            assert!((grid.get_amplitude(q).re - expected).abs() < 1e-12, "q={q}");
+        }
+        // ...and an out-of-range block index reads back as zero.
+        assert_eq!(grid.get_amplitude(10_000).norm(), 0.0);
+    }
+
+    #[test]
+    fn w_grid_amplitude_round_trip() {
+        let mut grid = SparseQuantumGridVec::new(64);
+        let amp = Complex64::new(0.5, 0.25);
+        grid.set_amplitude(5, amp);
+        let got = grid.get_amplitude(5);
+        assert_eq!((got.re, got.im), (0.5, 0.25));
+    }
+
+    // --- SymbolicNumber ---
+
+    #[test]
+    fn symbolic_number_is_zero() {
+        assert!(SymbolicNumber::Literal(0).is_zero());
+        assert!(!SymbolicNumber::Literal(5).is_zero());
+        assert!(SymbolicNumber::Big(num_bigint::BigUint::from(0u32)).is_zero());
+        assert!(!SymbolicNumber::Graham.is_zero());
+    }
+
+    #[test]
+    fn symbolic_number_size_class_and_notation() {
+        assert_eq!(SymbolicNumber::Literal(999_999).size_class(), "small");
+        assert_eq!(SymbolicNumber::Literal(2_000_000).size_class(), "large");
+        assert_eq!(SymbolicNumber::Graham.size_class(), "Graham-class");
+        assert_eq!(SymbolicNumber::Tree(3).size_class(), "TREE-class");
+        assert_eq!(SymbolicNumber::Rayo.size_class(), "uncomputable");
+        assert_eq!(SymbolicNumber::Infinity.size_class(), "infinite");
+
+        assert_eq!(SymbolicNumber::Literal(42).to_notation(), "42");
+        assert_eq!(SymbolicNumber::Graham.to_notation(), "G (Graham's number)");
+        assert_eq!(SymbolicNumber::Tree(3).to_notation(), "TREE(3)");
+        assert_eq!(SymbolicNumber::Infinity.to_notation(), "infty");
+        assert_eq!(SymbolicNumber::Rayo.to_notation(), "Rayo's number");
+    }
+
+    #[test]
+    fn symbolic_number_structural_equality() {
+        assert!(SymbolicNumber::Literal(5).structurally_equal(&SymbolicNumber::Literal(5)));
+        assert!(!SymbolicNumber::Literal(5).structurally_equal(&SymbolicNumber::Literal(6)));
+        assert!(SymbolicNumber::Graham.structurally_equal(&SymbolicNumber::Graham));
+        assert!(SymbolicNumber::Tree(3).structurally_equal(&SymbolicNumber::Tree(3)));
+        assert!(!SymbolicNumber::Graham.structurally_equal(&SymbolicNumber::Infinity));
+    }
+
+    #[test]
+    fn symbolic_number_estimate_log10_and_materializability() {
+        assert!((SymbolicNumber::Literal(1000).estimate_log10().unwrap() - 3.0).abs() < 1e-9);
+        assert!(SymbolicNumber::Graham.estimate_log10().is_none());
+        assert!(SymbolicNumber::Infinity.estimate_log10().is_none());
+
+        assert!(SymbolicNumber::Literal(5).is_materializable());
+        assert!(!SymbolicNumber::Graham.is_materializable());
+        assert!(
+            SymbolicNumber::Pow {
+                base: 10,
+                exponent: Box::new(SymbolicNumber::Literal(50)),
+            }
+            .is_materializable()
+        );
+        assert!(
+            !SymbolicNumber::Pow {
+                base: 10,
+                exponent: Box::new(SymbolicNumber::Literal(200_000_000)),
+            }
+            .is_materializable()
+        );
+    }
+
+    // --- SymbolicAmplitude / SymbolicFraction ---
+
+    #[test]
+    fn symbolic_amplitude_evaluation() {
+        assert!(
+            (SymbolicAmplitude::reciprocal_sqrt(SymbolicNumber::Literal(4))
+                .try_evaluate()
+                .unwrap()
+                - 0.5)
+                .abs()
+                < 1e-12
+        );
+        assert!(
+            (SymbolicAmplitude::sqrt_fraction(
+                SymbolicNumber::Literal(1),
+                SymbolicNumber::Literal(4)
+            )
+            .try_evaluate()
+            .unwrap()
+                - 0.5)
+                .abs()
+                < 1e-12
+        );
+        assert_eq!(SymbolicAmplitude::Zero.try_evaluate(), Some(0.0));
+        // A symbolic count with no finite value cannot be evaluated.
+        assert!(
+            SymbolicAmplitude::reciprocal_sqrt(SymbolicNumber::Graham)
+                .try_evaluate()
+                .is_none()
+        );
+        assert_eq!(
+            SymbolicAmplitude::reciprocal_sqrt(SymbolicNumber::Literal(2)).to_notation(),
+            "1/sqrt(2)"
+        );
+        assert_eq!(SymbolicAmplitude::Zero.to_notation(), "0");
+
+        // |1/sqrt(9)|^2 = 1/9.
+        let mag = SymbolicAmplitude::reciprocal_sqrt(SymbolicNumber::Literal(9))
+            .magnitude_squared_symbolic()
+            .unwrap();
+        assert!((mag.try_evaluate().unwrap() - 1.0 / 9.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn symbolic_fraction_ops() {
+        let f = SymbolicFraction::one_over(SymbolicNumber::Literal(4));
+        assert!((f.try_evaluate().unwrap() - 0.25).abs() < 1e-12);
+        assert_eq!(f.to_notation(), "1/4");
+
+        assert!(
+            SymbolicFraction::new(SymbolicNumber::Literal(42), SymbolicNumber::Literal(42))
+                .is_one()
+        );
+        assert!(
+            !SymbolicFraction::new(SymbolicNumber::Literal(1), SymbolicNumber::Literal(2)).is_one()
+        );
+        assert!(SymbolicFraction::new(SymbolicNumber::Graham, SymbolicNumber::Graham).is_one());
+
+        let g = SymbolicFraction::new(SymbolicNumber::Literal(6), SymbolicNumber::Literal(3));
+        assert!((g.try_evaluate().unwrap() - 2.0).abs() < 1e-12);
+        assert_eq!(g.to_notation(), "6/3");
+    }
+}

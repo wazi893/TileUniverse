@@ -345,3 +345,194 @@ impl DirtyBitset {
         false
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    /// `take_dirty_batch` drains the whole bitset in globally-ascending index
+    /// order (L1 words ascending → L0 segments ascending → bits ascending).
+    /// The hierarchical traversal must agree with a flat reference set, or the
+    /// sparse evaluator silently drops tiles.
+    fn drain_sorted(b: &DirtyBitset) -> Vec<usize> {
+        b.take_dirty_batch()
+    }
+
+    #[test]
+    fn new_is_empty() {
+        let b = DirtyBitset::new(500);
+        assert!(drain_sorted(&b).is_empty());
+        assert_eq!(b.debug_counts(), (0, 0));
+        assert!(!b.has_dirty_in_sparse(&[(0, u64::MAX), (7, u64::MAX)]));
+    }
+
+    #[test]
+    fn mark_and_drain_single_then_clears() {
+        let b = DirtyBitset::new(500);
+        b.mark_dirty(5);
+        assert_eq!(b.debug_counts(), (1, 1));
+        assert_eq!(drain_sorted(&b), vec![5]);
+        // Draining is consuming: a second drain is empty and the L1 summary is repaired.
+        assert!(drain_sorted(&b).is_empty());
+        assert_eq!(b.debug_counts(), (0, 0));
+    }
+
+    #[test]
+    fn drain_is_ascending_across_l1_words_and_clears() {
+        // 9000 tiles → 141 L0 segments → 3 L1 words, exercising the second/third
+        // L1 word (segment indices ≥ 64 live under L1 word 1+).
+        let b = DirtyBitset::new(9000);
+        let marked = [0usize, 1, 63, 64, 130, 4095, 4096, 4097, 8191, 8999];
+        for &i in &marked {
+            b.mark_dirty(i);
+        }
+        let got = drain_sorted(&b);
+        let mut want: Vec<usize> = marked.to_vec();
+        want.sort_unstable();
+        assert_eq!(got, want, "hierarchical drain must match the flat set");
+        // Strictly ascending output.
+        assert!(got.windows(2).all(|w| w[0] < w[1]));
+        // Fully consumed: no phantom dirty bits left in either level.
+        assert!(drain_sorted(&b).is_empty());
+        assert_eq!(b.debug_counts(), (0, 0));
+    }
+
+    #[test]
+    fn mark_dirty_out_of_range_is_ignored() {
+        let b = DirtyBitset::new(100); // 2 L0 segments
+        b.mark_dirty(5_000); // beyond capacity — must be a silent no-op
+        assert_eq!(b.debug_counts(), (0, 0));
+        assert!(drain_sorted(&b).is_empty());
+    }
+
+    #[test]
+    fn mark_all_dirty_marks_exact_range_with_remainder() {
+        // 200 is not a multiple of 64, so this exercises the partial-word mask.
+        let b = DirtyBitset::new(200);
+        b.mark_all_dirty(200);
+        assert_eq!(drain_sorted(&b), (0..200).collect::<Vec<_>>());
+
+        // A partial count must mark exactly [0, count) and nothing above it.
+        let b2 = DirtyBitset::new(200);
+        b2.mark_all_dirty(100);
+        assert_eq!(b2.debug_counts().1, 100);
+        assert_eq!(drain_sorted(&b2), (0..100).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn is_dirty_and_clear_consumes_bit() {
+        let b = DirtyBitset::new(200);
+        b.mark_dirty(7);
+        assert!(b.is_dirty_and_clear(7));
+        assert!(!b.is_dirty_and_clear(7)); // already consumed
+        assert!(!b.is_dirty_and_clear(8)); // never marked
+        // The stale L1 summary bit must not resurrect a phantom on a later drain.
+        assert!(drain_sorted(&b).is_empty());
+    }
+
+    #[test]
+    fn fill_into_scoped_drains_only_scope() {
+        let b = DirtyBitset::new(200);
+        for &i in &[3u32, 10, 70] {
+            b.mark_dirty(i as usize);
+        }
+        let mut out = Vec::new();
+        b.fill_into_scoped(&[3, 70], &mut out);
+        assert_eq!(out, vec![3, 70]); // follows scope order, only in-scope bits
+        // The unscoped index survives and drains afterwards.
+        assert_eq!(drain_sorted(&b), vec![10]);
+    }
+
+    #[test]
+    fn fill_into_masked_respects_mask_and_repairs_l1() {
+        let b = DirtyBitset::new(200); // 4 L0 segments
+        for &i in &[1usize, 2, 65] {
+            b.mark_dirty(i);
+        }
+        // Seg 0: only bit 1 in scope; seg 1: full scope; segs 2,3: empty scope.
+        let mut mask = vec![0u64; 4];
+        mask[0] = 1u64 << 1;
+        mask[1] = u64::MAX;
+        let mut out = Vec::new();
+        b.fill_into_masked(&mask, &mut out);
+        assert_eq!(out, vec![1, 65]); // bit 2 of seg 0 was out of scope
+        // Seg 1 emptied (L1 repaired); seg 0 keeps bit 2.
+        assert_eq!(b.debug_counts(), (1, 1));
+        assert_eq!(drain_sorted(&b), vec![2]);
+    }
+
+    #[test]
+    fn clear_masked_counts_and_drops_without_extract() {
+        let b = DirtyBitset::new(200);
+        for &i in &[1usize, 2, 65] {
+            b.mark_dirty(i);
+        }
+        // Scope only bits 1,2 of seg 0.
+        let mut mask = vec![0u64; 4];
+        mask[0] = (1u64 << 1) | (1u64 << 2);
+        assert_eq!(b.clear_masked(&mask), 2);
+        // 65 survives; the cleared bits are gone, L1 for seg 0 repaired.
+        assert_eq!(drain_sorted(&b), vec![65]);
+
+        // Full mask clears everything and reports the full count.
+        let b2 = DirtyBitset::new(200);
+        for &i in &[1usize, 2, 65] {
+            b2.mark_dirty(i);
+        }
+        assert_eq!(b2.clear_masked(&vec![u64::MAX; 4]), 3);
+        assert_eq!(b2.debug_counts(), (0, 0));
+    }
+
+    #[test]
+    fn sparse_drain_and_clear_repair_l1() {
+        // bit 1 → seg 0; bit 130 → seg 2, bit 2.
+        let scope = [(0u32, u64::MAX), (2u32, u64::MAX)];
+
+        let b = DirtyBitset::new(300);
+        b.mark_dirty(1);
+        b.mark_dirty(130);
+        let mut out = Vec::new();
+        b.fill_into_sparse(&scope, &mut out);
+        assert_eq!(out, vec![1, 130]);
+        assert_eq!(b.debug_counts(), (0, 0));
+        assert!(drain_sorted(&b).is_empty()); // L1 repaired, no phantom
+
+        let b2 = DirtyBitset::new(300);
+        b2.mark_dirty(1);
+        b2.mark_dirty(130);
+        assert_eq!(b2.clear_sparse(&scope), 2);
+        assert_eq!(b2.debug_counts(), (0, 0));
+    }
+
+    #[test]
+    fn has_dirty_in_sparse_honors_segment_and_mask() {
+        let b = DirtyBitset::new(300);
+        b.mark_dirty(130); // seg 2, bit 2
+        assert!(b.has_dirty_in_sparse(&[(2, u64::MAX)]));
+        assert!(!b.has_dirty_in_sparse(&[(0, u64::MAX)])); // wrong segment
+        assert!(!b.has_dirty_in_sparse(&[(2, !(1u64 << 2))])); // bit masked out
+        assert!(!b.has_dirty_in_sparse(&[(9_999, u64::MAX)])); // out-of-range segment
+    }
+
+    #[test]
+    fn hierarchical_drain_matches_reference_over_wide_spread() {
+        // Deterministic (no RNG) spread of indices across many segments and all
+        // three L1 words; cross-check the hierarchical drain against a flat set.
+        let tile_count = 9000usize;
+        let b = DirtyBitset::new(tile_count);
+        let mut reference = BTreeSet::new();
+        for i in 0..1500u64 {
+            // Knuth multiplicative hash → well-distributed but fully reproducible.
+            let idx = (i.wrapping_mul(2654435761) % tile_count as u64) as usize;
+            b.mark_dirty(idx);
+            reference.insert(idx);
+        }
+        assert_eq!(b.debug_counts().1, reference.len() as u32);
+        let got = drain_sorted(&b);
+        let want: Vec<usize> = reference.into_iter().collect();
+        assert_eq!(got, want);
+        assert!(got.windows(2).all(|w| w[0] < w[1]));
+        assert!(drain_sorted(&b).is_empty());
+    }
+}

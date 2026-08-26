@@ -257,17 +257,15 @@ fn route_wire(
             // Skip source and corner (corner handled in vertical)
             // But place intermediate Wire tiles
         }
-        if pos != from && !occupied.contains(&pos) {
-            if x < blueprint.width && y0 < blueprint.height {
-                blueprint.tiles.push(BlueprintTile {
-                    x,
-                    y: y0,
-                    z: 0,
-                    tile_type: TileType::Wire,
-                    logic: None,
-                });
-                occupied.insert(pos);
-            }
+        if pos != from && !occupied.contains(&pos) && x < blueprint.width && y0 < blueprint.height {
+            blueprint.tiles.push(BlueprintTile {
+                x,
+                y: y0,
+                z: 0,
+                tile_type: TileType::Wire,
+                logic: None,
+            });
+            occupied.insert(pos);
         }
     }
 
@@ -277,17 +275,20 @@ fn route_wire(
         let y_end = y0.max(y1);
         for y in y_start..=y_end {
             let pos = (x1, y);
-            if pos != to && pos != (x1, y0) && !occupied.contains(&pos) {
-                if x1 < blueprint.width && y < blueprint.height {
-                    blueprint.tiles.push(BlueprintTile {
-                        x: x1,
-                        y,
-                        z: 0,
-                        tile_type: TileType::Wire,
-                        logic: None,
-                    });
-                    occupied.insert(pos);
-                }
+            if pos != to
+                && pos != (x1, y0)
+                && !occupied.contains(&pos)
+                && x1 < blueprint.width
+                && y < blueprint.height
+            {
+                blueprint.tiles.push(BlueprintTile {
+                    x: x1,
+                    y,
+                    z: 0,
+                    tile_type: TileType::Wire,
+                    logic: None,
+                });
+                occupied.insert(pos);
             }
         }
     }

@@ -126,7 +126,7 @@ pub fn forward_batch(sensors: &[[f32; 8]], weights: &[BrainWeights]) -> Vec<Move
     }
 
     // Decode outputs to moves
-    output.iter().map(|o| decode_move(o)).collect()
+    output.iter().map(decode_move).collect()
 }
 
 /// Optimized batched forward pass for homogeneous population (shared weights)
@@ -167,7 +167,7 @@ pub fn forward_batch_shared_weights(sensors: &[[f32; 8]], weights: &BrainWeights
         }
     }
 
-    output.iter().map(|o| decode_move(o)).collect()
+    output.iter().map(decode_move).collect()
 }
 
 /// Fast tanh approximation (matches ClassicalBrain implementation)

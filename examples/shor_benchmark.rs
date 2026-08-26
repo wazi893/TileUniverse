@@ -187,7 +187,7 @@ fn demo_factorization(n: u64, verbose: bool) {
 
     if verbose {
         println!("Pre-checks:");
-        println!("  Even? {}", n % 2 == 0);
+        println!("  Even? {}", n.is_multiple_of(2));
         println!("  Prime? {}", engine::number_theory::is_prime(n));
         if let Some((p, k)) = engine::number_theory::is_prime_power(n) {
             println!("  Prime power? Yes ({}^{})", p, k);

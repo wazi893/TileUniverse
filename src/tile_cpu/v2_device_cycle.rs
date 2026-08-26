@@ -539,19 +539,25 @@ impl DeviceCyclePlan {
 /// lane buffer — decode regenerated from ROM+PC, operands trunk-injected); the rest of the
 /// charter ISA is the megakernel's scalar shell. Validated run-to-halt vs `TileCpuV2`.
 ///
-/// ## Coverage (charter scope: sum_loop / gcd_subtract / fib_recursive)
+/// ## Coverage (extended past the charter set, 2026-07-02)
 /// VALIDATED bit-exact (per-retired-instruction regs+flags+lr, final RAM/R0/halted/retired):
 /// NOP, HALT, MOV, MFLR, LDI, ALU reg (ADD/SUB/AND/OR/XOR/NOT/NEG/INC/DEC + CMP), LD/LDB,
-/// ST/STB, JMP/JZ/JNZ/CALL/RET/JMPR.
-/// CORRECT-BY-CONSTRUCTION but coverage depends on the charter actually emitting them
-/// (imm sourced from the regenerated decode, not trunk): ALU immediate (ADDI..XORI 0x10-14);
-/// carry branches JC/JNC.
-/// GUARDED (panic — modeled incorrectly, charter-absent): MUL (software, no tile path),
-/// conditional moves (MOVZ/MOVNZ/MOVC/MOVNC).
-/// UNMODELED / out of scope: SHL/SHR carry (result correct, carry left unchanged), upper-bank
-/// PC>=64 (needs the symmetric bank47 super-mux bridge). General-program support extends here.
+/// ST/STB, JMP/JZ/JNZ/CALL/RET/JMPR — plus the extended-corpus additions below.
+/// SCALAR (mirrors the real CPU, where these are stage-X software authority / no tile
+/// path): MUL (0x04 imm5==1: wrapping mul, Z only, C unchanged), conditional moves
+/// (MOVZ/MOVNZ/MOVC/MOVNC on pre-instruction flags, no flag writes), MTLR,
+/// SHL/SHR carry (ISS bit-position formulas from imm8).
+/// MMIO console (addr 57/58): STB 57 appends to `console` (no RAM write); reads of 57/58
+/// return last-byte/count. Other MMIO devices (41..=56, 59..=63) are NOT modeled —
+/// programs touching them diverge loudly against the oracle.
+/// UPPER BANK (pc 64..128): the super-mux bridge injects BOTH banks
+/// (final_mux → right, bank47_mux[(pc>>4)&3] → left), mirroring `stage_f_inject`.
+/// OUT OF SCOPE: pc >= 128 (no physical ROM on the real CPU either — it falls back to
+/// gated software Const-injection there), SRA overlay (0x0E imm8&0x08, unvalidated).
 pub struct DeviceCpu {
     pub state: DeviceCycleState,
+    /// MMIO console bytes (STB to addr 57), mirroring the ISS/hardware console buffer.
+    pub console: Vec<u8>,
     plan: DeviceCyclePlan,
     buf: LanePack,
     program: Vec<u32>,
@@ -573,8 +579,15 @@ impl DeviceCpu {
             regs: [0; 16],
             ram: vec![0; 128],
         };
+        assert!(
+            program.len() <= 128,
+            "DeviceCpu: physical decode covers pc < 128 (the real CPU has no physical \
+             ROM past 128 either); program has {} words",
+            program.len()
+        );
         Self {
             state,
+            console: Vec::new(),
             plan,
             buf,
             program,
@@ -583,21 +596,29 @@ impl DeviceCpu {
     }
 
     /// Tile ALU: regenerate decode from ROM at `pc`, inject operands, hold-aware trunk settle.
+    /// The super-mux bridge injects BOTH banks (mirroring `stage_f_inject`): bank03 from
+    /// `final_mux` into the right input, bank47 from `bank47_mux[(pc>>4)&3]` into the left;
+    /// the physical PC[6] selector picks — so pc 0..128 decodes physically.
     fn alu(&mut self, pc: u32, a: u64, b: u64) -> u64 {
         let l = &self.plan.layout;
-        let (pc_idx, fm, smi, ta, tb, wb) = (
+        let (pc_idx, fm, smir, smi, b47, ta, tb, wb) = (
             l.pc_idx,
             l.final_mux_indices,
             l.super_mux_inject_right_indices,
+            l.super_mux_inject_indices,
+            l.bank47_mux_indices,
             l.alu_a_trunk_terminal_idx,
             l.alu_b_trunk_terminal_idx,
             l.wb_alu_root_idx,
         );
         self.buf.set(pc_idx, 0, pc as u64);
         self.plan.phase("cone").eval(&mut self.buf);
+        let bank_within = ((pc >> 4) & 3) as usize;
         for lane in 0..4 {
             let v = self.buf.get(fm[lane], 0);
-            self.buf.set(smi[lane], 0, v);
+            self.buf.set(smir[lane], 0, v);
+            let v47 = self.buf.get(b47[bank_within][lane], 0);
+            self.buf.set(smi[lane], 0, v47);
         }
         self.plan.phase("settle").eval(&mut self.buf);
         self.buf.set(ta, 0, a);
@@ -629,18 +650,6 @@ impl DeviceCpu {
         let (fz0, fc0) = (self.state.flag_z, self.state.flag_c);
         let (a, b) = (self.state.regs[rd], self.state.regs[rs]);
 
-        // Charter-scope guards: fail loudly on ops the device does NOT model correctly,
-        // rather than silently producing wrong state (see the coverage note on DeviceCpu).
-        assert!(
-            !(d.opcode == 0x04 && d.imm5 == 1),
-            "DeviceCpu: MUL (software op, no tile path) not modeled at pc {pc}"
-        );
-        assert!(
-            !(d.opcode == 0x02 && (1..=4).contains(&d.imm5)),
-            "DeviceCpu: conditional move (sub-fn {}) not modeled at pc {pc}",
-            d.imm5
-        );
-
         let mut wb_val: Option<(usize, u64)> = None;
         let mut new_z: Option<bool> = None;
         let mut new_c: Option<bool> = None;
@@ -648,11 +657,30 @@ impl DeviceCpu {
         match d.opcode {
             0x00 => {}                        // NOP
             0x01 => self.state.halted = true, // HALT
-            0x02 => {
-                // MOV (sub-fn 0) / MFLR (sub-fn 5). (Conditional moves not in charter.)
-                let v = if d.imm5 == 5 { self.state.lr as u64 } else { b };
-                wb_val = Some((rd, v));
-            }
+            0x02 => match d.imm5 {
+                // MOV family (sub-fn selects; mirrors the ISS 0x02 dispatch).
+                5 => wb_val = Some((rd, self.state.lr as u64)), // MFLR
+                // MTLR: lr = rs. This DeviceCycle oracle is 8-bit by construction (PCM =
+                // 0xFF for every PC op — fall-through, RET, JMPR, branches; see next_pc),
+                // so 0xFF is the correct in-domain mask, NOT a wide-mode bug (Sprint 390
+                // re-verify). Wide programs use the authoritative ISS (v2_iss.rs) + the
+                // physical executor, which mask LR by pc_mask / pc_phys_mask.
+                6 => self.state.lr = (b as u32) & 0xFF, // MTLR (8-bit oracle PC width)
+                sub => {
+                    // MOV (0) / MOVZ/MOVNZ/MOVC/MOVNC (1..4) on PRE-instruction flags;
+                    // no flag writes.
+                    let cond = match sub {
+                        1 => fz0,
+                        2 => !fz0,
+                        3 => fc0,
+                        4 => !fc0,
+                        _ => true,
+                    };
+                    if cond {
+                        wb_val = Some((rd, b));
+                    }
+                }
+            },
             0x03 => {
                 // LDI (imm16==imm8 when not wide). LDI writes the Z flag (run_stage_x
                 // writes_flags ~4147); C is unchanged.
@@ -660,32 +688,47 @@ impl DeviceCpu {
                 wb_val = Some((rd, v));
                 new_z = Some(v == 0);
             }
+            0x04 if d.imm5 == 1 => {
+                // MUL: stage-X SOFTWARE authority on the real CPU too (no tile path) —
+                // scalar here is authority-faithful. Writes Z only; C unchanged.
+                let r = a.wrapping_mul(b);
+                wb_val = Some((rd, r));
+                new_z = Some(r == 0);
+            }
             0x04..=0x0E => {
                 let r = self.alu(pc, a, b); // tiles
                 wb_val = Some((rd, r));
                 new_z = Some(r == 0);
-                new_c = device_carry(d.opcode, a, r, fc0);
+                new_c = device_carry_ext(d.opcode, d.imm8, a, r, fc0);
             }
             0x0F => {
                 let r = self.alu(pc, a, b); // CMP: flags only
                 new_z = Some(r == 0);
-                new_c = device_carry(0x0F, a, r, fc0);
+                new_c = device_carry_ext(0x0F, d.imm8, a, r, fc0);
             }
             0x10..=0x14 => {
                 let r = self.alu(pc, a, b); // ALU immediate
                 wb_val = Some((rd, r));
                 new_z = Some(r == 0);
-                new_c = device_carry(d.opcode, a, r, fc0);
+                new_c = device_carry_ext(d.opcode, d.imm8, a, r, fc0);
             }
             0x16 | 0x18 => {
-                let addr = self.mem_addr(&d); // LD / LDB
-                let v = self.state.ram[addr];
+                let addr = self.mem_addr(&d); // LD / LDB (console taps at 57/58)
+                let v = match addr {
+                    57 => self.console.last().copied().unwrap_or(0) as u64,
+                    58 => self.console.len() as u64,
+                    _ => self.state.ram[addr],
+                };
                 wb_val = Some((rd, v));
                 new_z = Some(v == 0);
             }
             0x17 | 0x19 => {
                 let addr = self.mem_addr(&d); // ST / STB (store rd)
-                self.state.ram[addr] = a;
+                match addr {
+                    57 => self.console.push((a & 0xFF) as u8), // console: NOT a RAM write
+                    58 => {}                                   // count is read-only
+                    _ => self.state.ram[addr] = a,
+                }
             }
             0x15 | 0x1A..=0x1F => {} // RET / JMP / JZ / JNZ / JC / JNC / CALL — control only
             other => panic!("DeviceCpu: unhandled opcode {other:#04x} at pc {pc}"),
@@ -740,6 +783,30 @@ pub fn device_carry(opcode: u8, a: u64, result: u64, carry_before: bool) -> Opti
         0x05 | 0x0A | 0x0C | 0x0F | 0x11 => Some(result > a), // SUB / NEG / DEC / CMP / SUBI
         0x06 | 0x07 | 0x08 | 0x09 | 0x12 | 0x13 | 0x14 => Some(carry_before), // bitwise: unchanged
         _ => None,                              // SHL/SHR + non-ALU
+    }
+}
+
+/// `device_carry` extended with the shift carries, which need `imm8` (the shift amount
+/// is an immediate). Mirrors the ISS exactly: SHL carry = bit `(8 - imm8) & 63` of `a`
+/// (the ISA's legacy 8-bit-era formula, hardware parity); SHR carry = bit
+/// `((imm8 & 7) - 1) & 63` of `a` (last bit shifted out; shift amount is 3 bits).
+pub fn device_carry_ext(
+    opcode: u8,
+    imm8: u8,
+    a: u64,
+    result: u64,
+    carry_before: bool,
+) -> Option<bool> {
+    match opcode {
+        0x0D => {
+            let bit = 8u64.wrapping_sub(imm8 as u64) & 63;
+            Some((a >> bit) & 1 != 0)
+        }
+        0x0E => {
+            let bit = ((imm8 & 0x07) as u64).wrapping_sub(1) & 63;
+            Some((a >> bit) & 1 != 0)
+        }
+        _ => device_carry(opcode, a, result, carry_before),
     }
 }
 
@@ -840,7 +907,7 @@ mod tests {
     #[test]
     fn commit_swap_incidence_decodes_known_forms() {
         // Plain low-reg ADD (R0 = R1 + R2): no swap.
-        let add = (0x04u32 << 11) | (0 << 8) | (1 << 5) | 2;
+        let add = (0x04u32 << 11) | (1 << 5) | 2;
         let c = CommitSwapIncidence::classify(add);
         assert!(!c.any(), "plain low-reg ADD should need no swap: {c:?}");
 
@@ -925,7 +992,7 @@ mod tests {
         let rd_hi = u32::from(EXT_RD_HI) << 16;
 
         // ADD writing R8 (high): rd_lo=0 + rd_hi -> rd=8; imm5=2 (plain ADD, not MUL).
-        let add_r8 = (0x04u32 << 11) | (0 << 8) | 2 | rd_hi;
+        let add_r8 = (0x04u32 << 11) | 2 | rd_hi;
         let d = decode_v2_word(add_r8);
         assert!(d.rd >= 8 && writes_rd(d.opcode), "decoded {d:?}");
         assert!(
@@ -1109,14 +1176,33 @@ mod tests {
             .into_iter()
             .find(|c| c.name == name)
             .unwrap_or_else(|| panic!("missing charter program {name}"));
-        let program = compile_source(case.source).expect("compile");
+        validate_device_cpu_case(
+            case.name,
+            case.source,
+            case.max_cycles,
+            case.expected_r0,
+            "",
+        );
+    }
 
-        let (_c, sim, plan) = build_charter_plan(case.source);
-        let mut dev = DeviceCpu::new(plan, &sim, program);
-        let (cpu, mut csim, _) = build_charter_plan(case.source);
+    /// Per-retired-instruction oracle vs the REAL `TileCpuV2` (regs/flags/lr each retired
+    /// instruction; final retired/R0/RAM), plus console vs the ISS MMIO mirror. Used for
+    /// both the charter set and the extended corpus (MUL, upper-bank pc>=64, console).
+    fn validate_device_cpu_case(
+        name: &str,
+        source: &str,
+        max_cycles: u64,
+        expected_r0: u64,
+        expected_console: &str,
+    ) {
+        let program = compile_source(source).expect("compile");
+
+        let (_c, sim, plan) = build_charter_plan(source);
+        let mut dev = DeviceCpu::new(plan, &sim, program.clone());
+        let (cpu, mut csim, _) = build_charter_plan(source);
 
         let mut instrs = 0u64;
-        while !dev.state.halted && instrs < case.max_cycles {
+        while !dev.state.halted && instrs < max_cycles {
             dev.step();
             instrs += 1;
             // Advance the pipelined reference until it has RETIRED `instrs` instructions.
@@ -1160,7 +1246,7 @@ mod tests {
             cpu.read_retired_count(),
             "{name}: final retired count"
         );
-        assert_eq!(dev.state.regs[0], case.expected_r0, "{name}: final R0");
+        assert_eq!(dev.state.regs[0], expected_r0, "{name}: final R0");
         for a in 0..128 {
             assert_eq!(
                 dev.state.ram[a],
@@ -1168,6 +1254,26 @@ mod tests {
                 "{name}: final RAM[{a}]"
             );
         }
+
+        // Console: the hardware buffer lives inside the MMIO device, so compare against
+        // the ISS mirror (proven == hardware by the compiler-bench goldens) + the golden.
+        let mut iss = V2Iss::from_program_with_mmio(&program);
+        iss.enable_extended_pc();
+        let mut n = 0u64;
+        while !iss.state().halted && n < max_cycles {
+            iss.step();
+            n += 1;
+        }
+        assert_eq!(
+            iss.console_string(),
+            expected_console,
+            "{name}: ISS console golden"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&dev.console),
+            expected_console,
+            "{name}: device console"
+        );
     }
 
     #[test]
@@ -1185,6 +1291,135 @@ mod tests {
         validate_device_cpu("fib_recursive");
     }
 
+    /// Extended-corpus case lookup (the compiled benchmark corpus, past the charter set).
+    fn bench_case(name: &str) -> &'static crate::tile_cpu::V2CompiledBenchCase {
+        crate::tile_cpu::V2_COMPILED_BENCHMARKS
+            .iter()
+            .find(|c| c.name == name)
+            .unwrap_or_else(|| panic!("missing bench corpus program {name}"))
+    }
+
+    fn validate_device_cpu_bench(name: &str) {
+        let c = bench_case(name);
+        validate_device_cpu_case(
+            c.name,
+            c.source,
+            c.max_cycles,
+            c.expected_r0,
+            c.expected_console,
+        );
+    }
+
+    /// MUL coverage (stage-X software authority; scalar on the device too): fact(10).
+    #[test]
+    fn device_cpu_fact_matches_tilecpu() {
+        validate_device_cpu_bench("fact_iterative");
+    }
+
+    /// MUL-in-loop coverage: sum of squares.
+    #[test]
+    fn device_cpu_sum_squares_matches_tilecpu() {
+        validate_device_cpu_bench("sum_squares");
+    }
+
+    /// UPPER-BANK coverage (80 program words, pc crosses 64): the two-sided super-mux
+    /// bridge (final_mux -> right, bank47_mux[(pc>>4)&3] -> left) must decode pc 64..128
+    /// physically. Also exercises MUL + indexed (base+offset) RAM addressing.
+    #[test]
+    fn device_cpu_array_matches_tilecpu() {
+        validate_device_cpu_bench("array_sum_squares");
+    }
+
+    /// MMIO console coverage: a compiled-from-source putchar program prints through the
+    /// device console (STB addr 57 appends a byte, does NOT write RAM).
+    #[test]
+    fn device_cpu_console_matches_iss() {
+        validate_device_cpu_case(
+            "console_hi",
+            r#"
+                int main() { putchar(72); putchar(73); putchar(33); return 0; }
+            "#,
+            10_000,
+            0,
+            "HI!",
+        );
+    }
+
+    /// Conditional moves + shift carries + MTLR vs the ISS, per instruction (pc, regs,
+    /// flags, lr). These are scalar paths (cmov/MTLR) or scalar-carry-over-tile-result
+    /// (SHL/SHR) that no compiled corpus program emits — hand-assembled coverage.
+    #[test]
+    fn device_cpu_cmov_shift_mtlr_matches_iss() {
+        let ldi = |rd: u32, imm: u32| (0x03u32 << 11) | (rd << 8) | imm;
+        let cmp = |rd: u32, rs: u32| (0x0Fu32 << 11) | (rd << 8) | (rs << 5);
+        let mov_sub = |rd: u32, rs: u32, sub: u32| (0x02u32 << 11) | (rd << 8) | (rs << 5) | sub;
+        let shl = |rd: u32, imm: u32| (0x0Du32 << 11) | (rd << 8) | imm;
+        let shr = |rd: u32, imm: u32| (0x0Eu32 << 11) | (rd << 8) | imm;
+        let program = vec![
+            ldi(1, 5),            //  0: R1 = 5
+            ldi(2, 9),            //  1: R2 = 9
+            cmp(1, 2),            //  2: CMP R1,R2 -> Z=0, C=1 (5-9 borrows)
+            mov_sub(3, 1, 3),     //  3: MOVC  R3,R1 -> taken (C=1): R3=5
+            mov_sub(4, 2, 4),     //  4: MOVNC R4,R2 -> not taken
+            mov_sub(5, 2, 1),     //  5: MOVZ  R5,R2 -> not taken (Z=0)
+            mov_sub(6, 2, 2),     //  6: MOVNZ R6,R2 -> taken: R6=9
+            shl(1, 3),            //  7: SHL R1,3 -> R1=40, C=bit5(5)=0
+            (0x1Eu32 << 11) | 10, // 8: JNC 10 -> taken (C=0)
+            ldi(7, 99),           //  9: (skipped)
+            shr(1, 2),            // 10: SHR R1,2 -> R1=10, C=bit1(40)=0
+            mov_sub(0, 2, 6),     // 11: MTLR R2 -> lr=9
+            mov_sub(7, 0, 5),     // 12: MFLR R7 -> R7=9
+            (0x1Du32 << 11) | 15, // 13: JC 15 -> not taken (C=0)
+            0x01u32 << 11,        // 14: HALT
+        ];
+        let d3 = decode_v2_word(program[3]);
+        assert!(
+            d3.opcode == 0x02 && d3.imm5 == 3 && d3.rd == 3 && d3.rs == 1,
+            "{d3:?}"
+        );
+
+        // Device (full tile plan for the SHL/SHR tile results) vs ISS, per instruction.
+        let console = Rc::new(V2MmioCombinedDevice::new(0x000B_E5C0));
+        let builder = V2Builder::new()
+            .with_origin(0, 0)
+            .with_program(&program)
+            .with_rom_size(128)
+            .with_ram_size(128)
+            .with_extended_pc()
+            .with_mmio(V2MmioHandle::from_rc(console))
+            .with_synth_blocks(V2SynthConfig::max_authority());
+        let mut scratch = Simulation::with_size_layered(128, 640, 16);
+        let layout = builder.derive_indices(&mut scratch);
+        let mut sim = Simulation::with_size_layered(128, 640, 16);
+        let cpu = builder.build(&mut sim);
+        let plan = DeviceCyclePlan::new(&cpu, &sim, layout).expect("plan");
+        let mut dev = DeviceCpu::new(plan, &sim, program.clone());
+
+        let mut iss = V2Iss::from_program(&program);
+        iss.enable_extended_pc();
+        let mut n = 0u64;
+        while !dev.state.halted && n < 100 {
+            dev.step();
+            iss.step();
+            n += 1;
+            let s = iss.state();
+            assert_eq!(dev.state.halted, s.halted, "instr {n}: halted");
+            if !s.halted {
+                assert_eq!(dev.state.pc, s.pc, "instr {n}: pc");
+            }
+            assert_eq!(dev.state.regs, s.regs, "instr {n}: regs");
+            assert_eq!(dev.state.flag_z, s.flag_z, "instr {n}: Z");
+            assert_eq!(dev.state.flag_c, s.flag_c, "instr {n}: C");
+            assert_eq!(dev.state.lr, s.lr, "instr {n}: lr");
+        }
+        assert!(dev.state.halted, "did not halt");
+        assert_eq!(dev.state.regs[3], 5, "MOVC");
+        assert_eq!(dev.state.regs[4], 0, "MOVNC must not write");
+        assert_eq!(dev.state.regs[6], 9, "MOVNZ");
+        assert_eq!(dev.state.regs[1], 10, "SHL/SHR datapath");
+        assert_eq!(dev.state.regs[7], 9, "MTLR->MFLR round trip");
+    }
+
     /// 1c.1 oracle: the STANDALONE fetch+decode+ALU (decode regenerated from bare ROM+PC,
     /// no real-cycle seeding) computes the correct binary-register ALU op. Proves the
     /// standalone fetch+decode produces correct ALU control + datapath.
@@ -1200,8 +1435,7 @@ mod tests {
             .enumerate()
             .find_map(|(i, &w)| {
                 let d = decode_v2_word(w);
-                let binary = matches!(d.opcode, 0x05 | 0x06 | 0x07 | 0x08)
-                    || (d.opcode == 0x04 && d.imm5 != 1);
+                let binary = matches!(d.opcode, 0x05..=0x08) || (d.opcode == 0x04 && d.imm5 != 1);
                 (i < 64 && binary).then_some((i as u32, d.opcode))
             })
             .expect("no binary-register ALU instruction in program");

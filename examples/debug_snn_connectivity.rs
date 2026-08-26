@@ -84,7 +84,7 @@ fn main() {
         let cpu = network.topology.neuron_to_cpu[sample_id];
         let local = network
             .topology
-            .local_index(sample_id, config.neurons_per_cpu) as usize;
+            .local_index(sample_id, config.neurons_per_cpu);
 
         if cpu < network.synapses.len() && local < network.synapses[cpu].local.len() {
             let syns = &network.synapses[cpu].local[local];

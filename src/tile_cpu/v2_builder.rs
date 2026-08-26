@@ -321,6 +321,9 @@ pub struct V2Builder {
     extended_pc: bool,
     /// Sprint 370 (Gate B.3): wide 16-bit PC (Register64 tiles, up to 65,536 instrs).
     wide_pc: bool,
+    /// Sprint 395/396: place the MUL island (physical radix-2 shift-add) and enable
+    /// island-mode MUL sequencing. Default OFF — default fabric/goldens untouched.
+    mul_island: bool,
     mmio: Option<V2MmioHandle>,
     synth_config: Option<V2SynthConfig>,
 }
@@ -342,9 +345,18 @@ impl V2Builder {
             main_mem_words: 0,
             extended_pc: false,
             wide_pc: false,
+            mul_island: false,
             mmio: None,
             synth_config: None,
         }
+    }
+
+    /// Sprint 396: place the MUL island and enable island-mode MUL sequencing
+    /// (the physical shift-add datapath from Sprint 395, integrated). MUL becomes
+    /// a multi-cycle instruction in this mode; default mode keeps the software MUL.
+    pub fn with_mul_island(mut self) -> Self {
+        self.mul_island = true;
+        self
     }
 
     /// Set top-left origin on the simulation grid.
@@ -447,6 +459,7 @@ impl V2Builder {
             self.rom_size,
             self.ram_size,
             self.pc_addr_bits(),
+            self.mul_island,
         )
     }
 
@@ -457,6 +470,12 @@ impl V2Builder {
             sim.num_layers() >= 4,
             "V2 Sprint 118 requires layered simulation (use Simulation::with_size_layered(..., ..., 4))"
         );
+        // Sprint 396: island-mode MUL sequencing holds the PC through the
+        // extended-mode block; the classic 7-bit paths have no stall hook.
+        assert!(
+            !self.mul_island || self.wide_pc,
+            "with_mul_island() requires with_wide_pc()"
+        );
 
         let mut idx = wire_v2_cpu(
             sim,
@@ -465,6 +484,7 @@ impl V2Builder {
             self.rom_size,
             self.ram_size,
             self.pc_addr_bits(),
+            self.mul_island,
         );
 
         // Sprint 147: compute zone closures with placed-tile restriction.
@@ -481,7 +501,7 @@ impl V2Builder {
         idx.commit_scope = sim.compute_zone_closure_restricted(&commit_seeds, &idx.placed_mask);
 
         // Sprint 147: convert Vec<u32> scopes to bitset masks for masked drain.
-        let num_segments = (sim.tile_count() + 63) / 64;
+        let num_segments = sim.tile_count().div_ceil(64);
         idx.pipeline_scope_mask = scope_to_mask(&idx.pipeline_scope, num_segments);
         idx.branch_scope_mask = scope_to_mask(&idx.branch_scope, num_segments);
         idx.commit_scope_mask = scope_to_mask(&idx.commit_scope, num_segments);

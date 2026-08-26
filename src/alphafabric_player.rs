@@ -229,10 +229,10 @@ pub fn build_af_html(configs: &[AfConfig]) -> Result<String, String> {
 pub fn export_default_af_player(path: impl AsRef<Path>) -> Result<(), String> {
     let html = build_af_html(&default_configs())?;
     let path = path.as_ref();
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            create_dir_all(parent).map_err(|e: io::Error| e.to_string())?;
-        }
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        create_dir_all(parent).map_err(|e: io::Error| e.to_string())?;
     }
     write(path, html).map_err(|e: io::Error| e.to_string())
 }

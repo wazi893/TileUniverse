@@ -298,7 +298,7 @@ engine = tu.load_config("scenario.yaml")
 ## Building from Source
 
 ```bash
-git clone https://github.com/tileuniverse/tileuniverse
+git clone https://github.com/wazi893/TileUniverse
 cd tileuniverse/engine/python
 
 # Install build tools
@@ -325,7 +325,7 @@ If TileUniverse contributes to your research, please cite:
   title     = {TileUniverse: GPU-Accelerated Parallel Universe Simulation Engine},
   author    = {TileUniverse Contributors},
   year      = {2024},
-  url       = {https://github.com/tileuniverse/tileuniverse},
+  url       = {https://github.com/wazi893/TileUniverse},
   note      = {40B logic evals/sec on consumer GPU hardware}
 }
 ```

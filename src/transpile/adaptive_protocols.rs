@@ -305,8 +305,8 @@ impl AdaptiveProtocolSelector {
         let coefficient = protocol.error_coefficient;
 
         // Error suppression (clamped to min achievable error)
-        let p_out = (coefficient * p_in.powf(exponent)).max(protocol.min_output_error);
-        p_out
+
+        (coefficient * p_in.powf(exponent)).max(protocol.min_output_error)
     }
 
     /// Optimize protocol mix for total cost

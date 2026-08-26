@@ -75,7 +75,7 @@ pub struct DetectionReport {
 fn sample_field(sim: &Simulation, sel: FieldSelect, x: usize, y: usize) -> u32 {
     match sel {
         FieldSelect::Power => sim.get_power_field_for_test(x, y) as u32,
-        FieldSelect::LogicField => sim.get_logic_field_for_test(x, y) as u32,
+        FieldSelect::LogicField => sim.get_logic_field_for_test(x, y),
         FieldSelect::Clock => sim.get_clock_field_for_test(x, y) as u32,
         FieldSelect::Heat => sim.get_heat_field_for_test(x, y),
         FieldSelect::Charge => sim.get_charge_field_for_test(x, y),
@@ -223,7 +223,7 @@ pub fn detect_edges_u32(sim: &Simulation, sel: FieldSelect, params: &PatternPara
                     continue;
                 }
                 let nv = sample_field(sim, sel, ux, uy);
-                let diff = if v >= nv { v - nv } else { nv - v };
+                let diff = v.abs_diff(nv);
                 if diff > max_diff {
                     max_diff = diff;
                 }
@@ -284,27 +284,27 @@ pub fn detect_oscillators(sim: &Simulation) -> Vec<OscillatorCandidate> {
     // Conservative heuristic: flag NOT gate with wires left and right as a simple motif.
     for y in 0..HEIGHT {
         for x in 0..WIDTH {
-            if let Some(t) = sim.tilemap.get_tile(x, y) {
-                if matches!(t.meta.tile_type, TileType::Not) {
-                    let left_ok = x > 0
-                        && sim
-                            .tilemap
-                            .get_tile(x - 1, y)
-                            .map(|lt| matches!(lt.meta.tile_type, TileType::Wire))
-                            .unwrap_or(false);
-                    let right_ok = x + 1 < WIDTH
-                        && sim
-                            .tilemap
-                            .get_tile(x + 1, y)
-                            .map(|rt| matches!(rt.meta.tile_type, TileType::Wire))
-                            .unwrap_or(false);
-                    if left_ok && right_ok {
-                        out.push(OscillatorCandidate {
-                            x: x as u32,
-                            y: y as u32,
-                            reason: "local_not_motif",
-                        });
-                    }
+            if let Some(t) = sim.tilemap.get_tile(x, y)
+                && matches!(t.meta.tile_type, TileType::Not)
+            {
+                let left_ok = x > 0
+                    && sim
+                        .tilemap
+                        .get_tile(x - 1, y)
+                        .map(|lt| matches!(lt.meta.tile_type, TileType::Wire))
+                        .unwrap_or(false);
+                let right_ok = x + 1 < WIDTH
+                    && sim
+                        .tilemap
+                        .get_tile(x + 1, y)
+                        .map(|rt| matches!(rt.meta.tile_type, TileType::Wire))
+                        .unwrap_or(false);
+                if left_ok && right_ok {
+                    out.push(OscillatorCandidate {
+                        x: x as u32,
+                        y: y as u32,
+                        reason: "local_not_motif",
+                    });
                 }
             }
         }

@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ControlEval · Thermal Covert Channel</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  :root{
+    --bg:#070810; --panel:#0e1018; --line:#222637; --txt:#c6cad8; --dim:#646a82;
+    --accent:#8a8aff; --accent2:#aab0ff; --good:#46d08a; --bad:#ff4d5e; --warn:#e0b24a; --adv:#ff7a4d;
+  }
+  html,body{ height:100%; }
+  body{ background:var(--bg); color:var(--txt); height:100vh; overflow:hidden; display:flex; flex-direction:column;
+    font-family:'Consolas','SF Mono','Fira Code',ui-monospace,monospace; -webkit-font-smoothing:antialiased; }
+  header{ display:flex; align-items:center; gap:14px; padding:9px 16px; flex-shrink:0; z-index:5;
+    background:linear-gradient(180deg,#0d1018,#090b12); border-bottom:1px solid var(--line); }
+  .brand{ display:flex; align-items:baseline; gap:9px; margin-right:4px; }
+  .brand .logo{ font-size:15px; font-weight:700; letter-spacing:.4px; color:#eef3ff; }
+  .brand .logo b{ color:var(--accent2); }
+  .brand .sub{ font-size:10px; color:var(--dim); letter-spacing:1.2px; text-transform:uppercase; }
+  .sep{ width:1px; height:26px; background:var(--line); }
+  select{ background:#141722; color:var(--accent2); border:1px solid #2c3146; border-radius:6px; padding:5px 9px; font:inherit; font-size:12px; cursor:pointer; outline:none; }
+  select:hover{ border-color:#3e4566; }
+  .transport{ display:flex; gap:6px; }
+  .tbtn{ width:34px; height:30px; display:flex; align-items:center; justify-content:center; background:#141722; border:1px solid #2c3146; border-radius:6px; color:var(--accent2); font-size:13px; cursor:pointer; transition:all .12s; user-select:none; }
+  .tbtn:hover{ border-color:#5a5a82; background:#1a1a2c; color:#fff; }
+  .tbtn.play{ width:42px; background:#23234a; border-color:#4a4a8a; }
+  .scrub-wrap{ flex:1; display:flex; align-items:center; gap:10px; min-width:120px; }
+  input[type=range]{ -webkit-appearance:none; appearance:none; height:4px; border-radius:3px; background:#1f2433; outline:none; cursor:pointer; }
+  input[type=range].scrub{ flex:1; }
+  input[type=range]::-webkit-slider-thumb{ -webkit-appearance:none; width:14px; height:14px; border-radius:50%; background:var(--accent2); border:2px solid #070810; box-shadow:0 0 8px var(--accent); }
+  .speed{ display:flex; align-items:center; gap:6px; font-size:11px; color:var(--dim); } .speed input{ width:70px; }
+  .tickc{ font-size:12px; color:var(--accent2); min-width:96px; text-align:right; white-space:nowrap; } .tickc b{ color:#fff; }
+
+  #stage{ flex:1; display:flex; overflow:hidden; position:relative; }
+  #canvas-wrap{ flex:1; position:relative; overflow:hidden; background:radial-gradient(ellipse at center,#0a0c16,#070810); display:flex; flex-direction:column; }
+  #heatwrap{ flex:1; position:relative; }
+  canvas#heat{ display:block; position:absolute; inset:0; }
+  .overlay{ position:absolute; pointer-events:none; }
+  #status{ left:16px; top:14px; font-size:11px; line-height:1.7; }
+  #status .l1{ color:#fff; font-weight:600; font-size:13px; } #status .l2{ color:var(--dim); }
+  #verdict{ right:16px; top:12px; padding:6px 11px; border-radius:7px; font-size:12px; font-weight:700; }
+  #verdict.alert{ background:rgba(255,77,94,0.14); border:1px solid #5a1e28; color:var(--bad); }
+  #verdict.clear{ background:rgba(70,208,138,0.12); border:1px solid #1e4a40; color:var(--good); }
+  #legend{ left:16px; bottom:12px; display:flex; gap:14px; font-size:10.5px; flex-wrap:wrap; }
+  #legend .li{ display:flex; align-items:center; gap:6px; color:var(--dim); }
+  #legend .sw{ width:12px; height:12px; border-radius:3px; }
+
+  #decode{ flex-shrink:0; height:96px; border-top:1px solid var(--line); background:#080a12; padding:9px 16px; }
+  #decode h3{ font-size:9.5px; color:var(--dim); text-transform:uppercase; letter-spacing:1.3px; margin-bottom:6px; }
+  canvas#bits{ display:block; width:100%; height:54px; }
+
+  #panel{ width:322px; flex-shrink:0; background:var(--panel); border-left:1px solid var(--line); display:flex; flex-direction:column; overflow-y:auto; }
+  .sec{ padding:13px 16px; border-bottom:1px solid #181a26; }
+  .sec h2{ font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:1.4px; margin-bottom:9px; font-weight:600; }
+  .hero{ border-radius:9px; padding:14px; }
+  .hero.alert{ background:linear-gradient(150deg,#240d12,#1a0d16); border:1px solid #5a1e28; }
+  .hero.clear{ background:linear-gradient(150deg,#0c1f1b,#0d1320); border:1px solid #1e4a40; }
+  .hero .num{ font-size:32px; font-weight:800; letter-spacing:-1px; color:#fff; line-height:1; }
+  .hero .num small{ font-size:14px; font-weight:700; }
+  .hero.alert .num small{ color:var(--bad); } .hero.clear .num small{ color:var(--good); }
+  .hero .label{ font-size:11px; margin-top:4px; } .hero.alert .label{ color:var(--bad); } .hero.clear .label{ color:var(--good); }
+  .hero .meta{ margin-top:9px; font-size:10.5px; color:var(--dim); line-height:1.6; } .hero .meta b{ color:#b9c0d4; }
+  .stat-row{ display:flex; justify-content:space-between; font-size:12px; padding:3px 0; }
+  .stat-row .k{ color:var(--dim); } .stat-row .v{ color:#cfd4e4; } .stat-row .v b{ color:#fff; }
+  .blurb{ font-size:11px; color:#8088a0; line-height:1.7; } .blurb b{ color:var(--accent2); } .blurb .r{ color:var(--bad); } .blurb .g{ color:var(--good); }
+  ::-webkit-scrollbar{ width:8px; } ::-webkit-scrollbar-thumb{ background:#222637; border-radius:4px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand"><span class="logo">Control<b>Eval</b></span><span class="sub">thermal covert channel</span></div>
+  <div class="sep"></div>
+  <select id="run-select" title="Run"></select>
+  <div class="sep"></div>
+  <div class="transport">
+    <div class="tbtn" id="btn-first" title="Restart">⏮</div>
+    <div class="tbtn play" id="btn-play" title="Play / Pause (Space)">▶</div>
+  </div>
+  <div class="scrub-wrap"><input type="range" class="scrub" id="scrub" min="0" max="1" value="0" step="1"></div>
+  <div class="speed"><span>spd</span><input type="range" id="speed" min="1" max="30" value="12"></div>
+  <div class="tickc" id="tickc">tick <b>0</b></div>
+</header>
+
+<div id="stage">
+  <div id="canvas-wrap">
+    <div id="heatwrap">
+      <canvas id="heat"></canvas>
+      <div class="overlay" id="status"><div class="l1" id="st-name">—</div><div class="l2" id="st-sub">—</div></div>
+      <div class="overlay" id="verdict"></div>
+      <div class="overlay" id="legend">
+        <div class="li"><span class="sw" style="background:var(--adv)"></span>adversary core</div>
+        <div class="li"><span class="sw" style="background:#ffd24d"></span>shared cooling zone (carrier)</div>
+        <div class="li"><span class="sw" style="background:var(--accent2)"></span>receiver</div>
+        <div class="li"><span class="sw" style="background:var(--bad)"></span>monitor (alerted)</div>
+      </div>
+    </div>
+    <div id="decode">
+      <h3>Receiver decode &nbsp;·&nbsp; secret 0x<span id="dec-secret">00</span> &nbsp;·&nbsp; green = correct, red = bit error, ▮ = channel contained</h3>
+      <canvas id="bits"></canvas>
+    </div>
+  </div>
+
+  <aside id="panel">
+    <div class="sec">
+      <h2 id="hero-h">Detection</h2>
+      <div class="hero" id="hero">
+        <div class="num"><span id="h-num">—</span> <small id="h-unit"></small></div>
+        <div class="label" id="h-label">—</div>
+        <div class="meta" id="h-meta"></div>
+      </div>
+    </div>
+    <div class="sec">
+      <h2>This run</h2>
+      <div class="stat-row"><span class="k">monitor verdict</span><span class="v"><b id="s-verdict">—</b></span></div>
+      <div class="stat-row"><span class="k">detection latency</span><span class="v" id="s-lat">—</span></div>
+      <div class="stat-row"><span class="k">periodic structure</span><span class="v" id="s-per">—</span></div>
+      <div class="stat-row"><span class="k">bits leaked / sent</span><span class="v" id="s-leak">—</span></div>
+      <div class="stat-row"><span class="k">receiver BER</span><span class="v" id="s-ber">—</span></div>
+      <div class="stat-row"><span class="k">monitor score</span><span class="v" id="s-score">—</span></div>
+    </div>
+    <div class="sec">
+      <div class="blurb" id="blurb"></div>
+    </div>
+  </aside>
+</div>
+
+<script>
+const BUNDLE = /*__CTRL_BUNDLE__*/null;
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+// Role tiles, in REGION-local coords (derived from control_eval's fixed layout).
+const ROLES = {
+  adv:   {x:4,  y:2,  label:'ADV', color:'#ff7a4d'},
+  rx:    {x:20, y:2,  label:'RX',  color:'#aab0ff'},
+  mon:   {x:20, y:8,  label:'MON', color:'#ff4d5e'},
+};
+const ZONE = {y:4, x0:4, x1:21}; // bright horizontal cooling-zone bus
+
+let R = 0;          // run index
+let frame = 0;      // frame index
+let playing = true;
+let raf = null, acc = 0, last = 0;
+
+const heat = document.getElementById('heat'), hx = heat.getContext('2d');
+const bitsC = document.getElementById('bits'), bx = bitsC.getContext('2d');
+const scrub = document.getElementById('scrub');
+const W = BUNDLE.w, H = BUNDLE.h;
+
+function run(){ return BUNDLE.runs[R]; }
+function curTick(){ return run().frameTicks[frame]; }
+
+// 16-level heat colormap: black -> deep red -> orange -> yellow -> white.
+function heatColor(l){
+  if(l<=0) return '#0a0c14';
+  const t = l/15;
+  let r,g,b;
+  if(t<0.5){ const u=t/0.5; r=Math.round(40+215*u); g=Math.round(10+60*u); b=Math.round(20+10*u); }
+  else { const u=(t-0.5)/0.5; r=255; g=Math.round(70+185*u); b=Math.round(30+200*u); }
+  return `rgb(${r},${g},${b})`;
+}
+
+function fit(c){
+  const r=c.getBoundingClientRect(), dpr=window.devicePixelRatio||1;
+  c.width=Math.max(1,Math.round(r.width*dpr)); c.height=Math.max(1,Math.round(r.height*dpr));
+  return {w:r.width,h:r.height,dpr};
+}
+
+function drawHeat(){
+  const {w,h,dpr}=fit(heat); hx.setTransform(dpr,0,0,dpr,0,0); hx.clearRect(0,0,w,h);
+  const pad=24;
+  const cell=Math.max(4, Math.min((w-2*pad)/W, (h-2*pad)/H));
+  const ox=(w-cell*W)/2, oy=(h-cell*H)/2;
+  const f=run().frames[frame];
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++){
+    const l=parseInt(f[y*W+x],16);
+    hx.fillStyle=heatColor(l);
+    hx.fillRect(ox+x*cell, oy+y*cell, cell-1, cell-1);
+    if(l>=11){ hx.fillStyle='rgba(255,220,150,'+((l-10)/8)+')'; hx.fillRect(ox+x*cell-1, oy+y*cell-1, cell+1, cell+1); }
+  }
+  // role labels
+  hx.font=`bold ${Math.max(8,cell*0.42)}px Consolas, monospace`; hx.textAlign='center'; hx.textBaseline='middle';
+  const contained = run().detectionTick!=null && curTick()>=run().detectionTick;
+  for(const k in ROLES){ const role=ROLES[k];
+    const cx=ox+(role.x+0.5)*cell, cy=oy+(role.y+0.5)*cell;
+    let col=role.color; if(k==='mon' && !contained) col=css('--dim');
+    hx.strokeStyle=col; hx.lineWidth=1.5; hx.strokeRect(ox+role.x*cell-1, oy+role.y*cell-1, cell+1, cell+1);
+    hx.fillStyle=col; hx.fillText(role.label, cx, oy+role.y*cell-cell*0.55);
+  }
+  // zone bus bracket
+  hx.strokeStyle='rgba(255,210,77,0.5)'; hx.lineWidth=1; hx.setLineDash([3,3]);
+  hx.strokeRect(ox+ZONE.x0*cell-2, oy+ZONE.y*cell-2, (ZONE.x1-ZONE.x0)*cell+3, cell+3); hx.setLineDash([]);
+}
+
+function drawBits(){
+  const {w,h,dpr}=fit(bitsC); bx.setTransform(dpr,0,0,dpr,0,0); bx.clearRect(0,0,w,h);
+  const r=run(); const tick=curTick();
+  const shown=r.bits.filter(b=>b.tick<=tick);
+  const n=Math.max(r.bits.length,1);
+  const cw=Math.min(22, (w-10)/n); const bh=Math.min(26,h-20); const oy=4;
+  for(let i=0;i<r.bits.length;i++){
+    const b=r.bits[i]; const x=5+i*cw;
+    const revealed=b.tick<=tick;
+    if(!revealed){ bx.fillStyle='#11131d'; bx.fillRect(x,oy,cw-2,bh); continue; }
+    bx.fillStyle = b.correct ? css('--good') : css('--bad');
+    bx.globalAlpha = b.before ? 1 : 0.4; bx.fillRect(x,oy,cw-2,bh); bx.globalAlpha=1;
+    bx.fillStyle='rgba(0,0,0,0.8)'; bx.font=`${Math.min(13,cw)}px Consolas, monospace`; bx.textAlign='center'; bx.textBaseline='middle';
+    bx.fillText(b.value, x+(cw-2)/2, oy+bh/2);
+  }
+  // containment marker
+  if(r.detectionTick!=null){
+    const sealed=r.bits.filter(b=>b.tick<r.detectionTick).length;
+    const mx=5+sealed*cw;
+    bx.strokeStyle=css('--bad'); bx.lineWidth=2; bx.setLineDash([4,3]);
+    bx.beginPath(); bx.moveTo(mx,0); bx.lineTo(mx,bh+oy+4); bx.stroke(); bx.setLineDash([]);
+    if(tick>=r.detectionTick){ bx.fillStyle=css('--bad'); bx.font='bold 10px Consolas, monospace'; bx.textAlign='left';
+      bx.fillText('▮ contained', mx+4, h-6); }
+  }
+  bx.fillStyle=css('--dim'); bx.font='10px Consolas, monospace'; bx.textAlign='right';
+  bx.fillText(`${shown.length} bits decoded`, w-4, h-6);
+}
+
+function drawPanel(){
+  const r=run();
+  document.getElementById('st-name').textContent=r.label;
+  document.getElementById('st-sub').textContent=`secret 0x${r.secretHex} · ${r.ticks} ticks · ${W}×${H} cooling region`;
+  document.getElementById('dec-secret').textContent=r.secretHex;
+
+  const tick=curTick();
+  const alerted = r.detectionTick!=null && tick>=r.detectionTick;
+  const v=document.getElementById('verdict');
+  if(r.adversary){
+    v.className = alerted ? 'alert' : '';
+    v.style.cssText = alerted ? '' : 'background:rgba(255,122,77,0.14);border:1px solid #6a3a28;color:var(--adv)';
+    v.textContent = alerted ? '⚠ CHANNEL CONTAINED' : '🔓 exfiltrating…';
+  } else { v.className='clear'; v.textContent='✓ benign — monitor quiet'; }
+
+  const hero=document.getElementById('hero');
+  if(r.adversary){
+    hero.className='hero alert';
+    document.getElementById('hero-h').textContent='Bits leaked before catch';
+    document.getElementById('h-num').textContent=r.bitsLeaked;
+    document.getElementById('h-unit').textContent=`/ ${r.bitsTransmitted} sent`;
+    document.getElementById('h-unit').style.color='var(--bad)';
+    document.getElementById('h-label').textContent='received correctly before containment';
+    document.getElementById('h-meta').innerHTML=`monitor alerted after <b>${r.detectionLatency}</b> ticks · then the channel is cut`;
+  } else {
+    hero.className='hero clear';
+    document.getElementById('hero-h').textContent='False positives';
+    document.getElementById('h-num').textContent='0';
+    document.getElementById('h-unit').textContent='alerts';
+    document.getElementById('h-unit').style.color='var(--good)';
+    document.getElementById('h-label').textContent='benign workload, monitor stays quiet';
+    document.getElementById('h-meta').innerHTML=`score <b>${r.monitorScore}</b> stayed under the alert threshold`;
+  }
+
+  document.getElementById('s-verdict').textContent = r.detectionTick!=null ? 'ALERT' : 'quiet';
+  document.getElementById('s-lat').textContent = r.detectionLatency!=null ? r.detectionLatency+' ticks' : '—';
+  document.getElementById('s-per').textContent = r.detectedPeriod!=null ? '~'+r.detectedPeriod+'t' : '—';
+  document.getElementById('s-leak').textContent = r.adversary ? `${r.bitsLeaked} / ${r.bitsTransmitted}` : '—';
+  document.getElementById('s-ber').textContent = r.adversary ? `${r.berPre}% → ${r.berPost}%` : '—';
+  document.getElementById('s-score').textContent = r.monitorScore;
+
+  document.getElementById('blurb').innerHTML = r.adversary
+    ? `An untrusted co-tenant modulates the <b>shared cooling zone's</b> heat to <span class="r">exfiltrate a secret byte</span>. `+
+      `A trusted monitor phase-folds the carrier, spots its periodic structure, and <span class="g">contains the channel</span> — `+
+      `but only after some bits already leaked. Everything is deterministic: same secret, same heat, same catch tick, every run.`
+    : `The same rack with <b>no adversary</b>. Aperiodic benign heat folds flat, the monitor's score stays under threshold, `+
+      `and it raises <span class="g">zero false alarms</span> — the control that makes the detection above trustworthy.`;
+}
+
+function render(){ drawHeat(); drawBits(); drawPanel();
+  document.getElementById('tickc').innerHTML=`tick <b>${curTick()}</b>`;
+  scrub.value=frame; }
+
+function setRun(i){ R=i; frame=0; scrub.max=run().frames.length-1; render(); }
+
+// transport
+function loop(ts){
+  if(!last) last=ts; const dt=ts-last; last=ts;
+  if(playing){ acc+=dt; const spd=+document.getElementById('speed').value;
+    const step=1000/(spd*3);
+    while(acc>=step){ acc-=step; frame++; if(frame>=run().frames.length){ frame=run().frames.length-1; playing=false; setPlay(); break; } }
+    render();
+  }
+  raf=requestAnimationFrame(loop);
+}
+function setPlay(){ document.getElementById('btn-play').textContent=playing?'⏸':'▶'; }
+document.getElementById('btn-play').onclick=()=>{ if(frame>=run().frames.length-1){frame=0;} playing=!playing; last=0; setPlay(); };
+document.getElementById('btn-first').onclick=()=>{ frame=0; render(); };
+scrub.oninput=e=>{ frame=+e.target.value; playing=false; setPlay(); render(); };
+document.getElementById('run-select').onchange=e=>{ setRun(+e.target.value); };
+window.addEventListener('keydown',e=>{ if(e.code==='Space'){ e.preventDefault(); document.getElementById('btn-play').click(); }});
+window.addEventListener('resize',render);
+
+// init
+document.getElementById('run-select').innerHTML=BUNDLE.runs.map((r,i)=>`<option value="${i}">${r.name}</option>`).join('');
+setRun(BUNDLE.default||0);
+setPlay();
+raf=requestAnimationFrame(loop);
+</script>
+</body>
+</html>

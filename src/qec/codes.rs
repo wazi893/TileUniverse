@@ -27,16 +27,14 @@ impl RepetitionCode {
     pub fn new(n: usize) -> Self {
         assert!(n >= 3, "Need at least 3 qubits for error correction");
 
-        let code = Self {
-            n,
-            tableau: StabilizerTableau::new(n),
-        };
-
         // The |0...0⟩ state is already in the code space
         // Stabilizers are ZZ pairs: Z0Z1, Z1Z2, ..., Z_{n-2}Z_{n-1}
         // Plus one logical Z: Z0Z1...Z_{n-1}
 
-        code
+        Self {
+            n,
+            tableau: StabilizerTableau::new(n),
+        }
     }
 
     /// Get the i-th stabilizer generator: Z_i Z_{i+1}
@@ -400,24 +398,24 @@ impl SteaneCode {
     ///
     /// Correction is the same as the error (Pauli operators are self-inverse)
     pub fn correct(&mut self, qubit: Option<usize>, error_type: char) {
-        if let Some(q) = qubit {
-            if q < 7 {
-                match error_type {
-                    'X' => {
-                        self.tableau.pauli_x(q);
-                        self.x_errors[q] ^= true;
-                    }
-                    'Y' => {
-                        self.tableau.pauli_y(q);
-                        self.x_errors[q] ^= true;
-                        self.z_errors[q] ^= true;
-                    }
-                    'Z' => {
-                        self.tableau.pauli_z(q);
-                        self.z_errors[q] ^= true;
-                    }
-                    _ => {}
+        if let Some(q) = qubit
+            && q < 7
+        {
+            match error_type {
+                'X' => {
+                    self.tableau.pauli_x(q);
+                    self.x_errors[q] ^= true;
                 }
+                'Y' => {
+                    self.tableau.pauli_y(q);
+                    self.x_errors[q] ^= true;
+                    self.z_errors[q] ^= true;
+                }
+                'Z' => {
+                    self.tableau.pauli_z(q);
+                    self.z_errors[q] ^= true;
+                }
+                _ => {}
             }
         }
     }
@@ -517,38 +515,36 @@ impl SurfaceCode {
             }
         }
 
-        // Boundary stabilizers (2-qubit) for rotated surface code
-        // These complete the stabilizer set at the edges
+        // Boundary 2-qubit stabs complete the rotated code. They must sit on
+        // the edge of an *opposite-type* 4-qubit face: a Z 2-qubit on an
+        // X-plaquette edge (and X on a Z-plaquette edge). Same-type placement
+        // made the 2-qubit a subset of a 4-qubit (parallel syndrome-graph
+        // edges that differ by a logical) and left the (0,0)/(d-1,d-1)
+        // corners in no Z-stabilizer (undetectable weight-1 X).
 
-        // Top edge: horizontal 2-qubit stabilizers at certain positions
+        // Top/bottom: X 2-qubits on Z-plaquette horizontal edges.
         for c in 0..(width - 1) {
             if c % 2 == 1 {
-                // X stabilizer on top boundary at odd columns
                 x_stabilizers.push(vec![c, c + 1]);
             }
         }
-
-        // Bottom edge: horizontal 2-qubit stabilizers
         for c in 0..(width - 1) {
             if c % 2 == 0 {
-                // X stabilizer on bottom boundary at even columns
                 let base = (height - 1) * width;
                 x_stabilizers.push(vec![base + c, base + c + 1]);
             }
         }
 
-        // Left edge: vertical 2-qubit stabilizers
+        // Left/right: Z 2-qubits on X-plaquette vertical edges.
+        // X-plaquettes have even (r+c); left column c=0 → even r; right
+        // column of odd d → odd r.
         for r in 0..(height - 1) {
-            if r % 2 == 1 {
-                // Z stabilizer on left boundary at odd rows
+            if r % 2 == 0 {
                 z_stabilizers.push(vec![r * width, (r + 1) * width]);
             }
         }
-
-        // Right edge: vertical 2-qubit stabilizers
         for r in 0..(height - 1) {
-            if r % 2 == 0 {
-                // Z stabilizer on right boundary at even rows
+            if r % 2 == 1 {
                 z_stabilizers.push(vec![r * width + (width - 1), (r + 1) * width + (width - 1)]);
             }
         }
@@ -661,22 +657,20 @@ impl SurfaceCode {
         }
     }
 
-    /// Get logical X operator (horizontal chain)
+    /// Get logical X operator (vertical chain connecting the top/bottom X-boundaries).
     pub fn logical_x(&self) -> PauliOperator {
         let mut op = PauliOperator::identity(self.n_data);
-        // X chain along top row
-        for col in 0..self.width {
-            op.set_x(self.qubit_index(0, col), true);
+        for row in 0..self.height {
+            op.set_x(self.qubit_index(row, 0), true);
         }
         op
     }
 
-    /// Get logical Z operator (vertical chain)
+    /// Get logical Z operator (horizontal chain connecting the left/right Z-boundaries).
     pub fn logical_z(&self) -> PauliOperator {
         let mut op = PauliOperator::identity(self.n_data);
-        // Z chain along left column
-        for row in 0..self.height {
-            op.set_z(self.qubit_index(row, 0), true);
+        for col in 0..self.width {
+            op.set_z(self.qubit_index(0, col), true);
         }
         op
     }
@@ -784,12 +778,11 @@ impl SurfaceCode {
 
         // Decode X syndrome → Z errors
         for (stab_idx, &syn_bit) in x_syn.iter().enumerate() {
-            if syn_bit == 1 {
-                if let Some(&q) = self.x_stabilizers.get(stab_idx).and_then(|qs| qs.first()) {
-                    if !z_corrections.contains(&q) {
-                        z_corrections.push(q);
-                    }
-                }
+            if syn_bit == 1
+                && let Some(&q) = self.x_stabilizers.get(stab_idx).and_then(|qs| qs.first())
+                && !z_corrections.contains(&q)
+            {
+                z_corrections.push(q);
             }
         }
 
@@ -833,17 +826,16 @@ impl SurfaceCode {
         self.z_errors = vec![false; self.n_data];
     }
 
-    /// Check if a logical X error has occurred
+    /// Check if a logical X error has occurred.
     ///
-    /// A logical X error flips the logical qubit (|0_L⟩ ↔ |1_L⟩).
-    /// For the surface code, this happens when an X error chain
-    /// connects the top and bottom rough boundaries.
+    /// Residual X is a logical X iff it anticommutes with logical Z. Logical Z
+    /// is a horizontal chain (any row); we use the top row. Homologous vertical
+    /// X chains on every column are detected. Only meaningful once the syndrome
+    /// is trivial (otherwise the homology class is not well-defined).
     pub fn has_logical_x_error(&self) -> bool {
-        // Check if there's an odd number of X errors along the left column
-        // (which is the support of logical Z)
         let mut parity = false;
-        for row in 0..self.height {
-            let q = self.qubit_index(row, 0);
+        for col in 0..self.width {
+            let q = self.qubit_index(0, col);
             if self.x_errors[q] {
                 parity = !parity;
             }
@@ -851,17 +843,16 @@ impl SurfaceCode {
         parity
     }
 
-    /// Check if a logical Z error has occurred
+    /// Check if a logical Z error has occurred.
     ///
-    /// A logical Z error adds a phase to the logical qubit.
-    /// For the surface code, this happens when a Z error chain
-    /// connects the left and right smooth boundaries.
+    /// Residual Z is a logical Z iff it anticommutes with logical X. Logical X
+    /// is a vertical chain (any column); we use the left column. Homologous
+    /// horizontal Z chains on every row are detected. Only meaningful once the
+    /// syndrome is trivial.
     pub fn has_logical_z_error(&self) -> bool {
-        // Check if there's an odd number of Z errors along the top row
-        // (which is the support of logical X)
         let mut parity = false;
-        for col in 0..self.width {
-            let q = self.qubit_index(0, col);
+        for row in 0..self.height {
+            let q = self.qubit_index(row, 0);
             if self.z_errors[q] {
                 parity = !parity;
             }
@@ -869,11 +860,9 @@ impl SurfaceCode {
         parity
     }
 
-    /// Error correction cycle using Union-Find decoder
+    /// Error correction cycle using the Union-Find decoder
     ///
-    /// This uses the more sophisticated Union-Find decoder instead of
-    /// the simple greedy decoder. Achieves better performance, especially
-    /// for multiple errors.
+    /// Cluster growth + peeling, vs the simple greedy decoder on this type.
     ///
     /// Returns (success, x_corrections, z_corrections)
     pub fn error_correction_cycle_union_find(
@@ -1000,6 +989,126 @@ mod tests {
 
         // Logical X and Z should anti-commute
         assert!(!lx.commutes_with(&lz));
+    }
+
+    #[test]
+    fn test_surface_code_logical_homology_oracle() {
+        // Every vertical X chain is the same logical X (up to X-stabilizers).
+        for distance in [3, 5, 7] {
+            for col in 0..distance {
+                let mut code = SurfaceCode::new(distance);
+                for row in 0..distance {
+                    code.apply_x_error_at(code.qubit_index(row, col));
+                }
+                let (x_syn, z_syn) = code.measure_syndrome();
+                assert!(
+                    x_syn.iter().all(|&s| s == 0) && z_syn.iter().all(|&s| s == 0),
+                    "d={distance} col={col}: full-column X must have trivial syndrome"
+                );
+                assert!(
+                    code.has_logical_x_error(),
+                    "d={distance} col={col}: full-column X is logical X"
+                );
+                assert!(
+                    !code.has_logical_z_error(),
+                    "d={distance} col={col}: full-column X is not logical Z"
+                );
+            }
+        }
+
+        // Every horizontal Z chain is the same logical Z (up to Z-stabilizers).
+        for distance in [3, 5, 7] {
+            for row in 0..distance {
+                let mut code = SurfaceCode::new(distance);
+                for col in 0..distance {
+                    code.apply_z_error_at(code.qubit_index(row, col));
+                }
+                let (x_syn, z_syn) = code.measure_syndrome();
+                assert!(
+                    x_syn.iter().all(|&s| s == 0) && z_syn.iter().all(|&s| s == 0),
+                    "d={distance} row={row}: full-row Z must have trivial syndrome"
+                );
+                assert!(
+                    code.has_logical_z_error(),
+                    "d={distance} row={row}: full-row Z is logical Z"
+                );
+                assert!(
+                    !code.has_logical_x_error(),
+                    "d={distance} row={row}: full-row Z is not logical X"
+                );
+            }
+        }
+
+        // Weight-1 Paulis are all detectable (distance ≥ 3).
+        for q in 0..9 {
+            for apply in [
+                |c: &mut SurfaceCode, q| c.apply_x_error_at(q),
+                |c: &mut SurfaceCode, q| c.apply_z_error_at(q),
+                |c: &mut SurfaceCode, q| c.apply_y_error_at(q),
+            ] {
+                let mut code = SurfaceCode::new(3);
+                apply(&mut code, q);
+                let (x_syn, z_syn) = code.measure_syndrome();
+                let trivial = x_syn.iter().all(|&s| s == 0) && z_syn.iter().all(|&s| s == 0);
+                assert!(!trivial, "weight-1 Pauli at qubit {q} must be detectable");
+            }
+        }
+    }
+
+    fn same_type_max_share(stabs: &[Vec<usize>]) -> usize {
+        let mut max_share = 0;
+        for i in 0..stabs.len() {
+            for j in (i + 1)..stabs.len() {
+                let share = stabs[i].iter().filter(|q| stabs[j].contains(q)).count();
+                max_share = max_share.max(share);
+            }
+        }
+        max_share
+    }
+
+    #[test]
+    fn test_surface_code_rotated_geometry() {
+        for distance in [3, 5, 7] {
+            let code = SurfaceCode::new(distance);
+            let n = code.n_data;
+            assert_eq!(
+                code.num_x_stabilizers() + code.num_z_stabilizers(),
+                n - 1,
+                "d={distance}: one logical qubit ⇒ n-1 independent stabs"
+            );
+
+            let mut in_x = vec![0u32; n];
+            let mut in_z = vec![0u32; n];
+            for qs in code.x_stabilizer_supports() {
+                for &q in qs {
+                    in_x[q] += 1;
+                }
+            }
+            for qs in code.z_stabilizer_supports() {
+                for &q in qs {
+                    in_z[q] += 1;
+                }
+            }
+            for q in 0..n {
+                assert!(
+                    in_x[q] >= 1,
+                    "d={distance} q={q}: missing X-stab (Z undetectable)"
+                );
+                assert!(
+                    in_z[q] >= 1,
+                    "d={distance} q={q}: missing Z-stab (X undetectable)"
+                );
+            }
+
+            assert!(
+                same_type_max_share(code.x_stabilizer_supports()) <= 1,
+                "d={distance}: X-stabs must share at most one qubit"
+            );
+            assert!(
+                same_type_max_share(code.z_stabilizer_supports()) <= 1,
+                "d={distance}: Z-stabs must share at most one qubit"
+            );
+        }
     }
 
     #[test]
@@ -1580,10 +1689,7 @@ mod tests {
         println!("Z syndrome (detects X): {:?}", z_syn);
 
         // Z syndrome should be non-trivial
-        assert!(
-            z_syn.iter().any(|&s| s == 1),
-            "Z syndrome should detect X error"
-        );
+        assert!(z_syn.contains(&1), "Z syndrome should detect X error");
         assert!(
             x_syn.iter().all(|&s| s == 0),
             "X syndrome should be trivial for X error"
@@ -1614,10 +1720,7 @@ mod tests {
         println!("Z syndrome (detects X): {:?}", z_syn);
 
         // X syndrome should be non-trivial
-        assert!(
-            x_syn.iter().any(|&s| s == 1),
-            "X syndrome should detect Z error"
-        );
+        assert!(x_syn.contains(&1), "X syndrome should detect Z error");
         assert!(
             z_syn.iter().all(|&s| s == 0),
             "Z syndrome should be trivial for Z error"

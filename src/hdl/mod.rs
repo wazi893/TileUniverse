@@ -112,11 +112,8 @@ mod tests {
         let tokens = lexer::tokenize(src).expect("should tokenize");
         // Verify that comment content does not appear as tokens
         for (tok, _) in &tokens {
-            match tok {
-                Token::Ident(s) => {
-                    assert!(s != "This" && s != "is" && s != "block" && s != "comment");
-                }
-                _ => {}
+            if let Token::Ident(s) = tok {
+                assert!(s != "This" && s != "is" && s != "block" && s != "comment");
             }
         }
         // Should still contain: Module, Ident(foo), LParen, RParen, LBrace,

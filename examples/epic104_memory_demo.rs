@@ -7,7 +7,6 @@
 
 use engine::simulation::Simulation;
 use engine::tile_meta::TileType;
-use std::sync::atomic::Ordering;
 
 fn main() {
     println!("╔═══════════════════════════════════════════════════════════════╗");

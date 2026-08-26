@@ -32,6 +32,20 @@
 //!
 //! Simulated annealing (AF2) remains the gold-quality reference; neither path
 //! claims to beat it on final quality.
+//!
+//! ## AF6: timing-aware training
+//!
+//! [`TrainConfig::timing_weight`] (default `0.0` = the AF4/AF5 objectives,
+//! bit-for-bit) adds the placement-dependent timing term
+//! ([`PlacementEnv::timing_cost`], criticality-weighted wirelength) to either
+//! objective, so a policy can be fit to pull timing-critical nets short — the
+//! learned counterpart of the timing-driven annealing track.
+//!
+//! Honest scope (measured): the reduction holds **in-distribution** (−14% on
+//! the train adders at w=2); one-shot timing quality does **not** reliably
+//! transfer to held-out wider circuits, because net-criticality structure
+//! changes with depth while the slot features are only span-normalized. See
+//! `timing_aware_training_reduces_in_distribution_timing` for the numbers.
 
 use super::circuit::Circuit;
 use super::env::PlacementEnv;
@@ -167,12 +181,67 @@ fn fanin_fanout(env: &PlacementEnv) -> (Vec<usize>, Vec<usize>) {
     (fanin, fanout)
 }
 
+/// Two-hop gate adjacency: neighbors-of-neighbors, excluding self and 1-hop.
+/// The AF6b "GNN-style" lookahead feature's support set.
+fn adjacency_2hop(adj: &[Vec<usize>]) -> Vec<Vec<usize>> {
+    adj.iter()
+        .enumerate()
+        .map(|(g, near)| {
+            let mut set: std::collections::BTreeSet<usize> = Default::default();
+            for &nb in near {
+                for &nb2 in &adj[nb] {
+                    set.insert(nb2);
+                }
+            }
+            set.remove(&g);
+            for &nb in near {
+                set.remove(&nb);
+            }
+            set.into_iter().collect()
+        })
+        .collect()
+}
+
+/// Per-gate timing criticality: max STA criticality over the gate's incident
+/// nets (0.0..=1.0). The AF6c criticality-aware feature's per-gate scalar.
+fn gate_criticality(env: &PlacementEnv) -> Vec<f64> {
+    let mut crit = vec![0.0f64; env.num_gates()];
+    for (edge, &c) in env.hyperedges().iter().zip(env.net_criticalities()) {
+        for &g in edge {
+            if c > crit[g] {
+                crit[g] = c;
+            }
+        }
+    }
+    crit
+}
+
 /// Core greedy constructive placement under explicit slot + order weights.
-fn construct_core(env: &PlacementEnv, slot: &PolicyWeights, order: &OrderWeights) -> Vec<usize> {
+/// `two_hop_weight` scores slots by distance to the centroid of the gate's
+/// *placed two-hop neighborhood* (AF6b); `crit_pull` adds extra neighbor-pull
+/// proportional to the gate's timing criticality (AF6c). `0.0` skips each
+/// computation entirely, so all pre-AF6 call paths are bit-for-bit unchanged.
+fn construct_core(
+    env: &PlacementEnv,
+    slot: &PolicyWeights,
+    order: &OrderWeights,
+    two_hop_weight: f64,
+    crit_pull: f64,
+) -> Vec<usize> {
     let n = env.num_gates();
     let canvas = env.canvas();
     let num_slots = canvas.num_slots();
     let adj = adjacency(env);
+    let adj2 = if two_hop_weight != 0.0 {
+        adjacency_2hop(&adj)
+    } else {
+        Vec::new()
+    };
+    let gate_crit = if crit_pull != 0.0 {
+        gate_criticality(env)
+    } else {
+        Vec::new()
+    };
     let (fanin, fanout) = fanin_fanout(env);
 
     // Placement order: learned linear key over [degree, fanin, fanout], desc.
@@ -218,6 +287,24 @@ fn construct_core(env: &PlacementEnv, slot: &PolicyWeights, order: &OrderWeights
         }
         let centroid = (cnt > 0).then(|| (sx / cnt as f64, sy / cnt as f64));
 
+        // Centroid of the placed TWO-HOP neighborhood (AF6b lookahead).
+        let centroid2 = if two_hop_weight != 0.0 {
+            let mut sx2 = 0.0;
+            let mut sy2 = 0.0;
+            let mut cnt2 = 0u32;
+            for &nb in &adj2[g] {
+                if slot_of_gate[nb] != usize::MAX {
+                    let (x, y) = canvas.slot_coord(slot_of_gate[nb]);
+                    sx2 += x as f64;
+                    sy2 += y as f64;
+                    cnt2 += 1;
+                }
+            }
+            (cnt2 > 0).then(|| (sx2 / cnt2 as f64, sy2 / cnt2 as f64))
+        } else {
+            None
+        };
+
         let mut best_slot = usize::MAX;
         let mut best_score = f64::INFINITY;
         for s in 0..num_slots {
@@ -235,10 +322,18 @@ fn construct_core(env: &PlacementEnv, slot: &PolicyWeights, order: &OrderWeights
             let f_density = local_density(s, &gate_of_slot, &canvas) / 8.0;
             let f_boundary = boundary_distance(s, &canvas) / grid_max;
 
-            let score = slot.theta[0] * f_neigh
+            let mut score = slot.theta[0] * f_neigh
                 + slot.theta[1] * f_center
                 + slot.theta[2] * f_density
                 + slot.theta[3] * f_boundary;
+            if let Some((cx, cy)) = centroid2 {
+                score += two_hop_weight * (((xf - cx).abs() + (yf - cy).abs()) / span);
+            }
+            if crit_pull != 0.0 {
+                // Critical gates get extra pull toward their placed neighbors —
+                // the transferable "place critical gates tighter" lever.
+                score += crit_pull * gate_crit[g] * f_neigh;
+            }
             if score < best_score {
                 best_score = score;
                 best_slot = s;
@@ -256,12 +351,87 @@ fn construct_core(env: &PlacementEnv, slot: &PolicyWeights, order: &OrderWeights
 /// degree-descending order (AF4 path). Pure; apply with
 /// [`PlacementEnv::restore_assignment`].
 pub fn construct_placement(env: &PlacementEnv, weights: &PolicyWeights) -> Vec<usize> {
-    construct_core(env, weights, &OrderWeights::degree_descending())
+    construct_core(env, weights, &OrderWeights::degree_descending(), 0.0, 0.0)
 }
 
 /// Construct under a full learned [`Policy`] (slot + order; AF5 path).
 pub fn construct_with_policy(env: &PlacementEnv, policy: &Policy) -> Vec<usize> {
-    construct_core(env, &policy.slot, &policy.order)
+    construct_core(env, &policy.slot, &policy.order, 0.0, 0.0)
+}
+
+/// AF6b: a [`Policy`] extended with the two-hop-centroid lookahead weight.
+/// `two_hop == 0.0` is bit-for-bit the base policy (the feature is skipped).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TwoHopPolicy {
+    pub policy: Policy,
+    pub two_hop: f64,
+}
+
+impl TwoHopPolicy {
+    pub fn hand_tuned() -> Self {
+        Self {
+            policy: Policy::hand_tuned(),
+            two_hop: 0.0,
+        }
+    }
+}
+
+impl std::fmt::Display for TwoHopPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} two_hop={:.2}", self.policy, self.two_hop)
+    }
+}
+
+/// Construct under an AF6b two-hop-extended policy.
+pub fn construct_with_two_hop(env: &PlacementEnv, p: &TwoHopPolicy) -> Vec<usize> {
+    construct_core(env, &p.policy.slot, &p.policy.order, p.two_hop, 0.0)
+}
+
+/// Apply an AF6b two-hop policy to `env`, leaving it holding the layout.
+pub fn place_two_hop(env: &mut PlacementEnv, p: &TwoHopPolicy) {
+    let assignment = construct_with_two_hop(env, p);
+    env.restore_assignment(&assignment);
+}
+
+/// AF6c: slot weights extended with the criticality-pull weight — the
+/// *transferable* timing lever. `crit_pull == 0.0` is bit-for-bit the base
+/// 4-feature policy (the feature is skipped).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CritPolicy {
+    pub slot: PolicyWeights,
+    pub crit_pull: f64,
+}
+
+impl CritPolicy {
+    pub fn hand_tuned() -> Self {
+        Self {
+            slot: PolicyWeights::hand_tuned(),
+            crit_pull: 0.0,
+        }
+    }
+}
+
+impl std::fmt::Display for CritPolicy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} crit_pull={:.2}", self.slot, self.crit_pull)
+    }
+}
+
+/// Construct under an AF6c criticality-aware policy (degree-descending order).
+pub fn construct_with_crit(env: &PlacementEnv, p: &CritPolicy) -> Vec<usize> {
+    construct_core(
+        env,
+        &p.slot,
+        &OrderWeights::degree_descending(),
+        0.0,
+        p.crit_pull,
+    )
+}
+
+/// Apply an AF6c criticality-aware policy to `env`.
+pub fn place_crit(env: &mut PlacementEnv, p: &CritPolicy) {
+    let assignment = construct_with_crit(env, p);
+    env.restore_assignment(&assignment);
 }
 
 /// Number of occupied slots among the 8 grid-neighbors of `slot`.
@@ -311,20 +481,33 @@ pub fn place_policy(env: &mut PlacementEnv, policy: &Policy) {
 // AF4: HPWL-only training (slot weights)
 // ---------------------------------------------------------------------------
 
-/// Mean HPWL ratio (constructed / row-major) over pre-built envs.
+/// The training proxy for the current layout: HPWL plus the criticality-weighted
+/// wirelength term (AF6). Both are O(pins), route-free. `timing_weight == 0.0`
+/// reduces *exactly* to HPWL (`x + 0.0 * t == x`), so the AF4/AF5 defaults are
+/// numerically unchanged.
+fn proxy_cost(env: &PlacementEnv, timing_weight: f64) -> f64 {
+    if timing_weight == 0.0 {
+        env.hpwl() as f64
+    } else {
+        env.hpwl() as f64 + timing_weight * env.timing_cost()
+    }
+}
+
+/// Mean proxy ratio (constructed / row-major) over pre-built envs.
 fn mean_hpwl_ratio_envs(
     envs: &mut [PlacementEnv],
-    baseline_hpwl: &[f64],
+    baseline_proxy: &[f64],
     weights: &PolicyWeights,
+    timing_weight: f64,
 ) -> f64 {
     if envs.is_empty() {
         return 1.0;
     }
     let mut sum = 0.0;
-    for (env, &base) in envs.iter_mut().zip(baseline_hpwl.iter()) {
+    for (env, &base) in envs.iter_mut().zip(baseline_proxy.iter()) {
         let assignment = construct_placement(env, weights);
         env.restore_assignment(&assignment);
-        sum += env.hpwl() as f64 / base.max(1.0);
+        sum += proxy_cost(env, timing_weight) / base.max(1.0);
     }
     sum / envs.len() as f64
 }
@@ -335,6 +518,11 @@ pub struct TrainConfig {
     pub iterations: usize,
     pub seed: u64,
     pub init_step: f64,
+    /// AF6: weight of the criticality-weighted-wirelength term in the training
+    /// objective (`hpwl + timing_weight * timing_cost`, and
+    /// `routed_cost + timing_weight * timing_cost` for the route-aware fit).
+    /// Default `0.0` — the AF4/AF5 objectives, bit-for-bit.
+    pub timing_weight: f64,
 }
 
 impl Default for TrainConfig {
@@ -343,6 +531,7 @@ impl Default for TrainConfig {
             iterations: 250,
             seed: 0xA11C_E5ED,
             init_step: 0.5,
+            timing_weight: 0.0,
         }
     }
 }
@@ -357,9 +546,11 @@ pub struct TrainOutcome {
     pub hand_tuned_ratio: f64,
 }
 
-/// AF4: fit slot weights to minimize mean HPWL ratio via deterministic pattern
+/// AF4: fit slot weights to minimize the mean proxy ratio (HPWL, plus the AF6
+/// timing term when `config.timing_weight > 0`) via deterministic pattern
 /// search. Fast (no routing); the one-shot output is best used as a warm-start.
 pub fn train(circuits: &[Circuit], config: &TrainConfig) -> TrainOutcome {
+    let w = config.timing_weight;
     let mut envs: Vec<PlacementEnv> = circuits
         .iter()
         .map(|c| PlacementEnv::new(c).expect("env builds"))
@@ -368,12 +559,12 @@ pub fn train(circuits: &[Circuit], config: &TrainConfig) -> TrainOutcome {
         .iter_mut()
         .map(|e| {
             e.reset();
-            e.hpwl() as f64
+            proxy_cost(e, w)
         })
         .collect();
 
     let mut theta = PolicyWeights::hand_tuned();
-    let hand_tuned_ratio = mean_hpwl_ratio_envs(&mut envs, &baseline, &theta);
+    let hand_tuned_ratio = mean_hpwl_ratio_envs(&mut envs, &baseline, &theta, w);
     let mut best = hand_tuned_ratio;
     let mut step = config.init_step;
     let mut rng = SplitMix64::new(config.seed);
@@ -383,7 +574,7 @@ pub fn train(circuits: &[Circuit], config: &TrainConfig) -> TrainOutcome {
         for k in 0..NUM_FEATURES {
             cand.theta[k] += rng.signed_unit() * step;
         }
-        let ratio = mean_hpwl_ratio_envs(&mut envs, &baseline, &cand);
+        let ratio = mean_hpwl_ratio_envs(&mut envs, &baseline, &cand, w);
         if ratio < best {
             best = ratio;
             theta = cand;
@@ -400,13 +591,161 @@ pub fn train(circuits: &[Circuit], config: &TrainConfig) -> TrainOutcome {
 }
 
 // ---------------------------------------------------------------------------
+// AF6b: two-hop-extended training (slot weights + two-hop lookahead)
+// ---------------------------------------------------------------------------
+
+/// Result of the AF6b two-hop fit.
+#[derive(Clone, Debug)]
+pub struct TwoHopOutcome {
+    pub policy: TwoHopPolicy,
+    /// Mean proxy ratio on the training set (< 1.0 better than row-major).
+    pub train_ratio: f64,
+    /// Same metric for the hand-tuned 4-feature start, for reference.
+    pub hand_tuned_ratio: f64,
+}
+
+/// AF6b: fit slot weights PLUS the two-hop-centroid lookahead weight against the
+/// training proxy (HPWL, plus the AF6 timing term if configured). Same
+/// deterministic pattern search as [`train`], one extra dimension; the base
+/// 4-feature paths are untouched (their RNG stream never sees this function).
+pub fn train_two_hop(circuits: &[Circuit], config: &TrainConfig) -> TwoHopOutcome {
+    let w = config.timing_weight;
+    let mut envs: Vec<PlacementEnv> = circuits
+        .iter()
+        .map(|c| PlacementEnv::new(c).expect("env builds"))
+        .collect();
+    let baseline: Vec<f64> = envs
+        .iter_mut()
+        .map(|e| {
+            e.reset();
+            proxy_cost(e, w)
+        })
+        .collect();
+
+    let ratio_of = |envs: &mut [PlacementEnv], baseline: &[f64], p: &TwoHopPolicy| -> f64 {
+        let mut sum = 0.0;
+        for (env, &base) in envs.iter_mut().zip(baseline.iter()) {
+            let assignment = construct_with_two_hop(env, p);
+            env.restore_assignment(&assignment);
+            sum += proxy_cost(env, w) / base.max(1.0);
+        }
+        sum / envs.len().max(1) as f64
+    };
+
+    let mut policy = TwoHopPolicy::hand_tuned();
+    let hand_tuned_ratio = ratio_of(&mut envs, &baseline, &policy);
+    let mut best = hand_tuned_ratio;
+    let mut step = config.init_step;
+    let mut rng = SplitMix64::new(config.seed);
+
+    for _ in 0..config.iterations {
+        let mut cand = policy;
+        for k in 0..NUM_FEATURES {
+            cand.policy.slot.theta[k] += rng.signed_unit() * step;
+        }
+        cand.two_hop += rng.signed_unit() * step;
+        let ratio = ratio_of(&mut envs, &baseline, &cand);
+        if ratio < best {
+            best = ratio;
+            policy = cand;
+        } else {
+            step *= 0.99;
+        }
+    }
+
+    TwoHopOutcome {
+        policy,
+        train_ratio: best,
+        hand_tuned_ratio,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AF6c: criticality-aware training (slot weights + crit-pull)
+// ---------------------------------------------------------------------------
+
+/// Result of the AF6c criticality-aware fit.
+#[derive(Clone, Debug)]
+pub struct CritOutcome {
+    pub policy: CritPolicy,
+    /// Mean proxy ratio on the training set (< 1.0 better than row-major).
+    pub train_ratio: f64,
+    /// Same metric for the hand-tuned start, for reference.
+    pub hand_tuned_ratio: f64,
+}
+
+/// AF6c: fit slot weights PLUS the criticality-pull weight. Meant to be trained
+/// with `config.timing_weight > 0` so the objective rewards short critical nets
+/// and the policy has a *criticality-aware feature* to respond with — the
+/// missing lever behind AF6a's transfer negative (the 4 generic features cannot
+/// distinguish critical gates at inference time).
+pub fn train_crit(circuits: &[Circuit], config: &TrainConfig) -> CritOutcome {
+    let w = config.timing_weight;
+    let mut envs: Vec<PlacementEnv> = circuits
+        .iter()
+        .map(|c| PlacementEnv::new(c).expect("env builds"))
+        .collect();
+    let baseline: Vec<f64> = envs
+        .iter_mut()
+        .map(|e| {
+            e.reset();
+            proxy_cost(e, w)
+        })
+        .collect();
+
+    let ratio_of = |envs: &mut [PlacementEnv], baseline: &[f64], p: &CritPolicy| -> f64 {
+        let mut sum = 0.0;
+        for (env, &base) in envs.iter_mut().zip(baseline.iter()) {
+            let assignment = construct_with_crit(env, p);
+            env.restore_assignment(&assignment);
+            sum += proxy_cost(env, w) / base.max(1.0);
+        }
+        sum / envs.len().max(1) as f64
+    };
+
+    let mut policy = CritPolicy::hand_tuned();
+    let hand_tuned_ratio = ratio_of(&mut envs, &baseline, &policy);
+    let mut best = hand_tuned_ratio;
+    let mut step = config.init_step;
+    let mut rng = SplitMix64::new(config.seed);
+
+    for _ in 0..config.iterations {
+        let mut cand = policy;
+        for k in 0..NUM_FEATURES {
+            cand.slot.theta[k] += rng.signed_unit() * step;
+        }
+        cand.crit_pull += rng.signed_unit() * step;
+        let ratio = ratio_of(&mut envs, &baseline, &cand);
+        if ratio < best {
+            best = ratio;
+            policy = cand;
+        } else {
+            step *= 0.99;
+        }
+    }
+
+    CritOutcome {
+        policy,
+        train_ratio: best,
+        hand_tuned_ratio,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // AF5: route-aware training (slot + order weights)
 // ---------------------------------------------------------------------------
 
 /// Mean routed-cost ratio (routed cost / row-major HPWL) over pre-built envs.
 /// Unroutable layouts carry the env's flat penalty, so minimizing this jointly
 /// rewards routability and short wiring — the key difference from HPWL-only.
-fn mean_routed_ratio(envs: &mut [PlacementEnv], baseline_hpwl: &[f64], policy: &Policy) -> f64 {
+/// AF6: `timing_weight > 0` adds the criticality-weighted-wirelength term
+/// (`0.0` is bit-for-bit the AF5 objective).
+fn mean_routed_ratio(
+    envs: &mut [PlacementEnv],
+    baseline_hpwl: &[f64],
+    policy: &Policy,
+    timing_weight: f64,
+) -> f64 {
     if envs.is_empty() {
         return 1.0;
     }
@@ -414,7 +753,12 @@ fn mean_routed_ratio(envs: &mut [PlacementEnv], baseline_hpwl: &[f64], policy: &
     for (env, &base) in envs.iter_mut().zip(baseline_hpwl.iter()) {
         let assignment = construct_with_policy(env, policy);
         env.restore_assignment(&assignment);
-        sum += env.score().cost / base.max(1.0);
+        let timing_term = if timing_weight == 0.0 {
+            0.0
+        } else {
+            timing_weight * env.timing_cost()
+        };
+        sum += (env.score().cost + timing_term) / base.max(1.0);
     }
     sum / envs.len() as f64
 }
@@ -445,8 +789,9 @@ pub fn train_route_aware(circuits: &[Circuit], config: &TrainConfig) -> RouteAwa
         })
         .collect();
 
+    let w = config.timing_weight;
     let mut policy = Policy::hand_tuned();
-    let hand_tuned_cost_ratio = mean_routed_ratio(&mut envs, &baseline, &policy);
+    let hand_tuned_cost_ratio = mean_routed_ratio(&mut envs, &baseline, &policy, w);
     let mut best = hand_tuned_cost_ratio;
     let mut step = config.init_step;
     let mut rng = SplitMix64::new(config.seed);
@@ -459,7 +804,7 @@ pub fn train_route_aware(circuits: &[Circuit], config: &TrainConfig) -> RouteAwa
         for k in 0..NUM_ORDER_FEATURES {
             cand.order.psi[k] += rng.signed_unit() * step;
         }
-        let ratio = mean_routed_ratio(&mut envs, &baseline, &cand);
+        let ratio = mean_routed_ratio(&mut envs, &baseline, &cand, w);
         if ratio < best {
             best = ratio;
             policy = cand;
@@ -476,6 +821,60 @@ pub fn train_route_aware(circuits: &[Circuit], config: &TrainConfig) -> RouteAwa
 }
 
 // ---------------------------------------------------------------------------
+// AF6d: multi-seed evaluation (error bars for transfer claims)
+// ---------------------------------------------------------------------------
+
+/// Mean/std of a metric across training seeds. Session-3 lesson: pattern-search
+/// results are local optima, so any held-out comparison from a single seed is
+/// noise until shown otherwise — transfer claims need error bars.
+#[derive(Clone, Debug)]
+pub struct MultiSeedEval {
+    /// The metric per seed, in `seeds` order.
+    pub per_seed: Vec<f64>,
+    pub mean: f64,
+    /// Sample standard deviation (n-1); 0.0 for fewer than 2 seeds.
+    pub std: f64,
+}
+
+/// Run `run(seed)` for each seed and aggregate the returned metric. The closure
+/// owns training + evaluation, so any train/eval combination gets error bars
+/// without dedicated API per experiment.
+pub fn multi_seed(seeds: &[u64], mut run: impl FnMut(u64) -> f64) -> MultiSeedEval {
+    let per_seed: Vec<f64> = seeds.iter().map(|&s| run(s)).collect();
+    let n = per_seed.len();
+    let mean = if n == 0 {
+        0.0
+    } else {
+        per_seed.iter().sum::<f64>() / n as f64
+    };
+    let std = if n < 2 {
+        0.0
+    } else {
+        (per_seed
+            .iter()
+            .map(|v| (v - mean) * (v - mean))
+            .sum::<f64>()
+            / (n - 1) as f64)
+            .sqrt()
+    };
+    MultiSeedEval {
+        per_seed,
+        mean,
+        std,
+    }
+}
+
+/// Default seed set for multi-seed evals (arbitrary fixed constants — keep
+/// stable so results are reproducible across sessions).
+pub const EVAL_SEEDS: [u64; 5] = [
+    0xA11C_E5ED,
+    0xB0B5_1DE5,
+    0xC0FF_EE11,
+    0xD00D_FEED,
+    0x5EED_0005,
+];
+
+// ---------------------------------------------------------------------------
 // Evaluation
 // ---------------------------------------------------------------------------
 
@@ -489,6 +888,10 @@ pub struct CircuitEval {
     /// learned / row-major HPWL (< 1.0 = improvement).
     pub ratio: f64,
     pub learned_cost: f64,
+    /// Criticality-weighted wirelength of the row-major layout (AF6 timing metric).
+    pub rowmajor_timing: f64,
+    /// Criticality-weighted wirelength of the learned one-shot layout.
+    pub learned_timing: f64,
     pub routable: bool,
     pub phys_ok: bool,
 }
@@ -502,8 +905,10 @@ pub fn evaluate(circuits: &[Circuit], policy: &Policy) -> Vec<CircuitEval> {
             let mut env = PlacementEnv::new(c).expect("env builds");
             env.reset();
             let rowmajor_hpwl = env.hpwl();
+            let rowmajor_timing = env.timing_cost();
             place_policy(&mut env, policy);
             let learned_hpwl = env.hpwl();
+            let learned_timing = env.timing_cost();
             let score = env.score();
             let phys_ok = score.metrics.routable && env.verify_physical();
             CircuitEval {
@@ -513,6 +918,8 @@ pub fn evaluate(circuits: &[Circuit], policy: &Policy) -> Vec<CircuitEval> {
                 learned_hpwl,
                 ratio: learned_hpwl as f64 / (rowmajor_hpwl.max(1)) as f64,
                 learned_cost: score.cost,
+                rowmajor_timing,
+                learned_timing,
                 routable: score.metrics.routable,
                 phys_ok,
             }
@@ -633,6 +1040,251 @@ mod tests {
         assert!(
             ratio < 1.0,
             "learned policy should generalize (ratio {ratio})"
+        );
+    }
+
+    #[test]
+    fn timing_zero_objective_is_exactly_hpwl() {
+        // The AF6 guard: with timing_weight 0 the proxy is bit-for-bit HPWL, so
+        // AF4/AF5 default training is numerically unchanged.
+        let c = Circuit::from_aig("adder5", build_ripple_adder(5));
+        let mut env = PlacementEnv::new(&c).expect("env builds");
+        env.reset();
+        assert_eq!(proxy_cost(&env, 0.0), env.hpwl() as f64);
+        place(&mut env, &PolicyWeights::hand_tuned());
+        assert_eq!(proxy_cost(&env, 0.0), env.hpwl() as f64);
+    }
+
+    #[test]
+    fn timing_aware_training_reduces_in_distribution_timing() {
+        // AF6 mechanism proof: adding the timing term to the training objective
+        // reduces one-shot criticality-weighted wirelength ON THE TRAINING
+        // DISTRIBUTION. Measured (deterministic, seed-pinned): w=0 -> 603.6,
+        // w=2 -> 518.1 (-14%).
+        //
+        // HONEST SCOPE — what this does NOT claim: one-shot timing quality does
+        // not reliably transfer to held-out wider adders (measured: adder8
+        // 723.8 hpwl-trained vs 785-794 timing-trained on this train set).
+        // Unlike the HPWL slot features, which are canvas-span-normalized, net
+        // criticality structure changes with circuit depth, so a small-circuit
+        // timing fit overfits its own critical paths. A near-scale curriculum
+        // (adder3/5/7, w=1) improved both held-out adder8 and adder10 vs its
+        // own w=0 baseline, but non-monotonically in w — a stable transfer
+        // recipe (likely: depth-normalized criticality features) is future work.
+        let train_set = [
+            Circuit::from_aig("adder3", build_ripple_adder(3)),
+            Circuit::from_aig("adder5", build_ripple_adder(5)),
+        ];
+        let base_cfg = TrainConfig {
+            iterations: 80,
+            ..TrainConfig::default()
+        };
+        let timing_of = |weights: &PolicyWeights, c: &Circuit| -> f64 {
+            let mut env = PlacementEnv::new(c).expect("env builds");
+            place(&mut env, weights);
+            env.timing_cost()
+        };
+        let in_dist = |weights: &PolicyWeights| -> f64 {
+            train_set.iter().map(|c| timing_of(weights, c)).sum()
+        };
+
+        let hpwl_policy = train(&train_set, &base_cfg);
+        let timing_policy = train(
+            &train_set,
+            &TrainConfig {
+                timing_weight: 2.0,
+                ..base_cfg
+            },
+        );
+        let hpwl_timing = in_dist(&hpwl_policy.weights);
+        let timing_timing = in_dist(&timing_policy.weights);
+        assert!(
+            timing_timing < hpwl_timing,
+            "timing-aware training should shorten critical nets in-distribution: \
+             timing-trained {timing_timing:.1} vs hpwl-trained {hpwl_timing:.1}"
+        );
+    }
+
+    #[test]
+    fn two_hop_feature_generalizes_on_held_out_adders() {
+        // AF6b: the two-hop-centroid lookahead earns nonzero weight in training
+        // and improves ONE-SHOT held-out generalization on the deep-adder family
+        // where the 1-hop policy plateaus. Measured (deterministic, seed-pinned):
+        // train ratio 0.560 -> 0.515; held-out adder8 0.759 -> 0.659, adder10
+        // 0.796 -> 0.643, eq8 tie (0.444). The adder8 layout is verified
+        // physically correct, so the win is not bought with over-clustering.
+        let train_set = [
+            Circuit::from_aig("adder3", build_ripple_adder(3)),
+            Circuit::from_aig("adder5", build_ripple_adder(5)),
+            Circuit::from_aig("eq5", build_eq_comparator(5)),
+            Circuit::from_aig("adder7", build_ripple_adder(7)),
+            Circuit::from_aig("eq7", build_eq_comparator(7)),
+        ];
+        let cfg = TrainConfig {
+            iterations: 100,
+            ..TrainConfig::default()
+        };
+        let base = train(&train_set, &cfg);
+        let two = train_two_hop(&train_set, &cfg);
+        assert!(
+            two.train_ratio < base.train_ratio,
+            "two-hop should improve the training fit: {:.3} vs {:.3}",
+            two.train_ratio,
+            base.train_ratio
+        );
+
+        let ratio_pair = |c: &Circuit| -> (f64, f64) {
+            let mut env = PlacementEnv::new(c).expect("env builds");
+            env.reset();
+            let row = env.hpwl() as f64;
+            place(&mut env, &base.weights);
+            let b = env.hpwl() as f64 / row;
+            place_two_hop(&mut env, &two.policy);
+            let t = env.hpwl() as f64 / row;
+            (b, t)
+        };
+
+        let adder8 = Circuit::from_aig("adder8", build_ripple_adder(8));
+        let (b8, t8) = ratio_pair(&adder8);
+        assert!(t8 < b8, "held-out adder8: 2hop {t8:.3} vs base {b8:.3}");
+        let (b10, t10) = ratio_pair(&Circuit::from_aig("adder10", build_ripple_adder(10)));
+        assert!(
+            t10 < b10,
+            "held-out adder10: 2hop {t10:.3} vs base {b10:.3}"
+        );
+        let (be, te) = ratio_pair(&Circuit::from_aig("eq8", build_eq_comparator(8)));
+        assert!(
+            te <= be + 1e-9,
+            "held-out eq8 must not regress: {te:.3} vs {be:.3}"
+        );
+
+        // The generalization win must not be bought with an illegal layout.
+        let mut env = PlacementEnv::new(&adder8).expect("env builds");
+        place_two_hop(&mut env, &two.policy);
+        assert!(
+            env.score().metrics.routable,
+            "2hop adder8 one-shot must route"
+        );
+        assert!(
+            env.verify_physical(),
+            "2hop adder8 one-shot must be correct"
+        );
+    }
+
+    #[test]
+    fn crit_pull_zero_is_bit_identical_to_base_policy() {
+        // AF6c guard: crit_pull == 0.0 must produce exactly the 4-feature
+        // placement (the feature is skipped, not merely weighted to zero).
+        let c = Circuit::from_aig("adder5", build_ripple_adder(5));
+        let env = PlacementEnv::new(&c).expect("env builds");
+        let base = construct_placement(&env, &PolicyWeights::hand_tuned());
+        let crit = construct_with_crit(&env, &CritPolicy::hand_tuned());
+        assert_eq!(base, crit);
+    }
+
+    #[test]
+    fn crit_training_is_deterministic_and_earns_weight_under_timing_objective() {
+        // AF6c: with a timing-weighted objective the search assigns the
+        // criticality-pull feature nonzero weight (measured: 0.45 on the small
+        // adder set at w=2, deterministic).
+        //
+        // HONEST SCOPE — the hypothesis this feature was built to test ("a
+        // criticality-aware feature fixes AF6a's timing-transfer negative") was
+        // NOT confirmed: on the curriculum set the feature earns ~0 weight and
+        // matches objective-only training; cross-session comparisons show
+        // held-out timing at this scale is dominated by pattern-search seed
+        // noise (same set+objective, different search dims: adder10 1310 vs
+        // 1114). Conclusion recorded in the AF6 loop log: timing-transfer
+        // claims need a multi-seed eval harness (next session) before any
+        // further feature work.
+        let train_set = [
+            Circuit::from_aig("adder3", build_ripple_adder(3)),
+            Circuit::from_aig("adder5", build_ripple_adder(5)),
+        ];
+        let cfg = TrainConfig {
+            iterations: 80,
+            timing_weight: 2.0,
+            ..TrainConfig::default()
+        };
+        let a = train_crit(&train_set, &cfg);
+        let b = train_crit(&train_set, &cfg);
+        assert_eq!(a.policy, b.policy);
+        assert!(
+            a.policy.crit_pull != 0.0,
+            "crit feature should earn nonzero weight under a timing objective \
+             (got {})",
+            a.policy.crit_pull
+        );
+        assert!(
+            a.train_ratio < a.hand_tuned_ratio,
+            "training should improve on the hand-tuned start"
+        );
+    }
+
+    #[test]
+    fn two_hop_win_is_seed_robust() {
+        // AF6d: the AF6b two-hop held-out win, re-run across all EVAL_SEEDS
+        // with a PAIRED per-seed comparison. Measured: 2-hop beats the base
+        // 4-feature policy on all 5 seeds (base 0.656±0.030 vs 2hop
+        // 0.607±0.048 mean held-out HPWL ratio) — the claim is seed-robust,
+        // not a single-seed artifact.
+        //
+        // Contrast (measured with the same harness, recorded in the AF6 loop
+        // log, no assertion possible for a null): the AF6a timing-objective
+        // held-out effect is statistically indistinguishable from noise
+        // (w=0: 786±96 vs w=2: 829±46 on adder8 timing, 3 of 5 seeds worse) —
+        // confirming sessions 1 and 3 with error bars.
+        let curriculum = [
+            Circuit::from_aig("adder3", build_ripple_adder(3)),
+            Circuit::from_aig("adder5", build_ripple_adder(5)),
+            Circuit::from_aig("eq5", build_eq_comparator(5)),
+            Circuit::from_aig("adder7", build_ripple_adder(7)),
+            Circuit::from_aig("eq7", build_eq_comparator(7)),
+        ];
+        let held_out = [
+            Circuit::from_aig("adder8", build_ripple_adder(8)),
+            Circuit::from_aig("eq8", build_eq_comparator(8)),
+            Circuit::from_aig("adder10", build_ripple_adder(10)),
+        ];
+        let cfg = TrainConfig {
+            iterations: 100,
+            ..TrainConfig::default()
+        };
+        let held_ratio = |place_fn: &dyn Fn(&mut PlacementEnv)| -> f64 {
+            held_out
+                .iter()
+                .map(|c| {
+                    let mut env = PlacementEnv::new(c).expect("env builds");
+                    env.reset();
+                    let row = env.hpwl() as f64;
+                    place_fn(&mut env);
+                    env.hpwl() as f64 / row
+                })
+                .sum::<f64>()
+                / held_out.len() as f64
+        };
+
+        let base = multi_seed(&EVAL_SEEDS, |s| {
+            let o = train(&curriculum, &TrainConfig { seed: s, ..cfg });
+            held_ratio(&|env| place(env, &o.weights))
+        });
+        let twoh = multi_seed(&EVAL_SEEDS, |s| {
+            let o = train_two_hop(&curriculum, &TrainConfig { seed: s, ..cfg });
+            held_ratio(&|env| place_two_hop(env, &o.policy))
+        });
+
+        for (i, (b, t)) in base.per_seed.iter().zip(&twoh.per_seed).enumerate() {
+            assert!(
+                t < b,
+                "2-hop should win on every seed (paired): seed[{i}] 2hop {t:.3} \
+                 vs base {b:.3}"
+            );
+        }
+        assert!(
+            twoh.mean < base.mean,
+            "2-hop mean {:.3} should beat base mean {:.3}",
+            twoh.mean,
+            base.mean
         );
     }
 

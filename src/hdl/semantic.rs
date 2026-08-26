@@ -352,17 +352,15 @@ fn check_no_cycles(
     let mut visited = vec![0u8; n]; // 0=unvisited, 1=in-progress, 2=done
 
     for i in 0..n {
-        if visited[i] == 0 {
-            if has_cycle(i, checked, &mut visited) {
-                return Some(HdlError {
-                    message: format!(
-                        "circular module instantiation detected involving '{}'",
-                        checked[i].name
-                    ),
-                    line: 0,
-                    col: 0,
-                });
-            }
+        if visited[i] == 0 && has_cycle(i, checked, &mut visited) {
+            return Some(HdlError {
+                message: format!(
+                    "circular module instantiation detected involving '{}'",
+                    checked[i].name
+                ),
+                line: 0,
+                col: 0,
+            });
         }
     }
     None

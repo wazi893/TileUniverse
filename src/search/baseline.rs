@@ -70,14 +70,14 @@ impl BaselineConfig {
 
     /// Set crossover rate
     pub fn with_crossover_rate(mut self, rate: f32) -> Self {
-        assert!(rate >= 0.0 && rate <= 1.0, "Crossover rate must be [0, 1]");
+        assert!((0.0..=1.0).contains(&rate), "Crossover rate must be [0, 1]");
         self.crossover_rate = rate;
         self
     }
 
     /// Set mutation rate
     pub fn with_mutation_rate(mut self, rate: f32) -> Self {
-        assert!(rate >= 0.0 && rate <= 1.0, "Mutation rate must be [0, 1]");
+        assert!((0.0..=1.0).contains(&rate), "Mutation rate must be [0, 1]");
         self.mutation_rate = rate;
         self
     }

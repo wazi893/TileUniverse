@@ -474,9 +474,8 @@ Mega:    MegaGate(q, M)  where M = Rx(θ)·Z·X·H
 
 **Benefits:**
 - Reduces N gates → 1 operation
-- Effective throughput: N × amplitudes × states
 - Critical for VQE/QAOA circuits with varied gate types
-- Demonstrated 26+ PCOPS effective throughput
+- Gate-fusion gains are *work eliminated, bit-exact* — see `docs/epic83-proof.md`; not reported as an inflated ops/sec figure
 
 **Phase 4: Depth Batching**
 ```
@@ -542,8 +541,8 @@ wmma::fragment<wmma::matrix_a, 16, 16, 16, half, wmma::row_major> a_frag;
 wmma::load_matrix_sync(a_frag, matrix_a, 16);
 wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
 ```
-- Performance: **15.1× speedup** over FP32
-- Throughput: 12.4 PCOPS (trillion ops/sec)
+- Performance: **15.1× speedup** over FP32 baseline (raw FP16 WMMA)
+- Throughput: canonical raw anchor **15.8 TCOPS @ 24 qubits on RTX 5090** (see `PORTFOLIO.md`)
 - Use case: Production workloads, standard precision
 
 **3. WMMA FP8 Tensor Cores (EPIC 114):**
@@ -552,8 +551,7 @@ wmma::mma_sync(c_frag, a_frag, b_frag, c_frag);
 wmma::fragment<wmma::matrix_a, 16, 16, 16, __nv_fp8_e4m3, wmma::row_major> a_frag;
 // ILP (Instruction-Level Parallelism) variant
 ```
-- Performance: **26× speedup** over FP32 baseline
-- Throughput: 21.3 PCOPS
+- Performance: **26× speedup** over FP32 baseline (FP8 WMMA; reported as a speedup multiple, not an absolute ops/sec figure)
 - Requirements: Hopper+ GPUs (compute_90, compute_100)
 - Use case: Maximum throughput, research workloads
 

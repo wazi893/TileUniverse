@@ -416,6 +416,12 @@ pub fn charter_cases() -> Vec<&'static V2CompiledBenchCase> {
         .collect()
 }
 
+impl CharterProgramReport {
+    pub fn correct_and_clean(&self) -> bool {
+        self.r0 == self.expected_r0 && self.stat.mul == 0 && !self.mmio && self.inhibit == 0
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -475,11 +481,5 @@ mod tests {
             }
             assert!(r.pass, "charter '{}' overall PASS", case.name);
         }
-    }
-}
-
-impl CharterProgramReport {
-    pub fn correct_and_clean(&self) -> bool {
-        self.r0 == self.expected_r0 && self.stat.mul == 0 && !self.mmio && self.inhibit == 0
     }
 }

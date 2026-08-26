@@ -143,7 +143,7 @@ impl DynamicResourceEstimator {
         let max_qubit = self
             .circuit
             .iter()
-            .filter_map(|g| Self::gate_max_qubit(g))
+            .filter_map(Self::gate_max_qubit)
             .max()
             .unwrap_or(0);
 

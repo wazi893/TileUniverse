@@ -310,10 +310,10 @@ fn connected_neighbors(
             }
             // Clock neighbors: any adjacent ClockGlobal counts
             for (nx, ny) in neighbors.iter().filter_map(|(nx, ny)| in_bounds(*nx, *ny)) {
-                if let Some(t) = sim.tilemap.get_tile(nx, ny) {
-                    if matches!(t.meta.tile_type, TileType::ClockGlobal) {
-                        out.push((nx, ny));
-                    }
+                if let Some(t) = sim.tilemap.get_tile(nx, ny)
+                    && matches!(t.meta.tile_type, TileType::ClockGlobal)
+                {
+                    out.push((nx, ny));
                 }
             }
         }
@@ -595,10 +595,10 @@ fn connected_neighbors(
             }
             // Clock neighbors: any adjacent ClockGlobal counts
             for (nx, ny) in neighbors.iter().filter_map(|(nx, ny)| in_bounds(*nx, *ny)) {
-                if let Some(t) = sim.tilemap.get_tile(nx, ny) {
-                    if matches!(t.meta.tile_type, TileType::ClockGlobal) {
-                        out.push((nx, ny));
-                    }
+                if let Some(t) = sim.tilemap.get_tile(nx, ny)
+                    && matches!(t.meta.tile_type, TileType::ClockGlobal)
+                {
+                    out.push((nx, ny));
                 }
             }
         }

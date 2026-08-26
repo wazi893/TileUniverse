@@ -364,7 +364,7 @@ The system is released as open-source software under the MIT license, with the g
 pip install tileuniverse
 
 # From source
-git clone https://github.com/tileuniverse/tileuniverse
+git clone https://github.com/wazi893/TileUniverse
 cd tileuniverse/engine/python
 pip install maturin
 maturin develop --release
@@ -410,4 +410,4 @@ def benchmark(
 ---
 
 *TileUniverse is developed and maintained by the TileUniverse Contributors.*
-*For questions and contributions, visit: https://github.com/tileuniverse/tileuniverse*
+*For questions and contributions, visit: https://github.com/wazi893/TileUniverse*

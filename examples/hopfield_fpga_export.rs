@@ -223,7 +223,7 @@ module hopfield_{}x{} (
                 let neighbor_bits: Vec<String> =
                     neighbors.iter().map(|&i| format!("spins[{}]", i)).collect();
                 let sum_expr = neighbor_bits.join(" + ");
-                let threshold = (neighbors.len() + 1) / 2; // Majority threshold
+                let threshold = neighbors.len().div_ceil(2); // Majority threshold
 
                 v.push_str(&format!(
                     "    assign next_spins[{}] = ({}) < {} ? 1'b1 : 1'b0; // ({},{})\n",
@@ -483,7 +483,7 @@ module hopfield_{}x{} (
                 ));
             } else {
                 let sum: Vec<String> = neighbors.iter().map(|&i| format!("spins[{}]", i)).collect();
-                let thresh = (neighbors.len() + 1) / 2;
+                let thresh = neighbors.len().div_ceil(2);
                 v.push_str(&format!(
                     "    assign next_spins[{}] = ({}) < {} ? 1'b1 : 1'b0;\n",
                     idx,
@@ -494,8 +494,8 @@ module hopfield_{}x{} (
         }
     }
 
-    v.push_str(&format!(
-        "
+    v.push_str(
+        &"
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             spins <= 0; spins_prev <= 0;
@@ -506,7 +506,8 @@ module hopfield_{}x{} (
         end
     end
 endmodule\n"
-    ));
+            .to_string(),
+    );
 
     v
 }

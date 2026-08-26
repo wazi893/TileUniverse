@@ -1702,10 +1702,10 @@ impl V2MmioQuantumDevice {
                         &mut rng,
                     );
                     self.rng.set(rng);
-                    if let crate::quantum::GateOutcome::Measured { qubit: _, bit } = outcome {
-                        if bit != 0 {
-                            result |= 1u64 << q;
-                        }
+                    if let crate::quantum::GateOutcome::Measured { qubit: _, bit } = outcome
+                        && bit != 0
+                    {
+                        result |= 1u64 << q;
                     }
                 }
                 self.gate_count.set(self.gate_count.get() + n as u32);
@@ -2290,27 +2290,27 @@ impl V2MmioDevice for V2MmioCombinedDevice {
         if version == COMBINED_SNAPSHOT_VERSION && off < snapshot.len() {
             let ds_present = snapshot[off];
             off += 1;
-            if ds_present == 1 {
-                if let Some(ds) = &self.dataset {
-                    let ds_data = {
-                        if off + 8 > snapshot.len() {
-                            return Err("combined snapshot truncated at dataset header".to_string());
-                        }
-                        let len =
-                            u64::from_le_bytes(snapshot[off..off + 8].try_into().unwrap()) as usize;
-                        off += 8;
-                        if off + len > snapshot.len() {
-                            return Err("combined snapshot truncated at dataset data".to_string());
-                        }
-                        let data = &snapshot[off..off + len];
-                        off += len;
-                        let _ = off; // suppress unused warning
-                        data
-                    };
-                    ds.restore_state(ds_data)?;
-                }
-                // If snapshot has dataset but device doesn't, skip the data gracefully
+            if ds_present == 1
+                && let Some(ds) = &self.dataset
+            {
+                let ds_data = {
+                    if off + 8 > snapshot.len() {
+                        return Err("combined snapshot truncated at dataset header".to_string());
+                    }
+                    let len =
+                        u64::from_le_bytes(snapshot[off..off + 8].try_into().unwrap()) as usize;
+                    off += 8;
+                    if off + len > snapshot.len() {
+                        return Err("combined snapshot truncated at dataset data".to_string());
+                    }
+                    let data = &snapshot[off..off + len];
+                    off += len;
+                    let _ = off; // suppress unused warning
+                    data
+                };
+                ds.restore_state(ds_data)?;
             }
+            // If snapshot has dataset but device doesn't, skip the data gracefully
         }
         Ok(())
     }
@@ -2600,7 +2600,7 @@ mod tests {
     fn test_display_clear_screen() {
         let dev = V2MmioDisplayDevice::new();
         // Write some pixels
-        dev.write(MMIO_DISPLAY_CMD, (0 << 16) | (0 << 8) | 0xFF);
+        dev.write(MMIO_DISPLAY_CMD, 0xFF);
         dev.write(MMIO_DISPLAY_CMD, (7 << 16) | (7 << 8) | 0xAB);
         assert_eq!(dev.get_pixel(0, 0), 0xFF);
         assert_eq!(dev.get_pixel(7, 7), 0xAB);
@@ -2616,9 +2616,9 @@ mod tests {
     fn test_display_out_of_bounds_ignored() {
         let dev = V2MmioDisplayDevice::new();
         // Write to (16, 0) — out of bounds X
-        dev.write(MMIO_DISPLAY_CMD, (0 << 16) | (16 << 8) | 0xFF);
+        dev.write(MMIO_DISPLAY_CMD, (16 << 8) | 0xFF);
         // Write to (0, 16) — out of bounds Y
-        dev.write(MMIO_DISPLAY_CMD, (16 << 16) | (0 << 8) | 0xFF);
+        dev.write(MMIO_DISPLAY_CMD, (16 << 16) | 0xFF);
         // All pixels remain 0
         let all_zero = dev.pixels().iter().all(|&p| p == 0);
         assert!(all_zero, "out-of-bounds writes should not modify any pixel");
@@ -2628,7 +2628,7 @@ mod tests {
     fn test_display_ppm_render() {
         let dev = V2MmioDisplayDevice::new();
         // Set pixel (0,0) to white-ish (R=7,G=7,B=3 = 0xFF)
-        dev.write(MMIO_DISPLAY_CMD, (0 << 16) | (0 << 8) | 0xFF);
+        dev.write(MMIO_DISPLAY_CMD, 0xFF);
         let ppm = dev.render_display_ppm(1);
         // Check PPM header
         let header = b"P6\n16 16\n255\n";
@@ -3322,11 +3322,11 @@ mod tests {
         // Apply H on qubit 0 (gate_count=1)
         dev.write(MMIO_QUANTUM_QUBIT, 0);
         dev.write(MMIO_QUANTUM_CMD, 2); // GATE_H
-        assert_eq!(dev.read(MMIO_QUANTUM_CMD), (1 << 16) | (3 << 8) | 0);
+        assert_eq!(dev.read(MMIO_QUANTUM_CMD), ((1 << 16) | (3 << 8)));
         // Apply X on qubit 1 (gate_count=2)
         dev.write(MMIO_QUANTUM_QUBIT, 1);
         dev.write(MMIO_QUANTUM_CMD, 3); // GATE_X
-        assert_eq!(dev.read(MMIO_QUANTUM_CMD), (2 << 16) | (3 << 8) | 0);
+        assert_eq!(dev.read(MMIO_QUANTUM_CMD), ((2 << 16) | (3 << 8)));
     }
 
     // --- Address boundary tests (Sprint 159) ---

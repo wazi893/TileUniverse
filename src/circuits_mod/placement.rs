@@ -59,17 +59,9 @@ pub enum CircuitError {
     InvalidParams,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PlacementOptions {
     pub allow_overwrite: bool,
-}
-
-impl Default for PlacementOptions {
-    fn default() -> Self {
-        Self {
-            allow_overwrite: false,
-        }
-    }
 }
 
 #[derive(Debug, Clone)]

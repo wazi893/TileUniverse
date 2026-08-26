@@ -2944,7 +2944,7 @@ mod tests {
         let mut processor = FaultTolerantProcessor::new(20, config);
 
         // 20 parallel T-gates - big burst
-        let circuit: Vec<_> = (0..20).map(|q| LogicalGate::T(q)).collect();
+        let circuit: Vec<_> = (0..20).map(LogicalGate::T).collect();
 
         let result = processor.simulate_with_stalls(&circuit);
 
@@ -2982,7 +2982,7 @@ mod tests {
         let est_light = processor.estimate_with_factories(&light);
 
         // Heavy circuit (many parallel T-gates)
-        let heavy: Vec<_> = (0..50).map(|q| LogicalGate::T(q)).collect();
+        let heavy: Vec<_> = (0..50).map(LogicalGate::T).collect();
         let est_heavy = processor.estimate_with_factories(&heavy);
 
         // Heavy circuit should need more throughput
@@ -3004,7 +3004,7 @@ mod tests {
         let mut processor = FaultTolerantProcessor::new(10, config);
 
         // 10 parallel T-gates
-        let circuit: Vec<_> = (0..10).map(|q| LogicalGate::T(q)).collect();
+        let circuit: Vec<_> = (0..10).map(LogicalGate::T).collect();
 
         let schedule = processor.schedule_circuit(&circuit);
         let stall_result = processor.simulate_with_stalls(&circuit);

@@ -232,7 +232,7 @@ fn test_power_of_10(exp: u32) -> Option<()> {
         format_duration(create_time),
         format_duration(verify_time),
         mem_str,
-        format_big_num(bits as u64),
+        format_big_num(bits),
     );
 
     // Also show BigUint creation time if significant
@@ -283,7 +283,7 @@ fn test_power_of_2(exp: u32) -> Option<()> {
         format_duration(create_time),
         format_duration(verify_time),
         mem_str,
-        format_big_num(bits as u64),
+        format_big_num(bits),
     );
 
     if biguint_time.as_millis() > 10 {

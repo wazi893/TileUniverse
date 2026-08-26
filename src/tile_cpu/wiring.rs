@@ -719,22 +719,14 @@ pub fn wire_physical_cpu(
     // =========================================================================
     // Each row: Const(packed)@6, Mux8to1@7, WD(opcode)@8
     // LUT order: a_lo, a_hi, b_lo, b_hi (rows 6, 7, 8, 9)
-    let packed_ctrl_a_lo: u64 = 0x00
-        | (0x28 << 8)
+    let packed_ctrl_a_lo: u64 = (0x28 << 8)
         | (0x08 << 16)
         | (0x18 << 24)
         | (0x19u64 << 32)
         | (0x1A << 40)
         | (0x1B << 48)
         | (0x1C << 56);
-    let packed_ctrl_a_hi: u64 = 0x1E
-        | (0x1F << 8)
-        | (0x11 << 16)
-        | (0x00 << 24)
-        | (0x00u64 << 32)
-        | (0x00 << 40)
-        | (0x08 << 48)
-        | (0x00 << 56);
+    let packed_ctrl_a_hi: u64 = (0x1E | (0x1F << 8) | (0x11 << 16)) | (0x08 << 48);
     let packed_ctrl_b_lo: u64 = 0;
     let packed_ctrl_b_hi: u64 =
         (0x01 << 24) | (0x02u64 << 32) | (0x04 << 40) | (0x08 << 48) | (0x10 << 56);
@@ -3028,8 +3020,7 @@ pub fn wire_complete_cpu(
     // INSTRUCTION DECODER — LUT-based
     // =========================================================================
     //                  NOP   LDI   MOV   ADD   SUB   AND   OR    XOR
-    let packed_ctrl_a_lo: u64 = 0x00
-        | (0x28 << 8)
+    let packed_ctrl_a_lo: u64 = (0x28 << 8)
         | (0x08 << 16)
         | (0x18 << 24)
         | (0x19u64 << 32)
@@ -3037,14 +3028,7 @@ pub fn wire_complete_cpu(
         | (0x1B << 48)
         | (0x1C << 56);
     //                  SHL   SHR   CMP   JMP   JZ    JNZ   LD    ST
-    let packed_ctrl_a_hi: u64 = 0x1E
-        | (0x1F << 8)
-        | (0x11 << 16)
-        | (0x00 << 24)
-        | (0x00u64 << 32)
-        | (0x00 << 40)
-        | (0x08 << 48)
-        | (0x00 << 56);
+    let packed_ctrl_a_hi: u64 = (0x1E | (0x1F << 8) | (0x11 << 16)) | (0x08 << 48);
     let packed_ctrl_b_lo: u64 = 0;
     //                  SHL   SHR   CMP   JMP   JZ    JNZ   LD    ST
     let packed_ctrl_b_hi: u64 =

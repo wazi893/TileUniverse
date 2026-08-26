@@ -18,6 +18,8 @@
 //! - [`learned`] — AF4 learned constructive placer (a linear policy over
 //!   connectivity features, fit to a circuit family; the honest win is
 //!   generalization to unseen circuits, not beating SA on final quality).
+//! - [`route_frontier`] — reproducible SA route-frontier benchmark for the
+//!   citation `madd` circuit (`examples/sa_route_probe.rs` is a thin CLI).
 //!
 //! ## Legality gate (two tiers)
 //!
@@ -39,6 +41,8 @@ pub mod env;
 pub mod hls_corpus;
 pub mod learned;
 pub mod reward;
+pub mod route_frontier;
+pub mod sa_export;
 
 pub use anneal::{AnnealConfig, AnnealResult, anneal};
 pub use circuit::Circuit;
@@ -49,8 +53,16 @@ pub use corpus::{
 pub use env::{Canvas, EnvError, PlacementEnv, verify_physical};
 pub use hls_corpus::{HlsInstance, hls_instances};
 pub use learned::{
-    CircuitEval, OrderWeights, Policy, PolicyWeights, RouteAwareOutcome, TrainConfig, TrainOutcome,
-    construct_placement, construct_with_policy, evaluate, mean_hpwl_ratio, place, place_policy,
-    train, train_route_aware,
+    CircuitEval, CritOutcome, CritPolicy, EVAL_SEEDS, MultiSeedEval, OrderWeights, Policy,
+    PolicyWeights, RouteAwareOutcome, TrainConfig, TrainOutcome, TwoHopOutcome, TwoHopPolicy,
+    construct_placement, construct_with_crit, construct_with_policy, construct_with_two_hop,
+    evaluate, mean_hpwl_ratio, multi_seed, place, place_crit, place_policy, place_two_hop, train,
+    train_crit, train_route_aware, train_two_hop,
 };
 pub use reward::{PlacementMetrics, PlacementScore, RewardWeights};
+pub use route_frontier::{
+    RouteFrontierCase, RouteFrontierConfig, RouteFrontierRow, RouteOutcome, SaOutcome,
+    check_default_claims, default_claim_cases, frontier, madd_circuit, madd_func, place_config,
+    route_config, run_route_frontier, run_route_frontier_row,
+};
+pub use sa_export::{SaExport, sa_place_escalating, sa_place_to_export};

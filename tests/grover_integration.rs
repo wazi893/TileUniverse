@@ -12,7 +12,6 @@ use engine::algorithms::grover::{grover_circuit, optimal_iterations};
 use engine::quantum::QState;
 use engine::simulation::Simulation;
 use engine::tile_meta::TileType;
-use std::sync::atomic::Ordering;
 
 /// Test that Grover's algorithm finds the marked state when run on a QDemo tile.
 /// This is the key integration test proving the feedback loop works.

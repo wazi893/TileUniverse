@@ -268,7 +268,11 @@ fn main() {
     println!(
         "    H^{} = {} (since H² = I)",
         depth,
-        if depth % 2 == 0 { "Identity" } else { "H" }
+        if depth.is_multiple_of(2) {
+            "Identity"
+        } else {
+            "H"
+        }
     );
     println!("    Calculation time: {:?}", calc_time);
     println!();

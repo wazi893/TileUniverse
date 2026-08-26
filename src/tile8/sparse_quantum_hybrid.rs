@@ -298,11 +298,7 @@ impl SparseQuantumGridSmall {
     }
 
     pub fn block_bits(&self) -> usize {
-        if self.n_qubits <= 7 {
-            0
-        } else {
-            self.n_qubits - 7
-        }
+        self.n_qubits.saturating_sub(7)
     }
 
     pub fn stats(&self) -> &SparseGridStats {
@@ -317,7 +313,7 @@ impl SparseQuantumGridSmall {
                 self.stats.peak_blocks = self.stats.blocks_active;
             }
         }
-        self.blocks.entry(id).or_insert_with(SparseBlock::new)
+        self.blocks.entry(id).or_default()
     }
 
     pub fn initialize_zero_state(&mut self) {
@@ -441,7 +437,7 @@ impl SparseQuantumGridSmall {
     }
 
     fn local_cnot(&mut self, target: u8) {
-        assert!(target >= 1 && target <= 6, "Local CNOT target must be 1-6");
+        assert!((1..=6).contains(&target), "Local CNOT target must be 1-6");
         let target_mask = 1usize << target;
 
         for block in self.blocks.values_mut() {
@@ -789,7 +785,7 @@ impl SparseQuantumGridSmall {
         let mut total_prob = 0.0;
         let mut correct_count = 0usize;
 
-        for (_, block) in &self.blocks {
+        for block in self.blocks.values() {
             for addr in 0..128 {
                 let amp = block.get(addr);
                 if amp.norm_squared() > 1e-20 {

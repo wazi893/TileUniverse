@@ -491,11 +491,11 @@ impl LineageTracker {
         let mut similarities = Vec::new();
 
         for node in self.nodes.values() {
-            if let Some(parent_id) = node.parent_id {
-                if let Some(parent) = self.nodes.get(&parent_id) {
-                    let sim = circuit_similarity(&parent.birth_genome, &node.birth_genome);
-                    similarities.push(sim);
-                }
+            if let Some(parent_id) = node.parent_id
+                && let Some(parent) = self.nodes.get(&parent_id)
+            {
+                let sim = circuit_similarity(&parent.birth_genome, &node.birth_genome);
+                similarities.push(sim);
             }
         }
 
@@ -701,7 +701,7 @@ fn circuit_similarity(a: &[QGate], b: &[QGate]) -> f32 {
         }
     }
 
-    for (gate_type, _) in &b_types {
+    for gate_type in b_types.keys() {
         if !a_types.contains_key(gate_type) {
             total_types += 1;
         }

@@ -220,11 +220,11 @@ impl GroverSearch {
 
         let elapsed = start.elapsed().as_micros() as u64;
 
-        if config.profile {
-            if let Some(p) = profiler {
-                println!("\n📊 Grover's Search Profile");
-                p.print_report();
-            }
+        if config.profile
+            && let Some(p) = profiler
+        {
+            println!("\n📊 Grover's Search Profile");
+            p.print_report();
         }
 
         Ok(GroverResult {

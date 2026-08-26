@@ -342,10 +342,10 @@ pub fn build_player_html(
 /// Write a populated player HTML to disk (creating parent dirs as needed).
 pub fn write_player_html(path: impl AsRef<Path>, html: &str) -> io::Result<()> {
     let path = path.as_ref();
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            create_dir_all(parent)?;
-        }
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        create_dir_all(parent)?;
     }
     write(path, html)
 }

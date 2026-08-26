@@ -47,6 +47,12 @@ pub struct SparseBlock {
     pub amplitudes: [Complex64; 128],
 }
 
+impl Default for SparseBlock {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SparseBlock {
     pub fn new() -> Self {
         Self {
@@ -120,11 +126,7 @@ impl SparseQuantumGridBigInt {
 
     /// Calculate number of block ID bits needed
     pub fn block_bits(&self) -> usize {
-        if self.n_qubits <= 7 {
-            0
-        } else {
-            self.n_qubits - 7
-        }
+        self.n_qubits.saturating_sub(7)
     }
 
     /// Get or create a block (public for quantum-SNN hybrid encoding)
@@ -136,7 +138,7 @@ impl SparseQuantumGridBigInt {
                 self.stats.peak_blocks = self.stats.blocks_active;
             }
         }
-        self.blocks.entry(id).or_insert_with(SparseBlock::new)
+        self.blocks.entry(id).or_default()
     }
 
     /// Initialize with |0...0⟩ state
@@ -173,7 +175,7 @@ impl SparseQuantumGridBigInt {
 
     /// Apply local CNOT (control=0, target=1..6)
     pub fn local_cnot(&mut self, target: u8) {
-        assert!(target >= 1 && target <= 6, "Local CNOT target must be 1-6");
+        assert!((1..=6).contains(&target), "Local CNOT target must be 1-6");
         let target_mask = 1usize << target;
 
         for block in self.blocks.values_mut() {
@@ -562,7 +564,7 @@ impl SparseQuantumGridBigInt {
 
                 // Check if this is a valid W-state amplitude (exactly one bit set)
                 let is_valid = state_index.count_ones() == 1
-                    && &state_index < &(BigUint::one() << self.n_qubits);
+                    && state_index < (BigUint::one() << self.n_qubits);
 
                 if !is_valid {
                     let mag = block.get(addr).norm();
@@ -755,7 +757,7 @@ impl SparseQuantumGridBigInt {
         let mut correct_count = 0usize;
 
         // Sum probability from all blocks
-        for (_, block) in &self.blocks {
+        for block in self.blocks.values() {
             for addr in 0..128 {
                 let amp = block.get(addr);
                 if amp.norm_squared() > 1e-20 {
@@ -1199,22 +1201,18 @@ impl SparseQuantumGridBigInt {
                 for addr in 0..128 {
                     let c1_val = if c1_local {
                         (addr >> c1_bit) & 1
+                    } else if (&block_id >> c1_bit) & BigUint::one() == BigUint::one() {
+                        1
                     } else {
-                        if (&block_id >> c1_bit) & BigUint::one() == BigUint::one() {
-                            1
-                        } else {
-                            0
-                        }
+                        0
                     };
 
                     let c2_val = if c2_local {
                         (addr >> c2_bit) & 1
+                    } else if (&block_id >> c2_bit) & BigUint::one() == BigUint::one() {
+                        1
                     } else {
-                        if (&block_id >> c2_bit) & BigUint::one() == BigUint::one() {
-                            1
-                        } else {
-                            0
-                        }
+                        0
                     };
 
                     if c1_val != 1 || c2_val != 1 {
@@ -1229,12 +1227,10 @@ impl SparseQuantumGridBigInt {
 
                     let t_val = if t_local {
                         (addr >> t_bit) & 1
+                    } else if (&block_id >> t_bit) & BigUint::one() == BigUint::one() {
+                        1
                     } else {
-                        if (&block_id >> t_bit) & BigUint::one() == BigUint::one() {
-                            1
-                        } else {
-                            0
-                        }
+                        0
                     };
 
                     if t_val != 0 {
@@ -1255,11 +1251,11 @@ impl SparseQuantumGridBigInt {
                     if amp0.norm_squared() > 1e-30 || amp1.norm_squared() > 1e-30 {
                         self.blocks
                             .entry(block_id.clone())
-                            .or_insert_with(SparseBlock::new)
+                            .or_default()
                             .set(addr, amp1);
                         self.blocks
                             .entry(partner_block)
-                            .or_insert_with(SparseBlock::new)
+                            .or_default()
                             .set(partner_addr, amp0);
                     }
                 }

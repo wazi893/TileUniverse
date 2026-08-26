@@ -60,7 +60,7 @@ pub enum DJOracleType {
 /// |1⟩ ─H─────Oracle───────────── (ancilla, not measured)
 /// ```
 pub fn deutsch_jozsa_circuit(n_qubits: u8, oracle_type: DJOracleType) -> Vec<QGate> {
-    assert!(n_qubits >= 1 && n_qubits <= 10, "n_qubits must be 1-10");
+    assert!((1..=10).contains(&n_qubits), "n_qubits must be 1-10");
 
     let mut program = Vec::new();
     let ancilla = n_qubits; // Ancilla qubit index
@@ -140,10 +140,10 @@ pub fn run_deutsch_jozsa(n_qubits: u8, oracle_type: DJOracleType, seed: u64) -> 
 
     for gate in program.iter() {
         let outcome = apply_gate_scalar(&mut state, gate, &mut rng);
-        if let GateOutcome::Measured { qubit, bit } = outcome {
-            if bit != 0 {
-                result |= 1u64 << qubit;
-            }
+        if let GateOutcome::Measured { qubit, bit } = outcome
+            && bit != 0
+        {
+            result |= 1u64 << qubit;
         }
     }
 
@@ -179,7 +179,7 @@ pub fn run_deutsch_jozsa(n_qubits: u8, oracle_type: DJOracleType, seed: u64) -> 
 /// |1⟩ ─H─────Oracle───────────── (ancilla)
 /// ```
 pub fn bernstein_vazirani_circuit(n_qubits: u8, hidden_string: u64) -> Vec<QGate> {
-    assert!(n_qubits >= 1 && n_qubits <= 10, "n_qubits must be 1-10");
+    assert!((1..=10).contains(&n_qubits), "n_qubits must be 1-10");
     assert!(
         hidden_string < (1u64 << n_qubits),
         "hidden_string out of range"
@@ -244,10 +244,10 @@ pub fn run_bernstein_vazirani(n_qubits: u8, hidden_string: u64, seed: u64) -> u6
 
     for gate in program.iter() {
         let outcome = apply_gate_scalar(&mut state, gate, &mut rng);
-        if let GateOutcome::Measured { qubit, bit } = outcome {
-            if bit != 0 {
-                result |= 1u64 << qubit;
-            }
+        if let GateOutcome::Measured { qubit, bit } = outcome
+            && bit != 0
+        {
+            result |= 1u64 << qubit;
         }
     }
 

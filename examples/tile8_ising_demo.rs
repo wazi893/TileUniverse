@@ -118,7 +118,7 @@ fn demo_native_ising_tiles() {
             sim.set_tile(x, y, TileType::IsingNode);
             // Random initial spin (0 or 1)
             rng_state = rng_state.wrapping_mul(6364136223846793005).wrapping_add(1);
-            let spin = (rng_state >> 63) as u64;
+            let spin = (rng_state >> 63);
             sim.set_logic_value(x, y, spin);
         }
     }

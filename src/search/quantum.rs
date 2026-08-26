@@ -592,11 +592,11 @@ mod tests {
     fn test_optimal_iterations() {
         // For N=100, M=1: optimal ≈ π/4 * √100 ≈ 7.85
         let opt = QuantumConfig::optimal_iterations(100, 1);
-        assert!(opt >= 7 && opt <= 9, "Got {}", opt);
+        assert!((7..=9).contains(&opt), "Got {}", opt);
 
         // For N=100, M=25: optimal ≈ π/4 * √4 ≈ 1.57
         let opt = QuantumConfig::optimal_iterations(100, 25);
-        assert!(opt >= 1 && opt <= 3, "Got {}", opt);
+        assert!((1..=3).contains(&opt), "Got {}", opt);
 
         // Edge cases
         assert_eq!(QuantumConfig::optimal_iterations(100, 0), 1);

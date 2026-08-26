@@ -284,11 +284,7 @@ fn calculate_depth(circuit: &[QGate]) -> usize {
         return 0;
     }
 
-    let max_qubit = circuit
-        .iter()
-        .flat_map(|g| gate_qubits(g))
-        .max()
-        .unwrap_or(0);
+    let max_qubit = circuit.iter().flat_map(gate_qubits).max().unwrap_or(0);
 
     let mut qubit_depths = vec![0usize; max_qubit + 1];
 

@@ -9,7 +9,7 @@
 ## Executive Summary
 
 TileUniverse is a high-performance simulation engine that unifies:
-- **Cellular automata** (115 trillion tiles/sec, packed 1-bit)
+- **Cellular automata** (97.07 trillion tiles/sec, packed 1-bit, live-confirmed 2026-07-03)
 - **Ising/QUBO optimization** (10 trillion spin updates/sec)
 - **Spiking neural networks** (LIF neurons, STDP, GPU-accelerated)
 - **Sparse heterogeneous circuits** (73 billion tiles/sec, 52 tile types)
@@ -53,7 +53,7 @@ Everything is a **tile** on a 2D grid. Each tile:
 
 | Backend | Throughput | Use Case |
 |---------|------------|----------|
-| **Packed 1-bit** | 115T tiles/sec | Homogeneous grids (all tiles same type per 64-tile word) |
+| **Packed 1-bit** | 97.07T tiles/sec | Homogeneous grids (all tiles same type per 64-tile word) |
 | **Sparse heterogeneous** | 73G tiles/sec | Mixed tile types, only active tiles evaluated |
 | **Dense heterogeneous** | ~10G tiles/sec | All tiles evaluated every tick |
 
@@ -234,7 +234,7 @@ assign next_spins[9] = (spins[8] + spins[10] + spins[1] + spins[17]) < 2 ? 1'b1 
 ### 5.2 Why Packed 1-bit?
 
 We pack 64 tiles per `u64` for homogeneous grids. This:
-- Achieves 115T tiles/sec (memory bandwidth limited)
+- Achieves 97.07T tiles/sec in the 2026-07-03 confirmation sweep
 - Enables warp shuffle for neighbor access
 - Requires all 64 tiles in a word share the same type
 

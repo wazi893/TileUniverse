@@ -502,12 +502,11 @@ impl<'a> VariationalExecutor<'a> {
 
         let job_id = self.scheduler.submit(JobSpec::Quantum(spec));
 
-        if let Some(result) = self.scheduler.wait(job_id) {
-            if let Some(stage) = result.stage_results.first() {
-                if let StageOutputs::MeasurementCounts(counts) = &stage.outputs {
-                    return counts.clone();
-                }
-            }
+        if let Some(result) = self.scheduler.wait(job_id)
+            && let Some(stage) = result.stage_results.first()
+            && let StageOutputs::MeasurementCounts(counts) = &stage.outputs
+        {
+            return counts.clone();
         }
 
         HashMap::new()

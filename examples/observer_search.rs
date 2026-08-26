@@ -100,25 +100,24 @@ fn demo_basic_observer() {
         println!("Execution completed in {:?}", elapsed);
         println!("Success: {}", result.is_success());
 
-        if let Some(stage) = result.stage_results.first() {
-            if let StageOutputs::Observer {
+        if let Some(stage) = result.stage_results.first()
+            && let StageOutputs::Observer {
                 collapse_ratio,
                 anomaly_score,
                 ticks,
                 measurements,
             } = &stage.outputs
-            {
-                println!("\nObserver Grid Results:");
-                println!("  Ticks executed: {}", ticks);
-                println!("  Collapse ratio: {:.2}%", collapse_ratio * 100.0);
-                println!("  Anomaly score:  {:.4}", anomaly_score);
-                println!("  Measurements:   {} values", measurements.len());
+        {
+            println!("\nObserver Grid Results:");
+            println!("  Ticks executed: {}", ticks);
+            println!("  Collapse ratio: {:.2}%", collapse_ratio * 100.0);
+            println!("  Anomaly score:  {:.4}", anomaly_score);
+            println!("  Measurements:   {} values", measurements.len());
 
-                if !measurements.is_empty() {
-                    let sum: u32 = measurements.iter().map(|&x| x as u32).sum();
-                    let avg = sum as f64 / measurements.len() as f64;
-                    println!("  Average value:  {:.2}", avg);
-                }
+            if !measurements.is_empty() {
+                let sum: u32 = measurements.iter().map(|&x| x as u32).sum();
+                let avg = sum as f64 / measurements.len() as f64;
+                println!("  Average value:  {:.2}", avg);
             }
         }
     }
@@ -153,21 +152,20 @@ fn demo_tick_trigger() {
         if let Some(result) = scheduler.wait(job_id) {
             let elapsed = start.elapsed();
 
-            if let Some(stage) = result.stage_results.first() {
-                if let StageOutputs::Observer {
+            if let Some(stage) = result.stage_results.first()
+                && let StageOutputs::Observer {
                     collapse_ratio,
                     anomaly_score,
                     ..
                 } = &stage.outputs
-                {
-                    println!(
-                        "{:>6} {:>11.1}% {:>15.4} {:>12?}",
-                        ticks,
-                        collapse_ratio * 100.0,
-                        anomaly_score,
-                        elapsed
-                    );
-                }
+            {
+                println!(
+                    "{:>6} {:>11.1}% {:>15.4} {:>12?}",
+                    ticks,
+                    collapse_ratio * 100.0,
+                    anomaly_score,
+                    elapsed
+                );
             }
         }
     }
@@ -202,21 +200,20 @@ fn demo_collapse_trigger() {
         if let Some(result) = scheduler.wait(job_id) {
             let elapsed = start.elapsed();
 
-            if let Some(stage) = result.stage_results.first() {
-                if let StageOutputs::Observer {
+            if let Some(stage) = result.stage_results.first()
+                && let StageOutputs::Observer {
                     collapse_ratio,
                     ticks,
                     ..
                 } = &stage.outputs
-                {
-                    println!(
-                        "{:>9.0}% {:>11.1}% {:>12} {:>12?}",
-                        threshold * 100.0,
-                        collapse_ratio * 100.0,
-                        ticks,
-                        elapsed
-                    );
-                }
+            {
+                println!(
+                    "{:>9.0}% {:>11.1}% {:>12} {:>12?}",
+                    threshold * 100.0,
+                    collapse_ratio * 100.0,
+                    ticks,
+                    elapsed
+                );
             }
         }
     }
@@ -246,26 +243,24 @@ fn demo_compound_triggers() {
     let start = Instant::now();
     let job_id = scheduler.submit(JobSpec::Observer(spec));
 
-    if let Some(result) = scheduler.wait(job_id) {
-        if let Some(stage) = result.stage_results.first() {
-            if let StageOutputs::Observer {
-                collapse_ratio,
-                ticks,
-                ..
-            } = &stage.outputs
-            {
-                println!(
-                    "  Result: {} ticks, {:.1}% collapse (triggered by: {})",
-                    ticks,
-                    collapse_ratio * 100.0,
-                    if *ticks >= 50 {
-                        "tick count"
-                    } else {
-                        "collapse ratio"
-                    }
-                );
+    if let Some(result) = scheduler.wait(job_id)
+        && let Some(stage) = result.stage_results.first()
+        && let StageOutputs::Observer {
+            collapse_ratio,
+            ticks,
+            ..
+        } = &stage.outputs
+    {
+        println!(
+            "  Result: {} ticks, {:.1}% collapse (triggered by: {})",
+            ticks,
+            collapse_ratio * 100.0,
+            if *ticks >= 50 {
+                "tick count"
+            } else {
+                "collapse ratio"
             }
-        }
+        );
     }
     println!("  Time: {:?}\n", start.elapsed());
 
@@ -284,21 +279,19 @@ fn demo_compound_triggers() {
     let start = Instant::now();
     let job_id = scheduler.submit(JobSpec::Observer(spec));
 
-    if let Some(result) = scheduler.wait(job_id) {
-        if let Some(stage) = result.stage_results.first() {
-            if let StageOutputs::Observer {
-                collapse_ratio,
-                ticks,
-                ..
-            } = &stage.outputs
-            {
-                println!(
-                    "  Result: {} ticks, {:.1}% collapse (both conditions met)",
-                    ticks,
-                    collapse_ratio * 100.0
-                );
-            }
-        }
+    if let Some(result) = scheduler.wait(job_id)
+        && let Some(stage) = result.stage_results.first()
+        && let StageOutputs::Observer {
+            collapse_ratio,
+            ticks,
+            ..
+        } = &stage.outputs
+    {
+        println!(
+            "  Result: {} ticks, {:.1}% collapse (both conditions met)",
+            ticks,
+            collapse_ratio * 100.0
+        );
     }
     println!("  Time: {:?}", start.elapsed());
 }
@@ -342,20 +335,19 @@ fn demo_multi_substrate() {
 
         println!("\nJob completed in {:?}", elapsed);
 
-        if let Some(stage) = result.stage_results.first() {
-            if let StageOutputs::Observer {
+        if let Some(stage) = result.stage_results.first()
+            && let StageOutputs::Observer {
                 collapse_ratio,
                 anomaly_score,
                 ticks,
                 measurements,
             } = &stage.outputs
-            {
-                println!("Results:");
-                println!("  Ticks: {}", ticks);
-                println!("  Collapse ratio: {:.1}%", collapse_ratio * 100.0);
-                println!("  Anomaly score: {:.4}", anomaly_score);
-                println!("  Measurements: {} collapsed observers", measurements.len());
-            }
+        {
+            println!("Results:");
+            println!("  Ticks: {}", ticks);
+            println!("  Collapse ratio: {:.1}%", collapse_ratio * 100.0);
+            println!("  Anomaly score: {:.4}", anomaly_score);
+            println!("  Measurements: {} collapsed observers", measurements.len());
         }
     }
 
@@ -396,23 +388,22 @@ fn demo_observer_scaling() {
         if let Some(result) = scheduler.wait(job_id) {
             let elapsed = start.elapsed();
 
-            if let Some(stage) = result.stage_results.first() {
-                if let StageOutputs::Observer {
+            if let Some(stage) = result.stage_results.first()
+                && let StageOutputs::Observer {
                     collapse_ratio,
                     ticks,
                     ..
                 } = &stage.outputs
-                {
-                    let ops_per_sec = (count as f64 * *ticks as f64) / elapsed.as_secs_f64();
-                    println!(
-                        "{:>10} {:>12} {:>14.1}% {:>12?} {:>14.2e}",
-                        count,
-                        ticks,
-                        collapse_ratio * 100.0,
-                        elapsed,
-                        ops_per_sec
-                    );
-                }
+            {
+                let ops_per_sec = (count as f64 * *ticks as f64) / elapsed.as_secs_f64();
+                println!(
+                    "{:>10} {:>12} {:>14.1}% {:>12?} {:>14.2e}",
+                    count,
+                    ticks,
+                    collapse_ratio * 100.0,
+                    elapsed,
+                    ops_per_sec
+                );
             }
         }
     }

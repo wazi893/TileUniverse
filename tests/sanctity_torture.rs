@@ -70,15 +70,13 @@ fn sanctity_torture_test() {
             println!("Circuit: {:?}", circuit);
             println!("Fused Ops: {:?}", fused.ops);
             failures += 1;
-        } else {
-            if i % 10 == 0 {
-                println!(
-                    "Circuit #{} PASS (Reduced {} gates -> {} ops)",
-                    i,
-                    circuit.len(),
-                    fused.ops.len()
-                );
-            }
+        } else if i % 10 == 0 {
+            println!(
+                "Circuit #{} PASS (Reduced {} gates -> {} ops)",
+                i,
+                circuit.len(),
+                fused.ops.len()
+            );
         }
     }
 

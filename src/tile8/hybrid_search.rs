@@ -401,12 +401,12 @@ impl HybridSearch {
             .for_each(|(block_id, block)| {
                 for local_addr in 0..128 {
                     let global_state = (block_id << 7) | local_addr;
-                    if global_state < candidates.len() {
-                        if candidates[global_state].fitness >= threshold {
-                            // Phase flip: multiply by -1
-                            block.amplitudes[local_addr].re *= -1.0;
-                            block.amplitudes[local_addr].im *= -1.0;
-                        }
+                    if global_state < candidates.len()
+                        && candidates[global_state].fitness >= threshold
+                    {
+                        // Phase flip: multiply by -1
+                        block.amplitudes[local_addr].re *= -1.0;
+                        block.amplitudes[local_addr].im *= -1.0;
                     }
                 }
             });
@@ -462,10 +462,10 @@ impl HybridSearch {
                 let mut prob = 0.0;
                 for local_addr in 0..128 {
                     let global_state = (block_id << 7) | local_addr;
-                    if global_state < candidates.len() {
-                        if candidates[global_state].fitness >= threshold {
-                            prob += block.amplitudes[local_addr].norm_squared();
-                        }
+                    if global_state < candidates.len()
+                        && candidates[global_state].fitness >= threshold
+                    {
+                        prob += block.amplitudes[local_addr].norm_squared();
                     }
                 }
                 prob
@@ -843,7 +843,7 @@ mod tests {
         assert_ne!(a, b);
 
         let f = rng.next_f64();
-        assert!(f >= 0.0 && f < 1.0);
+        assert!((0.0..1.0).contains(&f));
     }
 
     #[test]

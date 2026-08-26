@@ -317,12 +317,12 @@ impl MWPMDecoderFB {
                 // Add corrections for non-boundary vertices on both sides of the edge
                 for &vid in &[edge.v1, edge.v2] {
                     let v = &graph.vertices[vid];
-                    if !v.is_boundary {
-                        if let Some(_stab_idx) = v.stabilizer_idx {
-                            let qubit = self.stabilizer_to_qubit(_stab_idx, v.position);
-                            if !corrections.contains(&qubit) {
-                                corrections.push(qubit);
-                            }
+                    if !v.is_boundary
+                        && let Some(_stab_idx) = v.stabilizer_idx
+                    {
+                        let qubit = self.stabilizer_to_qubit(_stab_idx, v.position);
+                        if !corrections.contains(&qubit) {
+                            corrections.push(qubit);
                         }
                     }
                 }

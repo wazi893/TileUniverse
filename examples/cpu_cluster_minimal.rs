@@ -129,7 +129,7 @@ impl MinimalCluster {
             // Fast path using indices
             let packed_rom = sim.get_logic_value_by_idx(rom_idx);
             let pc_val = (sim.get_logic_value_by_idx(pc_idx) & 0x07) as usize;
-            let mux_output = ((packed_rom >> (pc_val * 8)) & 0xFF) as u64;
+            let mux_output = ((packed_rom >> (pc_val * 8)) & 0xFF);
 
             sim.set_logic_value_by_idx(mux_idx, mux_output);
 

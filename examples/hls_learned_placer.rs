@@ -45,7 +45,7 @@ fn main() {
     );
     for (label, policy) in [
         ("hand-tuned", Policy::hand_tuned()),
-        ("learned", outcome.policy.clone()),
+        ("learned", outcome.policy),
     ] {
         println!("policy: {label}");
         println!("{header}");

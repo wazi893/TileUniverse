@@ -586,7 +586,7 @@ fn decode_hex(raw: &str) -> Result<Vec<u8>, Box<dyn Error>> {
         cleaned.push(ch);
     }
 
-    if cleaned.len() % 2 != 0 {
+    if !cleaned.len().is_multiple_of(2) {
         return Err("invalid hex payload length (must be even)".into());
     }
 

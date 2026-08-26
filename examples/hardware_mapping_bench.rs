@@ -207,7 +207,7 @@ fn swap_routing_analysis() {
     println!("{}", "-".repeat(70));
 
     for (name, profile) in &profiles {
-        let router = SwapRouter::new(&profile);
+        let router = SwapRouter::new(profile);
         let n = profile.qubit_count;
 
         // Generate random pairs

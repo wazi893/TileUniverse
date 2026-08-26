@@ -147,7 +147,7 @@ fn decode_extended_exec(registers: [u64; NUM_REGISTERS], lr: u64, instruction: u
             ExtendedExec {
                 reg_write: true,
                 rd,
-                value: value as u64,
+                value,
                 update_z: true,
                 update_c: true,
                 carry: current != 0,
@@ -472,7 +472,7 @@ impl TileCpu {
         let opcode = (instruction >> 4) & 0x0F;
         let mut rd = ((instruction >> 2) & 3) as usize;
         let rs = (instruction & 3) as usize;
-        let immediate = (instruction & 3) as u64;
+        let immediate = instruction & 3;
         let jump_target = instruction & 0x3F;
 
         // EXT prefix mode:
@@ -587,7 +587,7 @@ impl TileCpu {
         // 6. Register writeback via Mux->Register8
         if reg_write_en && !mem_read {
             for i in 0..NUM_REGISTERS {
-                sim.set_logic_value_by_idx(self.reg_result_indices[i], result as u64);
+                sim.set_logic_value_by_idx(self.reg_result_indices[i], result);
             }
             sim.set_logic_value_by_idx(self.reg_we_indices[rd], 1);
         }
@@ -595,7 +595,7 @@ impl TileCpu {
         // 7. Update flags via tile circuit (Z: Zero tile, C: software carry)
         if extended_mode {
             if ext.update_z {
-                sim.set_logic_value_by_idx(self.flag_z_result_idx, result as u64);
+                sim.set_logic_value_by_idx(self.flag_z_result_idx, result);
                 sim.set_logic_value_by_idx(self.flag_z_update_idx, u64::MAX);
             }
             if ext.update_c {
@@ -604,7 +604,7 @@ impl TileCpu {
                 sim.set_logic_value_by_idx(self.flag_c_update_idx, u64::MAX);
             }
         } else if update_flags {
-            sim.set_logic_value_by_idx(self.flag_z_result_idx, result as u64);
+            sim.set_logic_value_by_idx(self.flag_z_result_idx, result);
             sim.set_logic_value_by_idx(self.flag_z_update_idx, u64::MAX);
             let carry_val = if carry { u64::MAX } else { 0 };
             sim.set_logic_value_by_idx(self.flag_c_carry_idx, carry_val);
@@ -617,7 +617,7 @@ impl TileCpu {
             let addr = self.read_reg(sim, 0) as usize;
             let value = self.read_ram(sim, addr);
             for i in 0..NUM_REGISTERS {
-                sim.set_logic_value_by_idx(self.reg_result_indices[i], value as u64);
+                sim.set_logic_value_by_idx(self.reg_result_indices[i], value);
             }
             sim.set_logic_value_by_idx(self.reg_we_indices[rd], 1);
         }
@@ -652,7 +652,7 @@ impl TileCpu {
         }
 
         if extended_mode && ext.set_lr {
-            self.lr.set(ext.lr_value as u64);
+            self.lr.set(ext.lr_value);
         }
 
         let next_pc = if extended_mode && ext.is_call {
@@ -663,7 +663,7 @@ impl TileCpu {
             self.prev_prefix.set(false);
             self.lr.get()
         } else if branch_taken {
-            jump_target as u64
+            jump_target
         } else {
             current_pc.wrapping_add(1) as u64
         };
@@ -674,7 +674,7 @@ impl TileCpu {
         }
 
         // Write next_pc to Const_NPC tile - Register8 captures this at rising edge
-        sim.set_logic_value_by_idx(self.next_pc_const_idx, next_pc as u64);
+        sim.set_logic_value_by_idx(self.next_pc_const_idx, next_pc);
 
         // 11. Advance clock: rising edge -> Register8 captures next_pc + register values,
         //     WireDown+WireLeft propagate -> Mux8to1 fetches next instruction
@@ -936,7 +936,7 @@ impl TileCpu {
     pub fn write_ram(&self, sim: &mut Simulation, addr: usize, value: u64) {
         if addr < self.ram_indices.len() {
             let ram_idx = self.ram_indices[addr];
-            sim.set_logic_value_by_idx(ram_idx, value as u64);
+            sim.set_logic_value_by_idx(ram_idx, value);
 
             // write_ram() is used for direct initialization in tests/benchmarks.
             // Since this bypasses the physical write circuit, explicitly dirty the
@@ -1287,7 +1287,7 @@ impl PhysicalCpu {
         // For non-ALU register writes, inject result via L1 merge Mux
         if reg_write_en && needs_software_inject && !mem_read {
             for i in 0..NUM_REGISTERS {
-                sim.set_logic_value_by_idx(self.ld_data_l1_indices[i], result as u64);
+                sim.set_logic_value_by_idx(self.ld_data_l1_indices[i], result);
                 sim.set_logic_value_by_idx(self.mem_read_l1_indices[i], 0);
                 sim.dirty.mark_dirty(self.wb_merge_mux_l1_indices[i]);
             }
@@ -1296,7 +1296,7 @@ impl PhysicalCpu {
         // 6. Update flags (software-written Consts for Z and C circuits)
         if extended_mode {
             if ext.update_z {
-                let result8 = result as u64 & 0xFF;
+                let result8 = result & 0xFF;
                 sim.set_logic_value_by_idx(self.flag_z_result_idx, result8);
                 sim.set_logic_value_by_idx(self.flag_z_update_idx, u64::MAX);
             }
@@ -1306,7 +1306,7 @@ impl PhysicalCpu {
                 sim.set_logic_value_by_idx(self.flag_c_update_idx, u64::MAX);
             }
         } else if update_flags {
-            let result8 = result as u64 & 0xFF;
+            let result8 = result & 0xFF;
             sim.set_logic_value_by_idx(self.flag_z_result_idx, result8);
             sim.set_logic_value_by_idx(self.flag_z_update_idx, u64::MAX);
             let carry_val = if carry { u64::MAX } else { 0 };
@@ -1322,7 +1322,7 @@ impl PhysicalCpu {
         );
         if mem_write {
             let value = self.read_reg(sim, rs);
-            sim.set_logic_value_by_idx(self.write_data_const_idx, value as u64);
+            sim.set_logic_value_by_idx(self.write_data_const_idx, value);
         }
         // Dirty downstream consumers so they pick up new Const values.
         sim.dirty.mark_dirty(self.mem_write_const_idx - 1);
@@ -1354,7 +1354,7 @@ impl PhysicalCpu {
         let mut pc_override: Option<u64> = None;
         if extended_mode {
             if ext.set_lr {
-                self.lr.set(ext.lr_value as u64);
+                self.lr.set(ext.lr_value);
             }
             if ext.is_call {
                 self.lr.set(pc_before.wrapping_add(1) as u64);
@@ -1376,14 +1376,14 @@ impl PhysicalCpu {
         //   neutralizing base-op side effects from physical decoder control lines.
         let (pc_fix_deltas, pc_fix_eval, pc_fix_switched) = if extended_mode {
             if ext.reg_write {
-                sim.set_logic_value_by_idx(self.reg_indices[ext.rd], ext.value as u64);
+                sim.set_logic_value_by_idx(self.reg_indices[ext.rd], ext.value);
             } else {
                 for i in 0..NUM_REGISTERS {
-                    sim.set_logic_value_by_idx(self.reg_indices[i], ext_regs_before[i] as u64);
+                    sim.set_logic_value_by_idx(self.reg_indices[i], ext_regs_before[i]);
                 }
             }
             if let Some(next_pc) = pc_override {
-                sim.set_logic_value_by_idx(self.pc_idx, next_pc as u64);
+                sim.set_logic_value_by_idx(self.pc_idx, next_pc);
             }
             sim.dirty.mark_all_dirty(sim.tile_count());
             sim.propagate_combinational_counted()
@@ -1559,7 +1559,7 @@ impl PhysicalCpu {
     pub fn write_ram(&self, sim: &mut Simulation, addr: usize, value: u64) {
         if addr < self.ram_indices.len() {
             let ram_idx = self.ram_indices[addr];
-            sim.set_logic_value_by_idx(ram_idx, value as u64);
+            sim.set_logic_value_by_idx(ram_idx, value);
 
             // Direct RAM writes bypass the physical write circuit. Dirty and settle
             // the read tree entry point so L1 RAM read Mux sees updated values.

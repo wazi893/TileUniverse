@@ -12,8 +12,10 @@ use crate::tile_meta::TileType;
 /// - The control unit generates mux selects to choose the result
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[repr(u8)]
+#[derive(Default)]
 pub enum AluOp {
     /// Pass through A input unchanged
+    #[default]
     PassA = 0,
     /// Pass through B input unchanged
     PassB = 1,
@@ -120,12 +122,6 @@ pub struct ControlSignals {
 
     /// Update flags from ALU result
     pub update_flags: bool,
-}
-
-impl Default for AluOp {
-    fn default() -> Self {
-        AluOp::PassA
-    }
 }
 
 impl ControlSignals {

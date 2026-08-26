@@ -235,11 +235,11 @@ fn build_cells(export: &SynthExport, bits: u32, n_syn: usize) -> Vec<Cell> {
         let x = rem % w;
         let (mut kind, glyph) = classify_tile(tt);
         let mut label = glyph.to_string();
-        if z == 0 {
-            if let Some(l) = out_labels.get(&(x, y)) {
-                kind = 4;
-                label = l.clone();
-            }
+        if z == 0
+            && let Some(l) = out_labels.get(&(x, y))
+        {
+            kind = 4;
+            label = l.clone();
         }
         cells.push(Cell {
             idx,
@@ -401,10 +401,10 @@ pub fn build_player_html(configs: &[PlayerConfig]) -> Result<String, String> {
 pub fn export_default_player(path: impl AsRef<Path>) -> Result<(), String> {
     let html = build_player_html(&default_configs())?;
     let path = path.as_ref();
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            create_dir_all(parent).map_err(|e: io::Error| e.to_string())?;
-        }
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        create_dir_all(parent).map_err(|e: io::Error| e.to_string())?;
     }
     write(path, html).map_err(|e: io::Error| e.to_string())
 }

@@ -310,7 +310,7 @@ impl PhysicalCpu {
         // Registers - RAM tiles
         // RAM: up != 0 ? left : current
         // We need WE (write enable) tiles above each register
-        for (_i, &(x, y)) in self.regs.iter().enumerate() {
+        for &(x, y) in self.regs.iter() {
             sim.set_tile(x, y, TileType::Ram);
             // WE tile above (we'll control this to enable writes)
             sim.set_tile(x, y - 1, TileType::Const);

@@ -82,7 +82,6 @@ fn main() {
     {
         println!("ERROR: This benchmark requires the 'cuda' feature.");
         println!("Run with: cargo run --release --features cuda --example cpu_vs_gpu_f64_bench");
-        return;
     }
 
     #[cfg(feature = "cuda")]

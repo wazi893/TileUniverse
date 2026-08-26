@@ -4,12 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>TileUniverse - Trillion-Scale GPU Simulation Engine</title>
-    <meta name="description" content="High-performance simulation substrate for massively parallel world execution. 2.5 trillion operations per second on consumer GPUs.">
+    <meta name="description" content="From-scratch Rust + CUDA simulation engine. 115 trillion tile-updates/sec on an RTX 5090, verified bit-exact.">
 
     <!-- Open Graph / Social -->
     <meta property="og:type" content="website">
     <meta property="og:title" content="TileUniverse">
-    <meta property="og:description" content="Trillion-Scale GPU Simulation Engine. 2.5T ops/sec on consumer hardware.">
+    <meta property="og:description" content="From-scratch Rust + CUDA simulation engine. 115 trillion tile-updates/sec on an RTX 5090, verified bit-exact.">
     <meta property="og:image" content="assets/banner.png">
 
     <!-- Fonts -->
@@ -440,7 +440,7 @@
                 <li><a href="demos/index.html">Live Demos</a></li>
                 <li><a href="#features">Features</a></li>
                 <li><a href="#performance">Performance</a></li>
-                <li><a href="docs/whitepaper.html">Whitepaper</a></li>
+                
             </ul>
         </div>
     </nav>
@@ -459,7 +459,7 @@
                     <span class="stat-label">Tiles/sec (RTX 5090)</span>
                 </div>
                 <div class="stat">
-                    <span class="stat-value">9T</span>
+                    <span class="stat-value">6.7T</span>
                     <span class="stat-label">Game-of-Life updates/sec</span>
                 </div>
                 <div class="stat">
@@ -472,7 +472,7 @@
                 <a href="demos/index.html" class="btn btn-primary">
                     Watch the Live Demos
                 </a>
-                <a href="https://github.com/tileuniverse/tileuniverse" class="btn btn-secondary">
+                <a href="https://github.com/wazi893/TileUniverse" class="btn btn-secondary">
                     View on GitHub
                 </a>
             </div>
@@ -489,7 +489,7 @@
             <a class="feature-card" href="demos/cellular.html" style="text-decoration:none; color:inherit;">
                 <div class="feature-icon">&#129518;</div>
                 <h3>Cellular at Scale</h3>
-                <p>Conway's Game of Life on the packed GPU fabric &mdash; ~9 trillion cell-updates/sec on an RTX 5090, verified bit-identical to CPU.</p>
+                <p>Conway's Game of Life on the packed GPU fabric &mdash; 6.7 trillion cell-updates/sec on an RTX 5090, verified bit-identical to CPU.</p>
             </a>
             <a class="feature-card" href="demos/tilecpu.html" style="text-decoration:none; color:inherit;">
                 <div class="feature-icon">&#128187;</div>
@@ -614,7 +614,7 @@ world = engine.<span class="code-function">get_world</span>(<span class="code-nu
                 <div class="label">Tiles/sec (packed eval)</div>
             </div>
             <div class="perf-card">
-                <div class="value">~9T</div>
+                <div class="value">6.7T</div>
                 <div class="label">Game-of-Life updates/sec</div>
             </div>
             <div class="perf-card">
@@ -630,7 +630,7 @@ world = engine.<span class="code-function">get_world</span>(<span class="code-nu
         <h3 style="text-align: center; color: var(--soft-white); margin: 3rem 0 1.5rem;">Quantum Substrate</h3>
         <div class="perf-grid">
             <div class="perf-card">
-                <div class="value">63.6P</div>
+                <div class="value">15.8T</div>
                 <div class="label">Tensor-Core ops/sec</div>
             </div>
             <div class="perf-card">
@@ -663,8 +663,8 @@ world = engine.<span class="code-function">get_world</span>(<span class="code-nu
         <p>
             TileUniverse is open source under the MIT License.<br>
             <a href="demos/index.html">Live Demos</a> ·
-            <a href="https://github.com/tileuniverse/tileuniverse">GitHub</a> ·
-            <a href="docs/whitepaper.html">Whitepaper</a>
+            <a href="https://github.com/wazi893/TileUniverse">GitHub</a>
+            
         </p>
     </footer>
 </body>

@@ -26,15 +26,15 @@ pub fn balance(aig: &Aig) -> Aig {
     // A chain member should NOT be treated as its own chain root.
     let mut is_chain_member = vec![false; num_nodes];
     for (_node_idx, node) in aig.nodes_topo() {
-        if is_chain_member_fanin(aig, node.fanin0, &ref_counts) {
-            if let Some(fi) = aig.var_to_node_idx(node.fanin0.var()) {
-                is_chain_member[fi] = true;
-            }
+        if is_chain_member_fanin(aig, node.fanin0, &ref_counts)
+            && let Some(fi) = aig.var_to_node_idx(node.fanin0.var())
+        {
+            is_chain_member[fi] = true;
         }
-        if is_chain_member_fanin(aig, node.fanin1, &ref_counts) {
-            if let Some(fi) = aig.var_to_node_idx(node.fanin1.var()) {
-                is_chain_member[fi] = true;
-            }
+        if is_chain_member_fanin(aig, node.fanin1, &ref_counts)
+            && let Some(fi) = aig.var_to_node_idx(node.fanin1.var())
+        {
+            is_chain_member[fi] = true;
         }
     }
 

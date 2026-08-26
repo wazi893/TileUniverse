@@ -84,15 +84,18 @@ pub mod v2_execute;
 pub mod v2_fast;
 pub mod v2_fast_array;
 pub mod v2_full_phase_prover;
+pub mod v2_ground_truth;
 pub mod v2_hls_accel;
 pub mod v2_iss;
 #[cfg(feature = "cranelift_jit")]
 pub mod v2_jit;
 pub mod v2_mmio;
 pub mod v2_mmio_devices;
+pub mod v2_mul_island;
 pub mod v2_parser;
 pub mod v2_player;
 pub mod v2_replay;
+pub mod v2_route_materialize;
 pub mod v2_routing;
 pub mod v2_showcase;
 pub mod v2_simt_baseline;
@@ -151,6 +154,9 @@ pub use v2_full_phase_prover::{
     CHARTER_PROGRAMS, CharterProgramReport, LaneCpuState, PHASE_NAMES, PhaseProfile, StaticProfile,
     UnifiedSlotUniverse, charter_cases, prove_charter,
 };
+pub use v2_ground_truth::{
+    V2_GROUND_TRUTH_SCHEMA_VERSION, capture_v2_ground_truth_jsonl, write_v2_ground_truth_jsonl,
+};
 pub use v2_hls_accel::{
     V2MmioHlsAccelDevice, V2SocProgram, compile_source_with_accel, eval_accel_func_ref,
 };
@@ -187,6 +193,10 @@ pub use v2_replay::{
     capture_v2_replay_bundle_with_mmio_snapshot, hash_trace_lines, read_v2_replay_bundle_dir,
     verify_v2_replay_bundle, verify_v2_replay_bundle_with_mmio, write_v2_replay_bundle_dir,
 };
+pub use v2_route_materialize::{
+    V2MaterializeError, V2MaterializedRoute, materialize_route, materialize_routes, settle_route,
+    validate_materialized_route,
+};
 pub use v2_routing::{
     V2EndpointClass, V2MultiRouteResult, V2RouteBounds, V2RouteCoord, V2RouteNet, V2RouteNetClass,
     V2RoutingConfig, V2RoutingDb,
@@ -201,7 +211,11 @@ pub use v2_stdlib::{
     V2_ARG0, V2_ARG1, V2_ARG2, V2_ARG3, V2_RET, V2_SP, V2_STDLIB_ABS, V2_STDLIB_CLAMP,
     V2_STDLIB_MAX, V2_STDLIB_MEMSET4, V2_STDLIB_MIN,
 };
-pub use v2_trace::{V2TraceEntry, V2TraceLog, V2TraceMemEvent, V2TraceRegWrite};
+pub use v2_trace::{
+    V2_TRACE_CSV_HEADER, V2_TRACE_ENTRY_FIELDS, V2_TRACE_SCHEMA_NAME, V2_TRACE_SCHEMA_VERSION,
+    V2TraceDocument, V2TraceEntry, V2TraceLog, V2TraceMemEvent, V2TraceParseError, V2TraceProgram,
+    V2TraceProgramRow, V2TraceRegWrite, V2TraceState,
+};
 pub use v2_visualization::{
     V2_TRACE_VIZ_INDEX_FILE, V2_TRACE_VIZ_SUMMARY_FILE, V2_TRACE_VIZ_TRACE_FILE,
     V2TraceVizDeltaKind, V2TraceVizStepSummary, V2TraceVizTimeline, V2VizCoord, V2VizFlowEdge,

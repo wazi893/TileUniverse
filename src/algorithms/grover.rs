@@ -254,10 +254,10 @@ pub fn run_grover(n_qubits: u8, marked_state: u64, iterations: usize, seed: u64)
 
     for gate in program.iter() {
         let outcome = apply_gate_scalar(&mut state, gate, &mut rng);
-        if let GateOutcome::Measured { qubit, bit } = outcome {
-            if bit != 0 {
-                result |= 1u64 << qubit;
-            }
+        if let GateOutcome::Measured { qubit, bit } = outcome
+            && bit != 0
+        {
+            result |= 1u64 << qubit;
         }
     }
 
@@ -285,6 +285,19 @@ pub fn grover_success_rate(
     }
 
     successes as f64 / trials as f64
+}
+
+// =============================================================================
+// Integration with Simulation (for QDemo tiles)
+// =============================================================================
+
+/// Create a Grover circuit suitable for registering with a QDemo tile.
+///
+/// This is the same as `grover_circuit` but explicitly typed for
+/// the tile registration API.
+pub fn grover_program_for_tile(n_qubits: u8, marked_state: u64) -> Vec<QGate> {
+    let iterations = optimal_iterations(n_qubits);
+    grover_circuit(n_qubits, marked_state, iterations)
 }
 
 // =============================================================================
@@ -425,17 +438,4 @@ mod tests {
         let x_count = diff.iter().filter(|g| matches!(g, QGate::X(_))).count();
         assert_eq!(x_count, 6);
     }
-}
-
-// =============================================================================
-// Integration with Simulation (for QDemo tiles)
-// =============================================================================
-
-/// Create a Grover circuit suitable for registering with a QDemo tile.
-///
-/// This is the same as `grover_circuit` but explicitly typed for
-/// the tile registration API.
-pub fn grover_program_for_tile(n_qubits: u8, marked_state: u64) -> Vec<QGate> {
-    let iterations = optimal_iterations(n_qubits);
-    grover_circuit(n_qubits, marked_state, iterations)
 }

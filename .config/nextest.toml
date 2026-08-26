@@ -33,3 +33,12 @@ slow-timeout = { period = "120s", terminate-after = 8 }
 retries = 0
 fail-fast = false
 final-status-level = "slow"
+
+# seq_two_targets_agree_differential runs the seq program on BOTH targets
+# (ISS + real tiles) and was killed at exactly the 960s nightly cap on
+# 2026-07-04 while its single-target sibling passed at ~510s. Give the
+# two-target differential the ~2x headroom it structurally needs; the other
+# 8 slow-tier tests keep the tighter 960s hang-kill.
+[[profile.nightly.overrides]]
+filter = 'test(seq_two_targets_agree_differential)'
+slow-timeout = { period = "120s", terminate-after = 15 }

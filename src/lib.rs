@@ -1,3 +1,4 @@
+pub mod aicontrol_hub; // Single-file hub embedding both AI-control eval players
 pub mod algorithms;
 pub mod alphafabric_player; // Self-contained learned-placement visualization player
 pub mod assembler;
@@ -12,6 +13,8 @@ pub mod circuits_mod;
 pub mod clock_domain; // Priority 6: Multi-Clock Domains
 pub mod component;
 pub mod config;
+pub mod control_eval;
+pub mod control_eval_player; // Self-contained thermal covert-channel visualization player
 #[cfg(feature = "cuda")]
 pub mod cuda_life;
 #[cfg(feature = "cuda")]
@@ -49,6 +52,8 @@ pub mod qec; // Quantum Error Correction: stabilizer simulation, codes, decoders
 pub mod qec_player; // Self-contained surface-code decoder visualization player
 pub mod qram; // SPRINT 46.0: Quantum Random Access Memory
 
+pub mod sched_eval; // Workload-scheduling control eval: throughput<->safety frontier
+pub mod sched_eval_player; // Self-contained scheduling throughput<->safety frontier player
 pub mod scripts;
 pub mod search; // SPRINT 65.0: Quantum-Enhanced Neural Search Engine
 pub mod simulation;

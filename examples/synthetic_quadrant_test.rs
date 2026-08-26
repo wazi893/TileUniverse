@@ -403,7 +403,7 @@ fn run_minimal_test() -> bool {
         let mut best = 0.0f32;
         for _epoch in 0..n_epochs {
             train_epoch(&mut net, &dataset, ticks);
-            let eval_acc = evaluate(&mut net, &patterns.to_vec(), ticks);
+            let eval_acc = evaluate(&mut net, patterns, ticks);
             if eval_acc > best {
                 best = eval_acc;
             }
@@ -545,7 +545,10 @@ fn main() {
     println!("════════════════════════════════════════════");
     let avg = all_best.iter().sum::<f32>() / all_best.len() as f32;
     let pass_count = all_best.iter().filter(|&&a| a >= 0.9).count();
-    let partial_count = all_best.iter().filter(|&&a| a >= 0.5 && a < 0.9).count();
+    let partial_count = all_best
+        .iter()
+        .filter(|&&a| (0.5..0.9).contains(&a))
+        .count();
 
     for (&seed, &best) in seeds.iter().zip(all_best.iter()) {
         println!(

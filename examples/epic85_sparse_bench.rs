@@ -32,7 +32,7 @@ fn main() {
         let dense_bytes = dim * 8; // complex f32 = 8 bytes
 
         // Sparse: HashMap overhead ~56 bytes per entry (key=8, value=8, HashMap overhead ~40)
-        let sparse_1 = 1 * 56 + 48; // +48 for struct overhead
+        let sparse_1 = 56 + 48; // +48 for struct overhead
         let sparse_100 = 100 * 56 + 48;
         let sparse_1k = 1000 * 56 + 48;
 

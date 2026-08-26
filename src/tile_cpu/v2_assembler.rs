@@ -248,7 +248,7 @@ fn encode_ri(base: fn(u8, u8) -> u32, rd: u8, imm8: u8) -> u32 {
 /// Sprint 174: Encode a wide-immediate instruction with 16-bit constant.
 fn encode_ri_wide(base: fn(u8, u8) -> u32, rd: u8, imm16: u16) -> u32 {
     let lo = (imm16 & 0xFF) as u8;
-    let hi = ((imm16 >> 8) & 0xFF) as u16;
+    let hi = (imm16 >> 8) & 0xFF;
     let mut ext = EXT_WIDE_IMM | (hi << 8);
     if rd >= 8 {
         ext |= EXT_RD_HI;

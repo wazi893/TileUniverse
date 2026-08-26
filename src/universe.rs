@@ -827,8 +827,10 @@ impl Universe {
                                 } else {
                                     0
                                 }
+                            } else if neighbors == 3 {
+                                u64::MAX
                             } else {
-                                if neighbors == 3 { u64::MAX } else { 0 }
+                                0
                             }
                         }
                         Ruleset::Rule110 => {

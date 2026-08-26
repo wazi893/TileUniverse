@@ -194,7 +194,7 @@ fn benchmark_depth_scaling() {
     let mut results = Vec::new();
 
     for &depth in &depths {
-        let n_params = 3 * 1 * depth; // 3 rotations per qubit per layer
+        let n_params = 3 * depth; // 3 rotations per qubit per layer
 
         let config = VQEConfig {
             ansatz_type: AnsatzType::HardwareEfficient { depth },

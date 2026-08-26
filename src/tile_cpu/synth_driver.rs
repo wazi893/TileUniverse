@@ -425,11 +425,11 @@ mod tests {
 
         for combo in 0..4u32 {
             let inputs = vec![
-                if (combo >> 0) & 1 != 0 { u64::MAX } else { 0 },
+                if combo & 1 != 0 { u64::MAX } else { 0 },
                 if (combo >> 1) & 1 != 0 { u64::MAX } else { 0 },
             ];
             let outputs = driver.evaluate(&mut sim, &inputs).expect("evaluate");
-            let expected = ((combo >> 0) & 1 != 0) ^ ((combo >> 1) & 1 != 0);
+            let expected = (combo & 1 != 0) ^ ((combo >> 1) & 1 != 0);
             assert_eq!(
                 outputs[0] != 0,
                 expected,

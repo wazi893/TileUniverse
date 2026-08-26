@@ -623,7 +623,7 @@ mod tests {
         // All synapses should be from layer 0 to layer 1
         for (src, dst) in synapses {
             assert!(src < 8, "Source {} should be in layer 0", src);
-            assert!(dst >= 8 && dst < 16, "Dest {} should be in layer 1", dst);
+            assert!((8..16).contains(&dst), "Dest {} should be in layer 1", dst);
         }
     }
 

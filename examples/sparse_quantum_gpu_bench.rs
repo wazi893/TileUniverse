@@ -154,7 +154,6 @@ fn main() {
         println!(
             "Run with: cargo run --release --example sparse_quantum_gpu_bench --features gpu-prototype"
         );
-        return;
     }
 
     #[cfg(feature = "gpu-prototype")]

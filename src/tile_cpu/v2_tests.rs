@@ -918,7 +918,7 @@ fn test_v2_ram_read_tree_parity_all_addresses() {
         cpu.tick(&mut sim); // fill LDB
         cpu.tick(&mut sim); // execute LDB
 
-        let expected = (addr as u8).wrapping_mul(29).wrapping_add(7) as u64;
+        let expected = addr.wrapping_mul(29).wrapping_add(7) as u64;
         assert_eq!(
             cpu.read_reg(&sim, 0),
             expected,
@@ -2918,14 +2918,12 @@ fn test_v2_l3_ctrl_a_flag_propagation() {
     let (mut sim, cpu) = build_v2(&program);
     cpu.run(&mut sim, 16);
     assert_eq!(cpu.read_reg(&sim, 0), 300, "200+100 = 300"); // Sprint 129: 64-bit wrapping
-    assert_eq!(
-        cpu.read_flag_c(&sim),
-        false,
+    assert!(
+        !cpu.read_flag_c(&sim),
         "carry flag should be clear (no 64-bit overflow)"
     );
-    assert_eq!(
-        cpu.read_flag_z(&sim),
-        false,
+    assert!(
+        !cpu.read_flag_z(&sim),
         "zero flag should be clear (result != 0)"
     );
     assert!(cpu.is_halted());
@@ -5823,7 +5821,7 @@ fn test_v2_s151_l2_l3_occupancy_audit() {
 
     // L3 west y=0 from x=9..67
     for x in 9..=67 {
-        let tt = sim.tile_type_3d(ox + x, oy + 0, 3);
+        let tt = sim.tile_type_3d(ox + x, oy, 3);
         if !is_replaceable(tt) {
             println!("  HARD BLOCK L3({},0) = {:?}", x, tt);
             ir_low_blocked += 1;
@@ -5832,7 +5830,7 @@ fn test_v2_s151_l2_l3_occupancy_audit() {
 
     // L2 bridge y=0: ViaUp at (9,0), WireLeft from (8,0) to (6,0), ViaDown at L3(5,0)
     for x in 6..=9 {
-        let tt = sim.tile_type_3d(ox + x, oy + 0, 2);
+        let tt = sim.tile_type_3d(ox + x, oy, 2);
         if !is_replaceable(tt) {
             println!("  HARD BLOCK L2({},0) = {:?}", x, tt);
             ir_low_blocked += 1;
@@ -12383,7 +12381,7 @@ fn test_v2_s218_alu_readback_all_benchmarks() {
             .with_synth_blocks(synth)
             .build(&mut sim);
 
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "benchmark '{}' should halt", case.name);
 
         let checks = cpu.alu_readback_checks();
@@ -12617,7 +12615,7 @@ fn test_v2_s219_physical_alu_iss_differential() {
             .build(&mut sim);
 
         let config = V2DiffConfig {
-            max_ticks: case.max_cycles as u64,
+            max_ticks: case.max_cycles,
         };
         let result = run_v2_differential_with(&program, config, &cpu, &mut sim);
         match result {
@@ -12692,7 +12690,7 @@ fn test_v2_s219_physical_alu_golden_cycles() {
             .with_synth_blocks(synth)
             .build(&mut sim);
 
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "'{}' should halt", case.name);
 
         let cycles = cpu.read_cycle_count();
@@ -12786,7 +12784,7 @@ fn test_v2_s220_physical_reg_wb_iss_differential() {
             .build(&mut sim);
 
         let config = V2DiffConfig {
-            max_ticks: case.max_cycles as u64,
+            max_ticks: case.max_cycles,
         };
         let result = run_v2_differential_with(&program, config, &cpu, &mut sim);
         match result {
@@ -12829,7 +12827,7 @@ fn test_v2_s220_physical_reg_wb_golden_cycles() {
             .with_synth_blocks(synth)
             .build(&mut sim);
 
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "'{}' should halt", case.name);
 
         let cycles = cpu.read_cycle_count();
@@ -12866,7 +12864,7 @@ fn test_v2_s220_reg_wb_zero_mismatch_all_benchmarks() {
             .with_synth_blocks(synth)
             .build(&mut sim);
 
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
 
         let checks = cpu.reg_wb_checks();
         let mismatches = cpu.reg_wb_mismatches();
@@ -12963,7 +12961,7 @@ fn test_v2_s221_physical_flag_wb_iss_differential() {
             .build(&mut sim);
 
         let config = V2DiffConfig {
-            max_ticks: case.max_cycles as u64,
+            max_ticks: case.max_cycles,
         };
         let result = run_v2_differential_with(&program, config, &cpu, &mut sim);
         match result {
@@ -13007,7 +13005,7 @@ fn test_v2_s221_physical_flag_wb_golden_cycles() {
             .with_synth_blocks(synth)
             .build(&mut sim);
 
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "'{}' should halt", case.name);
 
         let cycles = cpu.read_cycle_count();
@@ -13047,7 +13045,7 @@ fn test_v2_s221_flag_wb_zero_mismatch_alu_authority_scope() {
             .with_synth_blocks(synth)
             .build(&mut sim);
 
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "'{}' should halt", case.name);
 
         let checks = cpu.flag_wb_checks();
@@ -13158,7 +13156,7 @@ fn test_v2_s222_physical_decode_iss_differential() {
             .build(&mut sim);
 
         let config = V2DiffConfig {
-            max_ticks: case.max_cycles as u64,
+            max_ticks: case.max_cycles,
         };
         let result = run_v2_differential_with(&program, config, &cpu, &mut sim);
         match result {
@@ -13203,7 +13201,7 @@ fn test_v2_s222_physical_decode_golden_cycles() {
             .with_synth_blocks(synth)
             .build(&mut sim);
 
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "'{}' should halt", case.name);
 
         let cycles = cpu.read_cycle_count();
@@ -13245,7 +13243,7 @@ fn test_v2_s222_decode_zero_mismatch_bank0() {
             .with_synth_blocks(synth)
             .build(&mut sim);
 
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "'{}' should halt", case.name);
 
         total_cb_checks += cpu.decode_ctrl_b_checks();
@@ -13348,7 +13346,7 @@ fn test_v2_s223_upper_bank_iss_differential() {
             .build(&mut sim);
 
         let config = V2DiffConfig {
-            max_ticks: case.max_cycles as u64,
+            max_ticks: case.max_cycles,
         };
         let result = run_v2_differential_with(&program, config, &cpu, &mut sim);
         match result {
@@ -13393,7 +13391,7 @@ fn test_v2_s223_upper_bank_golden_cycles() {
             .with_synth_blocks(synth)
             .build(&mut sim);
 
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "'{}' should halt", case.name);
 
         let cycles = cpu.read_cycle_count();
@@ -13446,7 +13444,7 @@ fn test_v2_s223_upper_bank_authority_diagnostics() {
             .with_synth_blocks(synth)
             .build(&mut sim);
 
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "'{}' should halt", case.name);
 
         total_cb_checks += cpu.decode_ctrl_b_checks();
@@ -13577,7 +13575,7 @@ fn test_v2_s224_pc_authority_iss_differential() {
             .build(&mut sim);
 
         let config = V2DiffConfig {
-            max_ticks: case.max_cycles as u64,
+            max_ticks: case.max_cycles,
         };
         let result = run_v2_differential_with(&program, config, &cpu, &mut sim);
         match result {
@@ -13622,7 +13620,7 @@ fn test_v2_s224_pc_authority_golden_cycles() {
             .with_synth_blocks(synth)
             .build(&mut sim);
 
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "'{}' should halt", case.name);
 
         let cycles = cpu.read_cycle_count();
@@ -13660,7 +13658,7 @@ fn test_v2_s224_pc_authority_zero_mismatches() {
             .with_synth_blocks(synth)
             .build(&mut sim);
 
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "'{}' should halt", case.name);
 
         assert_eq!(
@@ -13711,7 +13709,7 @@ fn test_v2_s225_branch_direction_iss_differential() {
             .build(&mut sim);
 
         let config = V2DiffConfig {
-            max_ticks: case.max_cycles as u64,
+            max_ticks: case.max_cycles,
         };
         let result = run_v2_differential_with(&program, config, &cpu, &mut sim);
         match result {
@@ -13757,7 +13755,7 @@ fn test_v2_s225_branch_direction_golden_cycles() {
             .with_synth_blocks(synth)
             .build(&mut sim);
 
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "'{}' should halt", case.name);
 
         let cycles = cpu.read_cycle_count();
@@ -13795,7 +13793,7 @@ fn test_v2_s225_branch_direction_zero_mismatches() {
             .with_synth_blocks(synth)
             .build(&mut sim);
 
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "'{}' should halt", case.name);
 
         assert_eq!(
@@ -13852,7 +13850,7 @@ fn test_v2_s226_imm8_alu_iss_differential() {
             .build(&mut sim);
 
         let config = V2DiffConfig {
-            max_ticks: case.max_cycles as u64,
+            max_ticks: case.max_cycles,
         };
         let result = run_v2_differential_with(&program, config, &cpu, &mut sim);
         match result {
@@ -13898,7 +13896,7 @@ fn test_v2_s226_imm8_alu_golden_cycles() {
             .with_synth_blocks(synth)
             .build(&mut sim);
 
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "'{}' should halt", case.name);
 
         let cycles = cpu.read_cycle_count();
@@ -13939,7 +13937,7 @@ fn test_v2_s226_imm8_alu_zero_mismatches() {
             .with_synth_blocks(synth)
             .build(&mut sim);
 
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "'{}' should halt", case.name);
 
         // Per-opcode breakdown: imm8 opcodes must have zero readback mismatches.
@@ -13977,7 +13975,7 @@ fn test_v2_s229_ram_physical_iss_differential() {
             .build(&mut sim);
 
         let config = V2DiffConfig {
-            max_ticks: case.max_cycles as u64,
+            max_ticks: case.max_cycles,
         };
         let result = run_v2_differential_with(&program, config, &cpu, &mut sim);
         match result {
@@ -14017,7 +14015,7 @@ fn test_v2_s229_ram_physical_golden_cycles() {
             .with_synth_blocks(synth)
             .build(&mut sim);
 
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "'{}' should halt", case.name);
 
         let cycles = cpu.read_cycle_count();
@@ -14052,7 +14050,7 @@ fn test_v2_s229_ram_we_gating_proof() {
             .with_synth_blocks(synth)
             .build(&mut sim);
 
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "'{}' should halt", case.name);
 
         let checks = cpu.ram_wb_checks();
@@ -14099,7 +14097,7 @@ fn test_v2_s230_three_point_ram_snapshot() {
     //   post_reinject[i] == software_mirror[i]  → re-inject ALWAYS correct
     //   post_clock differs from post_reinject    → clock edge re-corrupts
     let case = benchmark_cases()
-        .into_iter()
+        .iter()
         .find(|c| c.name == "memory_stream")
         .expect("missing memory_stream benchmark");
     let program = assemble_v2(case.source).unwrap_or_else(|e| panic!("assemble: {}", e));
@@ -14161,7 +14159,7 @@ fn test_v2_s230_cross_bank_alias() {
     //   store_addr = 40, store_addr & 7 = 0 → alias to cell 0
     //   post_reinject[0] == software_mirror[0] → re-inject restores
     let case = benchmark_cases()
-        .into_iter()
+        .iter()
         .find(|c| c.name == "memory_stream")
         .expect("missing memory_stream benchmark");
     let program = assemble_v2(case.source).unwrap_or_else(|e| panic!("assemble: {}", e));
@@ -14245,7 +14243,7 @@ fn test_v2_s230_post_commit_reinject() {
             .build(&mut sim);
 
         let config = V2DiffConfig {
-            max_ticks: case.max_cycles as u64,
+            max_ticks: case.max_cycles,
         };
         let result = run_v2_differential_with(&program, config, &cpu, &mut sim);
         match result {
@@ -14294,7 +14292,7 @@ fn test_v2_s230_store_mismatch_is_clock_edge() {
             .with_synth_blocks(synth)
             .build(&mut sim);
 
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "'{}' should halt", case.name);
 
         let nonstore_mm = cpu.ram_wb_nonstore_mismatches();
@@ -14339,7 +14337,7 @@ fn test_v2_s231_operand_authority_zero_mismatches() {
             .build(&mut sim);
 
         assert!(cpu.physical_operand_authority());
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "'{}' should halt", case.name);
 
         assert_eq!(
@@ -14423,7 +14421,7 @@ fn test_v2_s231_operand_authority_iss_differential() {
             .build(&mut sim);
 
         let config = V2DiffConfig {
-            max_ticks: case.max_cycles as u64,
+            max_ticks: case.max_cycles,
         };
         let result = run_v2_differential_with(&program, config, &cpu, &mut sim);
         match result {
@@ -14469,7 +14467,7 @@ fn test_v2_s232_flag_we_gating_no_reinject_needed() {
             .build(&mut sim);
 
         assert!(cpu.physical_flag_writeback());
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "'{}' should halt", case.name);
 
         assert_eq!(
@@ -14523,7 +14521,7 @@ fn test_v2_s232_post_clock_ram_reinject_zero_store_mismatches() {
             .with_synth_blocks(synth)
             .build(&mut sim);
 
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "'{}' should halt", case.name);
 
         assert_eq!(
@@ -14548,7 +14546,7 @@ fn test_v2_s232_three_point_snapshot_still_captures_clock_corruption() {
     // Sprint 244: The RAM WE gate Const-swap eliminates clock edge corruption.
     // All three snapshot points now show identical values for bank-0 cells.
     let case = benchmark_cases()
-        .into_iter()
+        .iter()
         .find(|c| c.name == "memory_stream")
         .expect("missing memory_stream benchmark");
     let program = assemble_v2(case.source).unwrap_or_else(|e| panic!("assemble: {}", e));
@@ -14603,7 +14601,7 @@ fn test_v2_s232_iss_differential_all_phases() {
             .build(&mut sim);
 
         let config = V2DiffConfig {
-            max_ticks: case.max_cycles as u64,
+            max_ticks: case.max_cycles,
         };
         let result = run_v2_differential_with(&program, config, &cpu, &mut sim);
         match result {
@@ -14646,7 +14644,7 @@ fn test_v2_s233_rd_decode_authority_zero_mismatches() {
             .build(&mut sim);
 
         assert!(cpu.physical_rd_decode());
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "'{}' should halt", case.name);
 
         assert_eq!(
@@ -14683,7 +14681,7 @@ fn test_v2_s233_we_mask_authority_zero_mismatches() {
             .build(&mut sim);
 
         assert!(cpu.physical_we_mask());
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "'{}' should halt", case.name);
 
         assert_eq!(
@@ -14720,7 +14718,7 @@ fn test_v2_s233_flag_we_mask_authority_zero_mismatches() {
             .build(&mut sim);
 
         assert!(cpu.physical_flag_we_mask());
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "'{}' should halt", case.name);
 
         assert_eq!(
@@ -14759,7 +14757,7 @@ fn test_v2_s233_iss_differential_decode_delivery() {
             .build(&mut sim);
 
         let config = V2DiffConfig {
-            max_ticks: case.max_cycles as u64,
+            max_ticks: case.max_cycles,
         };
         let result = run_v2_differential_with(&program, config, &cpu, &mut sim);
         match result {
@@ -14802,7 +14800,7 @@ fn test_v2_s234_super_mux_zero_mismatches() {
             .build(&mut sim);
 
         assert!(cpu.physical_super_mux());
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "'{}' should halt", case.name);
 
         assert_eq!(
@@ -14887,7 +14885,7 @@ fn test_v2_s234_iss_differential() {
             .build(&mut sim);
 
         let config = V2DiffConfig {
-            max_ticks: case.max_cycles as u64,
+            max_ticks: case.max_cycles,
         };
         let result = run_v2_differential_with(&program, config, &cpu, &mut sim);
         match result {
@@ -14932,7 +14930,7 @@ fn test_v2_s235_wb_data_zero_mismatches() {
             .build(&mut sim);
 
         assert!(cpu.physical_wb_data_authority());
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "'{}' should halt", case.name);
 
         assert_eq!(
@@ -15021,7 +15019,7 @@ fn test_v2_s235_iss_differential() {
             .build(&mut sim);
 
         let config = V2DiffConfig {
-            max_ticks: case.max_cycles as u64,
+            max_ticks: case.max_cycles,
         };
         let result = run_v2_differential_with(&program, config, &cpu, &mut sim);
         match result {
@@ -15259,7 +15257,7 @@ fn test_v2_s236_iss_differential_high_reg_writeback() {
             .build(&mut sim2);
 
         let config2 = V2DiffConfig {
-            max_ticks: case.max_cycles as u64,
+            max_ticks: case.max_cycles,
         };
         let result2 = run_v2_differential_with(&prog, config2, &cpu2, &mut sim2);
         match result2 {
@@ -15298,7 +15296,7 @@ fn test_v2_s236_low_half_no_regression() {
             .build(&mut sim);
 
         assert!(cpu.physical_high_reg_writeback());
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "'{}' should halt", case.name);
 
         // Low-half authority must remain intact
@@ -15564,7 +15562,7 @@ fn test_v2_s237_iss_differential_high_read() {
             .build(&mut sim2);
 
         let config2 = V2DiffConfig {
-            max_ticks: case.max_cycles as u64,
+            max_ticks: case.max_cycles,
         };
         let result2 = run_v2_differential_with(&prog, config2, &cpu2, &mut sim2);
         match result2 {
@@ -15603,7 +15601,7 @@ fn test_v2_s237_low_half_no_regression() {
             .with_synth_blocks(synth)
             .build(&mut sim);
 
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "'{}' should halt", case.name);
 
         // Low-half authority must remain intact
@@ -15921,7 +15919,7 @@ fn test_v2_s238_iss_differential_high_alu() {
             .build(&mut sim2);
 
         let config2 = V2DiffConfig {
-            max_ticks: case.max_cycles as u64,
+            max_ticks: case.max_cycles,
         };
         let result2 = run_v2_differential_with(&prog, config2, &cpu2, &mut sim2);
         match result2 {
@@ -15959,7 +15957,7 @@ fn test_v2_s238_low_half_no_regression() {
             .with_synth_blocks(synth)
             .build(&mut sim);
 
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
         assert!(cpu.is_halted(), "'{}' should halt", case.name);
 
         assert_eq!(
@@ -18030,7 +18028,7 @@ fn test_v2_s252_max_authority_iss_differential() {
             .build(&mut sim);
 
         let config = V2DiffConfig {
-            max_ticks: case.max_cycles as u64,
+            max_ticks: case.max_cycles,
         };
         let result = run_v2_differential_with(&program, config, &cpu, &mut sim);
         match result {
@@ -19097,8 +19095,6 @@ fn test_v2_s262_levelized_eval_golden_sweep() {
 /// compares every tile value in the pipeline scope. Identifies exact divergence.
 #[test]
 fn test_v2_s268_compact_eval_parity() {
-    use std::sync::atomic::Ordering;
-
     // Simple program: no memory ops, no upper bank, no wide-imm.
     let source = r#"
         LDI R0, 1
@@ -19505,7 +19501,6 @@ fn test_v2_s274_cone_convergence_proof() {
 ///   2. Global dirty bitset residue (expected: may diverge — diagnostic)
 #[test]
 fn test_v2_s281_branch_dirty_residue_parity() {
-    use std::sync::atomic::Ordering;
     let source = r#"
         LDI R0, 0
         LDI R1, 1
@@ -19647,7 +19642,6 @@ fn test_v2_s281_branch_dirty_residue_parity() {
 /// on the same pre-clock state under max_authority.
 #[test]
 fn test_v2_s281_clock_cascade_parity() {
-    use std::sync::atomic::Ordering;
     let source = r#"
         LDI R0, 0
         LDI R1, 1
@@ -19770,7 +19764,6 @@ fn test_v2_s281_clock_cascade_parity() {
 /// compact_dirty dirty residue at each cycle. Stops on first divergence.
 #[test]
 fn test_v2_s282_branch_multicycle_dirty_parity() {
-    use std::sync::atomic::Ordering;
     let source = r#"
         LDI R0, 0
         LDI R1, 1
@@ -25533,7 +25526,7 @@ fn test_v2_s331_commit_profile() {
                 "      Commit µs/cyc: {:.1}",
                 commit_ns_sum as f64 / 1000.0 / n as f64
             );
-            let slot_words = (sched_ops + 63) / 64;
+            let slot_words = sched_ops.div_ceil(64);
             eprintln!("      Slot bitset words: {}", slot_words);
             eprintln!(
                 "      Utilization: {:.1}% ({:.0} active of {} slots)",
@@ -25591,7 +25584,7 @@ fn test_v2_s330_settle_overlap_buckets() {
             b.set(0);
         }
 
-        let measure_cycles = case.max_cycles.min(100) as u64;
+        let measure_cycles = case.max_cycles.min(100);
         let mut actual_cycles = 0u64;
         for _ in 0..measure_cycles {
             if cpu.is_halted() {
@@ -25692,7 +25685,7 @@ fn test_v2_s328_settle_phase_local_hotness() {
         // Enable phase-local settle counting.
         cpu.enable_settle_switch_counting();
 
-        let measure_cycles = case.max_cycles.min(200) as u64;
+        let measure_cycles = case.max_cycles.min(200);
         let mut actual_cycles = 0u64;
         for _ in 0..measure_cycles {
             if cpu.is_halted() {
@@ -25870,7 +25863,7 @@ fn test_v2_s363_track_a_per_op_profiling() {
         // Enable phase-local settle counting.
         cpu.enable_settle_switch_counting();
 
-        let measure_cycles = case.max_cycles.min(200) as u64;
+        let measure_cycles = case.max_cycles.min(200);
         let mut actual_cycles = 0u64;
         for _ in 0..measure_cycles {
             if cpu.is_halted() {
@@ -26113,7 +26106,7 @@ fn test_v2_s363_track_a_per_op_profiling() {
     eprintln!("  {}", "-".repeat(46));
     for bd in &bench_datas {
         let dead: u32 = bd.counts.iter().filter(|&&c| c == 0).count() as u32;
-        let pct = if bd.counts.len() > 0 {
+        let pct = if !bd.counts.is_empty() {
             dead as f64 / bd.counts.len() as f64 * 100.0
         } else {
             0.0
@@ -26347,7 +26340,7 @@ fn test_v2_s322_pruned_clock_golden_parity() {
 
         // Sprint 324: Auto-warmup — just run all cycles. Clock pruning
         // activates automatically after first 10 cycles.
-        cpu.run(&mut sim, case.max_cycles as u64);
+        cpu.run(&mut sim, case.max_cycles);
 
         assert!(cpu.is_halted(), "benchmark '{}' did not halt", case.name);
         let hash = hash_v2_final_state(&cpu, &sim);
@@ -26403,7 +26396,7 @@ fn test_v2_s321_clock_phase_local_hotness() {
         // Enable phase-local counting.
         cpu.enable_clock_cascade_counting();
 
-        let measure_cycles = case.max_cycles.min(200) as u64;
+        let measure_cycles = case.max_cycles.min(200);
         let mut actual_cycles = 0u64;
         for _ in 0..measure_cycles {
             if cpu.is_halted() {
@@ -26501,8 +26494,6 @@ fn test_v2_s321_clock_phase_local_hotness() {
 /// but dynamically-dead ops that could be pruned from the scope.
 #[test]
 fn test_v2_s320_dead_op_measurement() {
-    use std::sync::atomic::Ordering;
-
     let cases = benchmark_cases();
 
     eprintln!("\n=== Sprint 320: Per-Op Hotness (Settle + Clock) ===\n");
@@ -26548,7 +26539,7 @@ fn test_v2_s320_dead_op_measurement() {
         let mut settle_switches = vec![0u32; n_settle];
         let mut clock_switches = vec![0u32; n_clock];
 
-        let measure_cycles = case.max_cycles.min(200) as u64;
+        let measure_cycles = case.max_cycles.min(200);
         let mut actual_cycles = 0u64;
         for _ in 0..measure_cycles {
             if cpu.is_halted() {

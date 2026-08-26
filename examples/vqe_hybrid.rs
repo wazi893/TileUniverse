@@ -124,25 +124,25 @@ fn demo_quantum_job() {
         println!("\nJob completed in {:?}", elapsed);
         println!("Success: {}", result.is_success());
 
-        if let Some(stage) = result.stage_results.first() {
-            if let StageOutputs::MeasurementCounts(counts) = &stage.outputs {
-                println!("\nBell State Measurement Results (1000 shots):");
-                let mut sorted: Vec<_> = counts.iter().collect();
-                sorted.sort_by_key(|(k, _)| *k);
-                for (bitstring, count) in sorted {
-                    let prob = *count as f64 / 1000.0;
-                    println!("  |{}⟩: {} ({:.1}%)", bitstring, count, prob * 100.0);
-                }
+        if let Some(stage) = result.stage_results.first()
+            && let StageOutputs::MeasurementCounts(counts) = &stage.outputs
+        {
+            println!("\nBell State Measurement Results (1000 shots):");
+            let mut sorted: Vec<_> = counts.iter().collect();
+            sorted.sort_by_key(|(k, _)| *k);
+            for (bitstring, count) in sorted {
+                let prob = *count as f64 / 1000.0;
+                println!("  |{}⟩: {} ({:.1}%)", bitstring, count, prob * 100.0);
+            }
 
-                // Verify Bell state: should see ~50% |00⟩ and ~50% |11⟩
-                let entangled = counts.get("00").unwrap_or(&0) + counts.get("11").unwrap_or(&0);
-                let classical = counts.get("01").unwrap_or(&0) + counts.get("10").unwrap_or(&0);
-                if entangled + classical > 0 {
-                    println!(
-                        "\nEntanglement verification: {:.1}% correlated (expect ~100%)",
-                        entangled as f64 / (entangled + classical) as f64 * 100.0
-                    );
-                }
+            // Verify Bell state: should see ~50% |00⟩ and ~50% |11⟩
+            let entangled = counts.get("00").unwrap_or(&0) + counts.get("11").unwrap_or(&0);
+            let classical = counts.get("01").unwrap_or(&0) + counts.get("10").unwrap_or(&0);
+            if entangled + classical > 0 {
+                println!(
+                    "\nEntanglement verification: {:.1}% correlated (expect ~100%)",
+                    entangled as f64 / (entangled + classical) as f64 * 100.0
+                );
             }
         }
     }
@@ -191,28 +191,27 @@ fn demo_h2_vqe() {
 
         // Execute on quantum substrate
         let job_id = scheduler.submit(JobSpec::Quantum(spec));
-        if let Some(result) = scheduler.wait(job_id) {
-            if let Some(stage) = result.stage_results.first() {
-                if let StageOutputs::MeasurementCounts(counts) = &stage.outputs {
-                    // Compute energy expectation value
-                    let energy = compute_h2_energy(&counts, &h2_hamiltonian);
+        if let Some(result) = scheduler.wait(job_id)
+            && let Some(stage) = result.stage_results.first()
+            && let StageOutputs::MeasurementCounts(counts) = &stage.outputs
+        {
+            // Compute energy expectation value
+            let energy = compute_h2_energy(counts, &h2_hamiltonian);
 
-                    if energy < best_energy {
-                        best_energy = energy;
-                    }
+            if energy < best_energy {
+                best_energy = energy;
+            }
 
-                    println!(
-                        "  Iteration {}: Energy = {:.6} Ha (best: {:.6} Ha)",
-                        iteration + 1,
-                        energy,
-                        best_energy
-                    );
+            println!(
+                "  Iteration {}: Energy = {:.6} Ha (best: {:.6} Ha)",
+                iteration + 1,
+                energy,
+                best_energy
+            );
 
-                    // Simple gradient-free parameter update (demonstration)
-                    for (i, p) in params.iter_mut().enumerate() {
-                        *p += 0.05 * (0.5 - rand_f64(iteration as u64 + i as u64));
-                    }
-                }
+            // Simple gradient-free parameter update (demonstration)
+            for (i, p) in params.iter_mut().enumerate() {
+                *p += 0.05 * (0.5 - rand_f64(iteration as u64 + i as u64));
             }
         }
     }
@@ -252,23 +251,23 @@ fn demo_pipeline() {
 
         println!("Pipeline completed in {:?}\n", elapsed);
 
-        if let Some(stage) = result.stage_results.first() {
-            if let StageOutputs::MeasurementCounts(counts) = &stage.outputs {
-                println!("3-Qubit GHZ State Results (2000 shots):");
-                let mut sorted: Vec<_> = counts.iter().collect();
-                sorted.sort_by_key(|(k, _)| *k);
-                for (bitstring, count) in sorted {
-                    let prob = *count as f64 / 2000.0;
-                    if *count > 10 {
-                        println!("  |{}⟩: {} ({:.1}%)", bitstring, count, prob * 100.0);
-                    }
+        if let Some(stage) = result.stage_results.first()
+            && let StageOutputs::MeasurementCounts(counts) = &stage.outputs
+        {
+            println!("3-Qubit GHZ State Results (2000 shots):");
+            let mut sorted: Vec<_> = counts.iter().collect();
+            sorted.sort_by_key(|(k, _)| *k);
+            for (bitstring, count) in sorted {
+                let prob = *count as f64 / 2000.0;
+                if *count > 10 {
+                    println!("  |{}⟩: {} ({:.1}%)", bitstring, count, prob * 100.0);
                 }
-
-                // Post-processing: compute fidelity to ideal GHZ
-                let ghz_fidelity = compute_ghz_fidelity(&counts, 3);
-                println!("\nPost-processing:");
-                println!("  GHZ state fidelity: {:.1}%", ghz_fidelity * 100.0);
             }
+
+            // Post-processing: compute fidelity to ideal GHZ
+            let ghz_fidelity = compute_ghz_fidelity(counts, 3);
+            println!("\nPost-processing:");
+            println!("  GHZ state fidelity: {:.1}%", ghz_fidelity * 100.0);
         }
     }
 }

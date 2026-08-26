@@ -34,7 +34,7 @@ Build a two-level Hopfield network:
 │                  8×8     8×8     8×8     8×8                    │
 │                                                                 │
 │  Total: 32×32 = 1024 neurons                                    │
-│  L0 runs at packed speed (115T tiles/sec)                       │
+│  L0 runs at packed speed (~97T tiles/sec, 2026-07-03)            │
 │  L1 enforces boundary coherence between adjacent blocks         │
 └─────────────────────────────────────────────────────────────────┘
 ```

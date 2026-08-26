@@ -22,20 +22,15 @@
 pub const BLOCK_SIZE: usize = 128;
 
 /// Observation state for a single CPU-quantum pair
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum ObservationState {
     /// Still in superposition - not yet observed
+    #[default]
     Superposition,
     /// Collapsed to classical state
     Collapsed(u8), // 7-bit measurement result (0-127)
     /// Protected - explicitly marked to never observe
     Protected,
-}
-
-impl Default for ObservationState {
-    fn default() -> Self {
-        Self::Superposition
-    }
 }
 
 /// Rules governing when a CPU decides to observe
@@ -914,12 +909,12 @@ impl AnomalyDetector {
 
         // Collect recent measurements for pattern analysis
         for obs in observers {
-            if let Some(m) = obs.measurement() {
-                if obs.observation_tick == Some(self.tick) {
-                    self.measurement_history.push(m);
-                    if self.measurement_history.len() > 10000 {
-                        self.measurement_history.remove(0);
-                    }
+            if let Some(m) = obs.measurement()
+                && obs.observation_tick == Some(self.tick)
+            {
+                self.measurement_history.push(m);
+                if self.measurement_history.len() > 10000 {
+                    self.measurement_history.remove(0);
                 }
             }
         }

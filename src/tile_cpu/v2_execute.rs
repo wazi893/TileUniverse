@@ -347,6 +347,27 @@ pub struct TileCpuV2 {
     _lr_idx: usize,
     _lr_dirty_indices: Vec<usize>,
 
+    // Sprint 396: MUL island (empty indices = island not placed). P/A/B are the
+    // island's Register64s, act is the mul_active Const. Sequencing lands in the
+    // S396 I2 phase; I1 carries the indices and integrates the scopes.
+    mul_island_indices: Vec<usize>,
+    mul_island_p_idx: usize,
+    mul_island_a_idx: usize,
+    mul_island_b_idx: usize,
+    mul_island_act_idx: usize,
+
+    // Sprint 396 (I2): MUL island sequencing state. `mul_busy` counts remaining
+    // active clock edges (0 = idle; initiation sets 64, the initiation cycle's own
+    // edge is iteration 1, completion fires when it reaches 0). `mul_stall_cycle`
+    // flags the current tick as an initiation/stall cycle so the WE/flag Const-swap
+    // sites and the PC block suppress writeback, flag capture, and PC advance.
+    // `mul_verify` holds the Stage-F operand mirrors for the completion
+    // trust-verify; `mul_assists` counts completion fallbacks (expected 0).
+    mul_busy: Cell<u8>,
+    mul_stall_cycle: Cell<bool>,
+    mul_verify: Cell<(u64, u64)>,
+    mul_assists: Cell<u64>,
+
     reg_indices: [usize; 16],
     flag_z_idx: usize,
     flag_c_idx: usize,
@@ -877,6 +898,21 @@ pub struct TileCpuV2 {
     /// Sprint 224: Per-branch-kind PC mismatch breakdown.
     pc_mismatch_per_kind: [Cell<u64>; 8],
 
+    /// Sprint 390: Wide-mode control-transfer target authority counters.
+    /// Distinct from `pc_override_*` (which cover S370 fall-through): these track the
+    /// control-transfer kinds flipped to physical trust-verify-fallback this sprint
+    /// (RET in Phase A; wide immediate targets in Phase B). Verify-only — a mismatch
+    /// still falls back to the software target write, so correctness is never at risk.
+    wide_target_checks: Cell<u64>,
+    wide_target_mismatches: Cell<u64>,
+
+    /// Sprint 390 (Phase D): MTLR software-assist telemetry. MTLR (LR = rs) has no
+    /// physical capture path (the LR mux only captures on is_call), so the executor
+    /// injects the physical LR tile after the clock edge — a documented software assist.
+    /// Kept OUT of `V2HybridAssistCounters` (whose sum is golden-asserted zero across the
+    /// benchmark corpus): no corpus program uses MTLR, so this stays 0 there regardless.
+    mtlr_assists: Cell<u64>,
+
     /// Sprint 225: Physical branch direction authority.
     /// When true, the physical Mux16to1 branch LUT computes branch_taken — synth
     /// injection is skipped. Dual-path verification compares against synth truth table.
@@ -1032,6 +1068,15 @@ impl TileCpuV2 {
             branch_flag_dirty_indices: idx.branch_flag_dirty_indices,
             op_a_root_idx: idx.op_a_root_idx,
             op_b_root_idx: idx.op_b_root_idx,
+            mul_island_indices: idx.mul_island_indices,
+            mul_island_p_idx: idx.mul_island_p_idx,
+            mul_island_a_idx: idx.mul_island_a_idx,
+            mul_island_b_idx: idx.mul_island_b_idx,
+            mul_island_act_idx: idx.mul_island_act_idx,
+            mul_busy: Cell::new(0),
+            mul_stall_cycle: Cell::new(false),
+            mul_verify: Cell::new((0, 0)),
+            mul_assists: Cell::new(0),
             pipeline_dirty_indices: idx.pipeline_dirty_indices,
             pipeline_backbone_dirty_indices: idx.pipeline_backbone_dirty_indices,
             upper_bank_dirty_indices: Vec::new(), // populated by builder
@@ -1342,6 +1387,11 @@ impl TileCpuV2 {
             pc_override_checks: Cell::new(0),
             pc_override_mismatches: Cell::new(0),
             pc_mismatch_per_kind: std::array::from_fn(|_| Cell::new(0)),
+
+            // Sprint 390: Wide-mode control-transfer target authority counters
+            wide_target_checks: Cell::new(0),
+            wide_target_mismatches: Cell::new(0),
+            mtlr_assists: Cell::new(0),
 
             // Sprint 225: Physical branch direction authority
             physical_branch: Cell::new(false),
@@ -3367,6 +3417,12 @@ impl TileCpuV2 {
 
         let mut result = 0u64;
         let mut reg_write_value: Option<u64> = None;
+        // Sprint 390 (Phase D): MTLR (opcode 0x02, sub_fn 6) writes LR = rs. There is no
+        // physical LR capture on this cycle (the LR mux only captures on is_call), so we
+        // record the intent here and inject the physical LR tile AFTER the clock edge
+        // (post-edge, so the mux hold re-captures it next cycle). `None` on all other
+        // instructions.
+        let mut mtlr_lr_write: Option<u64> = None;
         let mut next_flag_z = self.flag_z.get();
         let mut next_flag_c = self.flag_c.get();
 
@@ -3562,6 +3618,10 @@ impl TileCpuV2 {
             None
         };
 
+        // Sprint 396 (I2): per-tick reset — set true only by the island MUL arm on
+        // initiation/stall cycles; a stale value would suppress everything forever.
+        self.mul_stall_cycle.set(false);
+
         match opcode {
             0x02 => {
                 // MOV/MOVZ/MOVNZ/MOVC/MOVNC rd, rs (Sprint 177: sub-function in imm5)
@@ -3572,21 +3632,33 @@ impl TileCpuV2 {
                 // level as MUL: read from real tile, write to real tile, software only
                 // chooses which mux input.
                 let sub_fn = imm8 & 0x1F;
-                result = if sub_fn == 5 {
-                    // MFLR: read LR from its physical tile (8-bit value, zero-extended).
-                    sim.get_logic_value_by_idx(self._lr_idx)
+                if sub_fn == 6 {
+                    // Sprint 390 (Gate C completion): MTLR rs — LR = rs (masked by the PC
+                    // width). Before S390 this fell through to the MOV arm and wrongly
+                    // wrote rd = rs while leaving LR untouched — a silent divergence from
+                    // the ISS (which sets LR, no rd write). Suppress the register write
+                    // (reg_write_value stays None) and record the LR write; the physical
+                    // LR tile is injected post-clock-edge (mtlr_lr_write handler below),
+                    // matching the ISS `lr = regs[rs] & pc_mask`.
+                    mtlr_lr_write = Some(b & self.pc_phys_mask as u64);
+                    result = b; // telemetry only; no register writeback for MTLR.
                 } else {
-                    b
-                };
-                let cond_met = match sub_fn {
-                    1 => self.flag_z.get(),  // MOVZ: move if Z=1
-                    2 => !self.flag_z.get(), // MOVNZ: move if Z=0
-                    3 => self.flag_c.get(),  // MOVC: move if C=1
-                    4 => !self.flag_c.get(), // MOVNC: move if C=0
-                    _ => true,               // 0, 5-31: unconditional (incl. MFLR)
-                };
-                if cond_met {
-                    reg_write_value = Some(result);
+                    result = if sub_fn == 5 {
+                        // MFLR: read LR from its physical tile (zero-extended).
+                        sim.get_logic_value_by_idx(self._lr_idx)
+                    } else {
+                        b
+                    };
+                    let cond_met = match sub_fn {
+                        1 => self.flag_z.get(),  // MOVZ: move if Z=1
+                        2 => !self.flag_z.get(), // MOVNZ: move if Z=0
+                        3 => self.flag_c.get(),  // MOVC: move if C=1
+                        4 => !self.flag_c.get(), // MOVNC: move if C=0
+                        _ => true,               // 0, 5, 7-31: unconditional (incl. MFLR)
+                    };
+                    if cond_met {
+                        reg_write_value = Some(result);
+                    }
                 }
             }
             0x03 => {
@@ -3598,8 +3670,68 @@ impl TileCpuV2 {
             0x04 => {
                 // ADD rd, rs / MUL rd, rs (Sprint 188: imm5=1 → multiply)
                 let sub_fn = imm8 & 0x1F;
-                if sub_fn == 1 {
-                    // MUL rd, rs
+                if sub_fn == 1 && !self.mul_island_indices.is_empty() {
+                    // Sprint 396 (I2): island-mode MUL — multi-cycle stall sequencing.
+                    // The island iterates once per GLOBAL clock edge (Register64
+                    // clocks are global; sub-cycle pumping is impossible by design),
+                    // so MUL becomes a 65-cycle instruction: initiation (edge =
+                    // iteration 1) + 63 stalls + completion. PC is held and WE/flag
+                    // captures suppressed on initiation/stall cycles (mul_stall_cycle
+                    // read by the S242/S246 Const-swap sites and the PC block).
+                    //
+                    // Classification (honest): the 64 shift-add iterations are
+                    // PHYSICAL (the S261 computation gap being closed). The operand
+                    // load writes the island registers from `latch.phys_top_a/b` —
+                    // the physical Top-Mux outputs captured at Stage F while the
+                    // trees were settled (delivery-grade). Result delivery reads the
+                    // island P tile into the existing sub-fn wb_data path (delivery).
+                    // Sequencing (act/busy, PC hold, suppressions) is documented
+                    // orchestration. Trust-verify at completion: software fallback +
+                    // `mul_assists` counter, expected 0 under max_authority.
+                    let busy = self.mul_busy.get();
+                    if busy == 0 {
+                        // Initiation: arm the island. This cycle's edge = iteration 1.
+                        sim.set_logic_value_by_idx(self.mul_island_p_idx, 0);
+                        sim.set_logic_value_by_idx(self.mul_island_a_idx, latch.phys_top_a);
+                        sim.set_logic_value_by_idx(self.mul_island_b_idx, latch.phys_top_b);
+                        sim.set_logic_value_by_idx(self.mul_island_act_idx, u64::MAX);
+                        for &i in &self.mul_island_indices {
+                            sim.dirty.mark_dirty(i);
+                        }
+                        self.mul_verify.set((a, b));
+                        self.mul_busy.set(64);
+                        self.mul_stall_cycle.set(true);
+                        // No writeback, no flags, PC held (mul_stall_cycle).
+                    } else if busy > 1 {
+                        // Stall: one more physical iteration on this cycle's edge.
+                        self.mul_busy.set(busy - 1);
+                        self.mul_stall_cycle.set(true);
+                    } else {
+                        // busy == 1: all 64 iterations captured as of the previous
+                        // cycle's edge. Completion: drop act BEFORE this cycle's
+                        // settle (the island holds through this edge), read the
+                        // physical product, deliver through the normal writeback.
+                        self.mul_busy.set(0);
+                        sim.set_logic_value_by_idx(self.mul_island_act_idx, 0);
+                        for &i in &self.mul_island_indices {
+                            sim.dirty.mark_dirty(i);
+                        }
+                        let phys_p = sim.get_logic_value_by_idx(self.mul_island_p_idx);
+                        let (va, vb) = self.mul_verify.get();
+                        let expected = va.wrapping_mul(vb);
+                        result = if phys_p == expected {
+                            phys_p
+                        } else {
+                            // Fallback: software product, counted. Expected 0 fires.
+                            self.mul_assists.set(self.mul_assists.get() + 1);
+                            expected
+                        };
+                        reg_write_value = Some(result);
+                        next_flag_z = result == 0;
+                        // C unchanged for MUL (existing flag_we suppression).
+                    }
+                } else if sub_fn == 1 {
+                    // MUL rd, rs (software — default mode / island not placed)
                     result = a.wrapping_mul(b);
                     reg_write_value = Some(result);
                     next_flag_z = result == 0;
@@ -4289,7 +4421,12 @@ impl TileCpuV2 {
         // Sprint 242: When rd_hi=true and the physical WE And tile is live, temporarily
         // swap it to Const(0) so the zero WE survives commit propagation. The physical
         // And tile would otherwise re-evaluate to rd_onehot (the decoder only sees rd[0:2]).
-        let we_mask_suppressed = rd_hi && reg_write_value.is_some() && self.physical_we_mask.get();
+        // Sprint 396 (I2): MUL initiation/stall cycles suppress the physical WE mask
+        // entirely — decode still sees MUL (PC is held, same instruction refetches),
+        // so the physical we_mask would otherwise fire a stale writeback every edge.
+        let we_mask_suppressed =
+            (rd_hi && reg_write_value.is_some() && self.physical_we_mask.get())
+                || (self.mul_stall_cycle.get() && self.physical_we_mask.get());
         let we_mask_saved_type = if we_mask_suppressed {
             let (x, y, z) = Self::idx_to_xyz(sim, self.we_mask_const_idx);
             let saved = sim.tile_type_3d(x, y, z);
@@ -4332,7 +4469,15 @@ impl TileCpuV2 {
             let (x, y, z) = Self::idx_to_xyz(sim, self.flag_we_mask_const_idx);
             let saved = sim.tile_type_3d(x, y, z);
             sim.set_tile_3d(x, y, z, TileType::Const);
-            sim.set_logic_value_by_idx(self.flag_we_mask_const_idx, 0x01); // Z_WE only
+            // Sprint 396 (I2): on MUL initiation/stall cycles suppress BOTH flag
+            // captures (0x00) — Z would otherwise capture a stale zero-detect every
+            // stall edge. Completion (and plain MUL) keeps Z_WE only (0x01).
+            let fw_val: u64 = if self.mul_stall_cycle.get() {
+                0x00
+            } else {
+                0x01
+            };
+            sim.set_logic_value_by_idx(self.flag_we_mask_const_idx, fw_val);
             sim.dirty.mark_dirty(self.flag_we_mask_const_idx);
             Some((x, y, z, saved))
         } else {
@@ -4476,6 +4621,72 @@ impl TileCpuV2 {
             if phys != expected {
                 self.branch_target_mismatches
                     .set(self.branch_target_mismatches.get() + 1);
+            }
+        }
+
+        // Sprint 391 (Phase B1-I): wide immediate branch target authority.
+        //
+        // The S125 Target Selection Mux RIGHT input is fed by the ir_low delivery
+        // route (Phase 8), which physically carries only the 8-bit ir_low (imm8).
+        // For a WIDE immediate control transfer (JMP.W / CALL.W / JZ.W / ...,
+        // EXT_WIDE_IMM set) the true target is the 16-bit `imm_val` (byte3:byte1),
+        // so the physical route truncates it to imm8. Inject `imm_val` into the
+        // delivery chain and re-propagate the commit scope — exactly the Sprint 224
+        // upper-bank model, generalized to wide mode — so the Target Mux output
+        // carries the full target and the clock edge latches it into the wide PC.
+        //
+        // Phase 0 (SPRINT_391_REPORT) verified this survives to the PC capture: the
+        // clock edge latches the Target Mux output BEFORE the spine re-drives the
+        // route on the next combinational settle (post-capture, so it does not matter).
+        //
+        // Gated on wide_pc + a TAKEN wide immediate branch. Not-taken conditionals
+        // ride the physical fall-through (Sprint 370); non-wide immediate targets fit
+        // the 8-bit route and are already physical; register-indirect (JMPR/CALLR) and
+        // HALT are excluded (Phase C / the Sprint 390 B0 freeze own those). Every write
+        // is gated behind `self.wide_pc`, so default-mode goldens never enter here.
+        if self.wide_pc && wide_imm && !is_halt && (latch.ir_ext & EXT_REG_INDIRECT) == 0 {
+            let imm_taken = match branch_kind {
+                1 | 6 => true,       // JMP.W / CALL.W
+                2 => flag_z_before,  // JZ.W
+                3 => !flag_z_before, // JNZ.W
+                4 => carry_before,   // JC.W
+                5 => !carry_before,  // JNC.W
+                _ => false,          // kind 0 (no branch) / 7 (RET) — not an immediate target
+            };
+            if imm_taken {
+                let (ox, oy) = self.origin;
+                let gw = sim.width();
+                let layer_size = gw * sim.height();
+                let target = imm_val;
+                // L2 east bus: (ox+2..7, oy+4) — source + WireRight chain.
+                for x in (ox + 2)..=(ox + 7) {
+                    sim.set_logic_value_by_idx(2 * layer_size + (oy + 4) * gw + x, target);
+                }
+                // L3 ViaDown at (ox+7, oy+4).
+                sim.set_logic_value_by_idx(3 * layer_size + (oy + 4) * gw + (ox + 7), target);
+                // L3 WireUp chain: (ox+7, oy+3..1).
+                for y in (oy + 1)..=(oy + 3) {
+                    sim.set_logic_value_by_idx(3 * layer_size + y * gw + (ox + 7), target);
+                }
+                // L2 ViaUp at (ox+7, oy+1) — feeds Target Mux RIGHT.
+                sim.set_logic_value_by_idx(2 * layer_size + (oy + 1) * gw + (ox + 7), target);
+                // Mark Target Mux dirty and re-propagate the commit scope (Sprint 224
+                // model — same re-propagation selection so the injected chain settles
+                // into the Target Mux output).
+                let target_mux_idx = 2 * layer_size + (oy + 1) * gw + (ox + 6);
+                sim.dirty.mark_dirty(target_mux_idx);
+                let (d2, e2, s2) = if !self.commit_compact_ops.is_empty()
+                    && wb_data_mux_saved.is_none()
+                    && ram_we_gate_saved.is_none()
+                    && !self.compact_ops_stale.get()
+                {
+                    sim.propagate_compact_dirty(&self.commit_compact_ops, &self.commit_compact_wvia)
+                } else {
+                    sim.propagate_levelized(&self.commit_eval_order)
+                };
+                stats.comb_deltas += d2;
+                stats.comb_eval += e2;
+                stats.comb_switched += s2;
             }
         }
 
@@ -4672,6 +4883,36 @@ impl TileCpuV2 {
             if up_restore != 0 {
                 sim.set_logic_value_by_idx(up_restore, 0);
                 self.ram_store_inject_up_idx.set(0);
+            }
+        }
+
+        // Sprint 390 (Phase D): MTLR physical LR injection (post-clock-edge). The LR
+        // register captured a hold value at the edge (is_call=0), so write the new LR
+        // into its tile now. The next cycle re-holds it through the LR mux (is_call=0 →
+        // RIGHT=LR feedback), the Phase 9 LR route (in the commit dirty set every cycle)
+        // delivers it to the S125 Target Mux LEFT for a subsequent RET, and MFLR reads
+        // the tile directly. Software mirror `self.lr` is kept in sync for RET's
+        // expected_pc and read_lr(). No corpus program uses MTLR, so this never fires in
+        // the golden sweep — default-mode goldens stay byte-identical.
+        if let Some(lr_val) = mtlr_lr_write {
+            self.lr.set(lr_val as u32);
+            if self.extended_pc {
+                // Sprint 394: trust-verify. The annex LR cascade (rail-muxed rs
+                // port → pc-mask via → relocated LR mux chain) captured
+                // regs[rs] & pc_mask at the clock edge. Verify the physical LR
+                // tile and inject only on mismatch — `mtlr_assists` is now the
+                // fallback counter, expected 0 in extended/wide fabrics.
+                let phys = sim.get_logic_value_by_idx(self._lr_idx);
+                if phys != lr_val {
+                    sim.set_logic_value_by_idx(self._lr_idx, lr_val);
+                    sim.dirty.mark_dirty(self._lr_idx);
+                    self.mtlr_assists.set(self.mtlr_assists.get() + 1);
+                }
+            } else {
+                // Default 7-bit fabric has no cascade — the S390 Phase D assist.
+                sim.set_logic_value_by_idx(self._lr_idx, lr_val);
+                sim.dirty.mark_dirty(self._lr_idx);
+                self.mtlr_assists.set(self.mtlr_assists.get() + 1);
             }
         }
 
@@ -4987,6 +5228,17 @@ impl TileCpuV2 {
             } else if branch_kind == 7 {
                 // RET: target = LR (software mirror, kept in sync above).
                 self.lr.get() & pcm
+            } else if is_halt {
+                // Sprint 390 (Phase B0): a HALT self-targets (branch_kind 1) so the PC
+                // stays put — but the self-target rides the 8-bit `imm8` field, which
+                // `build_program_ext` patches with `addr & 0xFF`. For a HALT sitting at a
+                // WIDE address (> 0xFF) that truncates the self-target (HALT@305 → 305 &
+                // 0xFF = 49), diverging from the ISS (which does not advance past HALT).
+                // Freeze the PC at the HALT's own full-width address. Scoped to the
+                // extended/wide path (default-mode goldens never enter this block); the
+                // fall-through and RET paths are unaffected — this is the whole defect the
+                // Phase B0 regression gate reproduced.
+                pc_full
             } else {
                 // Sprint 371 (Gate B.3.1): JMP.W / CALL.W target the full 16-bit
                 // address via the wide immediate (`imm_val`). For non-wide branches
@@ -5010,7 +5262,29 @@ impl TileCpuV2 {
             // Control transfers (branches, JMPR/CALLR/RET) keep the software target
             // write — physical wide target delivery is deferred (ir_low is 8-bit).
             let is_control_transfer = branch_kind != 0 || reg_indirect;
-            if self.wide_pc && !is_control_transfer {
+            // Sprint 390 (Phase A) + Sprint 391 (Phase B1-I): wide control-transfer
+            // TARGET authority via the S125 Target Selection Mux → physical PC.
+            //   - RET (kind 7): LR (Register64) → Target Mux (is_ret) → PC (S390 A).
+            //   - Immediate targets (JMP.W / CALL.W / JZ.W / ..., kinds 1..=6, not
+            //     register-indirect, not HALT): `imm_val` is injected into the ir_low
+            //     delivery route above (S391 B1-I) so the Target Mux → PC path latches
+            //     the full 16-bit target. Not-taken conditionals ride the physical
+            //     fall-through (S370). Both outcomes are physically authoritative.
+            // Sprint 393: register-indirect targets (JMPR kind 1 / CALLR kind 6) are
+            // now physically authoritative too — the register read port (16 taps of
+            // the permanent Register64 file → 16:1 annex mux ladder selected by the
+            // physical rd field) feeds Mux2.LEFT, and Mux2 (is_reg_indirect = byte2
+            // bit 4, S392 C1) re-heads the Target-Mux → PC path. Only HALT (S390 B0
+            // freeze) still takes the software write below.
+            let ct_target_physical = (!reg_indirect && !is_halt && matches!(branch_kind, 1..=7))
+                || (reg_indirect && matches!(branch_kind, 1 | 6));
+            if self.mul_stall_cycle.get() {
+                // Sprint 396 (I2): MUL initiation/stall — hold the PC so the same
+                // MUL refetches while the island iterates. Unconditional software
+                // hold, no trust-verify counters (documented orchestration; the
+                // physical PC captured fall-through this edge and is re-pinned).
+                self.write_pc(sim, pc_full);
+            } else if self.wide_pc && !is_control_transfer {
                 self.pc_override_checks
                     .set(self.pc_override_checks.get() + 1);
                 if self.pc.get() != expected_pc {
@@ -5019,6 +5293,29 @@ impl TileCpuV2 {
                     self.write_pc(sim, expected_pc);
                 }
                 // else: physical PC is authoritative — no software write.
+            } else if self.wide_pc && ct_target_physical {
+                // Sprint 390 (Phase A) / Sprint 391 (Phase B1-I): wide control-transfer
+                // target authority via trust-verify-fallback (S224). The target flows
+                // LR / injected imm_val → S125 Target Mux → PC; trust the physical PC,
+                // verify against software, fall back only on mismatch. The physical
+                // target is correct for RET and taken/not-taken immediate branches
+                // (wide_target_mismatches == 0).
+                //
+                // NOTE (pre-existing, out of S390 scope): a wide RET that lands at a HIGH
+                // address (> 0x7F) and then continues to stay high (fall-through / HALT at
+                // that address) drops PC bits 8..15 on the following cycle — a defect in
+                // the S370 wide-PC high-bit carry that reproduces with unconditional
+                // write_pc too (so it is NOT introduced here). Real return sites in the
+                // corpus are low or immediately re-jump, so it does not surface. See
+                // SPRINT_390_REPORT.md; a fix belongs to a wide-PC-sequencing sprint.
+                self.wide_target_checks
+                    .set(self.wide_target_checks.get() + 1);
+                if self.pc.get() != expected_pc {
+                    self.wide_target_mismatches
+                        .set(self.wide_target_mismatches.get() + 1);
+                    self.write_pc(sim, expected_pc);
+                }
+                // else: physical control-transfer target is authoritative — no write.
             } else {
                 self.write_pc(sim, expected_pc);
             }
@@ -6441,6 +6738,52 @@ impl TileCpuV2 {
     /// Sprint 224: Per-branch-kind PC mismatch breakdown.
     pub fn pc_mismatch_per_kind(&self) -> [u64; 8] {
         std::array::from_fn(|i| self.pc_mismatch_per_kind[i].get())
+    }
+
+    /// Sprint 390: Wide-mode control-transfer target authority counters.
+    /// `checks` increments per control-transfer cycle whose target is now physically
+    /// authoritative; `mismatches` counts cycles where the physical PC disagreed with
+    /// the software-computed target and the software fallback fired. Expected: 0.
+    pub fn wide_target_checks(&self) -> u64 {
+        self.wide_target_checks.get()
+    }
+
+    pub fn wide_target_mismatches(&self) -> u64 {
+        self.wide_target_mismatches.get()
+    }
+
+    // ---- Sprint 396: MUL island ----
+
+    /// MUL island tile indices (empty if the island is not placed).
+    pub fn mul_island_indices(&self) -> &[usize] {
+        &self.mul_island_indices
+    }
+
+    /// Sprint 396 (I2): completion trust-verify fallback counter. Expected 0 —
+    /// a nonzero value means the physical island product disagreed with software
+    /// and the fallback fired.
+    pub fn mul_assists(&self) -> u64 {
+        self.mul_assists.get()
+    }
+
+    /// (P, A, B, act) island tile indices, if the island is placed.
+    pub fn mul_island_regs(&self) -> Option<(usize, usize, usize, usize)> {
+        if self.mul_island_indices.is_empty() {
+            None
+        } else {
+            Some((
+                self.mul_island_p_idx,
+                self.mul_island_a_idx,
+                self.mul_island_b_idx,
+                self.mul_island_act_idx,
+            ))
+        }
+    }
+
+    /// Sprint 390: MTLR software-assist count (physical LR tile injected after the
+    /// clock edge because the LR mux only captures on is_call). Telemetry only.
+    pub fn mtlr_assists(&self) -> u64 {
+        self.mtlr_assists.get()
     }
 
     // ---- Sprint 225: Physical branch direction authority ----
@@ -8377,6 +8720,13 @@ impl TileCpuV2 {
                 .map(|(i, &w)| {
                     let addr = 128 + i;
                     if ((w >> 11) & 0x1F) as u8 == 0x01 {
+                        // HALT self-target patch. NOTE (Sprint 390 B0): the self-target
+                        // rides the 8-bit imm8 field, so for a HALT at a WIDE address
+                        // (> 0xFF) this truncates to addr & 0xFF. The extended/wide
+                        // executor compensates by freezing is_halt at its own full-width
+                        // PC (`run_stage_x`), so the truncated physical self-target is
+                        // never consumed. Left as-is (imm8-width) to keep the classic /
+                        // 8-bit ROM patch identical.
                         (w & !0xFF) | ((addr as u32) & mask)
                     } else {
                         w

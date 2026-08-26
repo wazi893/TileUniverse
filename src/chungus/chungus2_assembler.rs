@@ -186,7 +186,7 @@ pub fn assemble(source: &str) -> Result<Vec<u8>, String> {
                 // JMP
                 let label = &parts[1];
                 let addr = *labels.get(label).unwrap_or(&0) as u16;
-                word |= (addr & 0x7FF) << 0; // JMP uses 11 bits?
+                word |= addr & 0x7FF; // JMP uses 11 bits?
                 // Wait, JMP Op is 5 bits (15..11).
                 // Addr is 11 bits (10..0).
                 // Previous code: word |= (addr as u16) << 2; (dropped 2 bits? or shifted up?)

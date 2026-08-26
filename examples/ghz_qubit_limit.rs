@@ -66,7 +66,7 @@ fn main() {
 
 fn format_big_number(n: usize) -> String {
     if n == usize::MAX {
-        format!("MAX (2^64-1)")
+        "MAX (2^64-1)".to_string()
     } else if n >= 1_000_000_000_000_000_000 {
         format!("{:.1}Qi qubits", n as f64 / 1_000_000_000_000_000_000.0)
     } else if n >= 1_000_000_000_000_000 {

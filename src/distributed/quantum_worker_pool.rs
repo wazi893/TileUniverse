@@ -244,7 +244,7 @@ impl QuantumWorkerPool {
     /// Panics if num_workers < 1 or > 64
     pub fn new(num_workers: usize) -> Self {
         assert!(
-            num_workers >= 1 && num_workers <= 64,
+            (1..=64).contains(&num_workers),
             "num_workers must be 1-64, got {}",
             num_workers
         );
@@ -1142,9 +1142,7 @@ fn apply_cnot_cross_block(block: &mut Block, control: u8, target: u8, block_id: 
         let _target_mask = 1usize << target_block_bit;
 
         // If control qubit is NOT set in block_id, CNOT has no effect
-        if (block_id & control_mask) == 0 {
-            return;
-        }
+        if (block_id & control_mask) == 0 {}
 
         // If control is set, we need to swap this block with partner block
         // Partner block differs in target bit: block_id ^ target_mask

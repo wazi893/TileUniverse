@@ -163,19 +163,17 @@ impl Task for DelayedRewardTask {
         organism.tick_metabolism();
 
         // Check if organism reached beacon
-        if !organism.state.beacon_visited {
-            if world.is_on_beacon(organism.x, organism.y).is_some() {
-                organism.state.beacon_visited = true;
-                organism.state.beacon_visit_tick = Some(world.tick);
-            }
+        if !organism.state.beacon_visited && world.is_on_beacon(organism.x, organism.y).is_some() {
+            organism.state.beacon_visited = true;
+            organism.state.beacon_visit_tick = Some(world.tick);
         }
 
         // Check if organism can eat food
-        if self.is_food_accessible(organism, world.tick) {
-            if world.is_on_food(organism.x, organism.y).is_some() {
-                let value = self.config.food_value;
-                organism.eat(value);
-            }
+        if self.is_food_accessible(organism, world.tick)
+            && world.is_on_food(organism.x, organism.y).is_some()
+        {
+            let value = self.config.food_value;
+            organism.eat(value);
         }
     }
 

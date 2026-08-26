@@ -26,7 +26,6 @@ fn main() {
     {
         println!("ERROR: Requires CUDA support!");
         println!("Build with: cargo run --example epic96_v2_perf_bench --features cuda --release");
-        return;
     }
 
     #[cfg(feature = "cuda")]

@@ -301,10 +301,6 @@ pub fn diff_runs(dir1: &Path, dir2: &Path) -> io::Result<(usize, usize)> {
     }
     let len1 = m1.artifacts.len();
     let len2 = m2.artifacts.len();
-    let len_diff = if len1 >= len2 {
-        len1 - len2
-    } else {
-        len2 - len1
-    };
+    let len_diff = len1.abs_diff(len2);
     Ok((mismatches, len_diff))
 }

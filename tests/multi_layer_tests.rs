@@ -10,7 +10,6 @@ use engine::simulation::Simulation;
 use engine::slim_simulation::SlimSimulation;
 use engine::tile_meta::TileType;
 use std::io::BufReader;
-use std::sync::atomic::Ordering;
 
 // ============================================================================
 // Test 1: Single-layer identity

@@ -79,7 +79,7 @@ fn memory_scaling_analysis() {
         let sparse_str = format!("{} KB", sparse_bytes / 1024);
 
         // Stabilizer: 2n * (n/64) * 8 bytes
-        let n_words = (qubits + 63) / 64;
+        let n_words = qubits.div_ceil(64);
         let stab_bytes = 2 * qubits * n_words * 8;
         let stab_str = format_bytes(stab_bytes as u64);
 
@@ -203,12 +203,9 @@ fn graph_router_test() {
     println!();
 
     let topologies: Vec<(&str, Box<dyn Fn(usize) -> GraphRouter>)> = vec![
-        (
-            "Bucket-Brigade",
-            Box::new(|d| GraphRouter::new_bucket_brigade(d)),
-        ),
-        ("Star", Box::new(|d| GraphRouter::new_star(d))),
-        ("Path", Box::new(|d| GraphRouter::new_path(d))),
+        ("Bucket-Brigade", Box::new(GraphRouter::new_bucket_brigade)),
+        ("Star", Box::new(GraphRouter::new_star)),
+        ("Path", Box::new(GraphRouter::new_path)),
     ];
 
     println!(

@@ -418,12 +418,12 @@ impl EntangledNodePair {
         self.quantum_state.apply_h(offset + 3);
 
         // CZ between adjacent pairs
-        self.quantum_state.apply_cz(offset + 0, offset + 1);
+        self.quantum_state.apply_cz(offset, offset + 1);
         self.quantum_state.apply_cz(offset + 1, offset + 2);
         self.quantum_state.apply_cz(offset + 2, offset + 3);
 
         // H on even qubits
-        self.quantum_state.apply_h(offset + 0);
+        self.quantum_state.apply_h(offset);
         self.quantum_state.apply_h(offset + 2);
     }
 

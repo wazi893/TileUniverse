@@ -406,6 +406,6 @@ mod tests {
         };
 
         let confidence = brain.confidence(&sensors);
-        assert!(confidence >= 0.0 && confidence <= 1.0);
+        assert!((0.0..=1.0).contains(&confidence));
     }
 }

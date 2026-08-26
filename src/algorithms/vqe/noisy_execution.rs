@@ -255,7 +255,7 @@ pub fn measure_hamiltonian_with_noise(
     let mut total_expectation = 0.0;
     let mut rng = QRng::new(seed);
 
-    for (_term_idx, term) in hamiltonian.terms.iter().enumerate() {
+    for term in hamiltonian.terms.iter() {
         let mut term_expectation = 0.0;
 
         // Measurement circuit for basis rotation
@@ -340,10 +340,10 @@ pub fn measure_hamiltonian_with_rem(
         // Measure all qubits
         for q in 0..hamiltonian.n_qubits {
             let outcome = apply_gate_scalar(&mut shot_state, &QGate::Measure(q), &mut rng);
-            if let GateOutcome::Measured { bit, .. } = outcome {
-                if bit == 1 {
-                    bitstring |= 1 << q;
-                }
+            if let GateOutcome::Measured { bit, .. } = outcome
+                && bit == 1
+            {
+                bitstring |= 1 << q;
             }
         }
 

@@ -358,7 +358,7 @@ fn scale_input_weights(net: &mut SNNNetwork, d_norms: &[Vec<f32>; N_CLASSES], k:
         for i in 0..k {
             let global = c * k + i;
             let cpu = net.topology.neuron_to_cpu[global];
-            let local = net.topology.local_index(global, npcu) as usize;
+            let local = net.topology.local_index(global, npcu);
             let d = d_norms[c][i];
             for syn in &mut net.synapses[cpu].local[local] {
                 let new_w = (syn.weight as f32 * d).round();
@@ -377,7 +377,7 @@ fn set_hidden_thresholds(net: &mut SNNNetwork, t_per_class: &[i16; N_CLASSES]) {
         for i in 0..N_H_PER_CLASS {
             let global = h_start + c * N_H_PER_CLASS + i;
             let cpu = net.topology.neuron_to_cpu[global];
-            let local = net.topology.local_index(global, npcu) as usize;
+            let local = net.topology.local_index(global, npcu);
             net.populations[cpu].neurons[local].threshold = t;
         }
     }
@@ -416,7 +416,7 @@ fn run_trial(net: &mut SNNNetwork, rates: &[u8], ticks: u32) -> usize {
             for i in 0..N_H_PER_CLASS {
                 let global = h_start + c * N_H_PER_CLASS + i;
                 let cpu = net.topology.neuron_to_cpu[global];
-                let local = net.topology.local_index(global, npcu) as usize;
+                let local = net.topology.local_index(global, npcu);
                 ch_spikes[c] += net.populations[cpu].neurons[local].spiked as u32;
             }
         }

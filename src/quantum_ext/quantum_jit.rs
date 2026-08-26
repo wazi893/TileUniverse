@@ -30,6 +30,12 @@ pub struct JitBackend {
     pub kernels: Vec<JitKernel>,
 }
 
+impl Default for JitBackend {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl JitBackend {
     pub fn new() -> Self {
         Self {

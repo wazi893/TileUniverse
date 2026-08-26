@@ -216,8 +216,8 @@ impl SparseQuantumGrid {
 
     /// Get or create a block
     fn get_or_create_block(&mut self, cpu_id: u128) -> &mut SparseBlock {
-        if !self.blocks.contains_key(&cpu_id) {
-            self.blocks.insert(cpu_id, SparseBlock::new());
+        if let std::collections::hash_map::Entry::Vacant(e) = self.blocks.entry(cpu_id) {
+            e.insert(SparseBlock::new());
             self.stats.blocks_allocated += 1;
             self.stats.blocks_active += 1;
             if self.stats.blocks_active > self.stats.peak_blocks {

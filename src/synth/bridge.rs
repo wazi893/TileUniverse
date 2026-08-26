@@ -455,13 +455,13 @@ mod tests {
             compile_and_inject(&aig, &lib, &mut sim, 64, 400, 0).expect("XOR compiled");
 
         for combo in 0..4u32 {
-            let a_val = if (combo >> 0) & 1 != 0 { u64::MAX } else { 0 };
+            let a_val = if combo & 1 != 0 { u64::MAX } else { 0 };
             let b_val = if (combo >> 1) & 1 != 0 { u64::MAX } else { 0 };
 
             let outputs = evaluate_block_bool(&mut sim, &block, &[a_val, b_val]).expect("evaluate");
             let actual = outputs[0];
 
-            let expected = (combo >> 0) & 1 != (combo >> 1) & 1;
+            let expected = combo & 1 != (combo >> 1) & 1;
             assert_eq!(actual, expected, "XOR mismatch at combo={:02b}", combo);
         }
     }
@@ -481,11 +481,11 @@ mod tests {
             compile_and_inject(&aig, &lib, &mut sim, 64, 460, 0).expect("AND compiled");
 
         for combo in 0..4u32 {
-            let a_val = if (combo >> 0) & 1 != 0 { u64::MAX } else { 0 };
+            let a_val = if combo & 1 != 0 { u64::MAX } else { 0 };
             let b_val = if (combo >> 1) & 1 != 0 { u64::MAX } else { 0 };
 
             let outputs = evaluate_block_bool(&mut sim, &block, &[a_val, b_val]).expect("evaluate");
-            let expected = ((combo >> 0) & 1 != 0) && ((combo >> 1) & 1 != 0);
+            let expected = (combo & 1 != 0) && ((combo >> 1) & 1 != 0);
             assert_eq!(outputs[0], expected, "AND mismatch at combo={:02b}", combo);
         }
     }
@@ -505,11 +505,11 @@ mod tests {
             compile_and_inject(&aig, &lib, &mut sim, 64, 520, 0).expect("OR compiled");
 
         for combo in 0..4u32 {
-            let a_val = if (combo >> 0) & 1 != 0 { u64::MAX } else { 0 };
+            let a_val = if combo & 1 != 0 { u64::MAX } else { 0 };
             let b_val = if (combo >> 1) & 1 != 0 { u64::MAX } else { 0 };
 
             let outputs = evaluate_block_bool(&mut sim, &block, &[a_val, b_val]).expect("evaluate");
-            let expected = ((combo >> 0) & 1 != 0) || ((combo >> 1) & 1 != 0);
+            let expected = (combo & 1 != 0) || ((combo >> 1) & 1 != 0);
             assert_eq!(outputs[0], expected, "OR mismatch at combo={:02b}", combo);
         }
     }
@@ -575,9 +575,9 @@ mod tests {
         for combo in 0..64u32 {
             let s1 = (combo >> 5) & 1 != 0;
             let s0 = (combo >> 4) & 1 != 0;
-            let sel = ((s1 as u32) << 1) | ((s0 as u32) << 0);
+            let sel = ((s1 as u32) << 1) | (s0 as u32);
 
-            let d0 = (combo >> 0) & 1 != 0;
+            let d0 = combo & 1 != 0;
             let d1 = (combo >> 1) & 1 != 0;
             let d2 = (combo >> 2) & 1 != 0;
             let d3 = (combo >> 3) & 1 != 0;
@@ -744,12 +744,12 @@ mod tests {
 
         for combo in 0..4u32 {
             let inputs = vec![
-                if (combo >> 0) & 1 != 0 { u64::MAX } else { 0 },
+                if combo & 1 != 0 { u64::MAX } else { 0 },
                 if (combo >> 1) & 1 != 0 { u64::MAX } else { 0 },
             ];
             let outputs =
                 evaluate_block_bool(&mut sim, &block, &inputs).expect("evaluate succeeded");
-            let expected = ((combo >> 0) & 1 != 0) && ((combo >> 1) & 1 != 0);
+            let expected = (combo & 1 != 0) && ((combo >> 1) & 1 != 0);
             assert_eq!(
                 outputs[0], expected,
                 "roundtrip mismatch at combo={:02b}",

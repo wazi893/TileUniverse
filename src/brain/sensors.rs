@@ -280,7 +280,7 @@ mod tests {
         // Should have 4 heat values + 4 charge values
         // All values should be in [-1, 1] range
         for &s in &sensors {
-            assert!(s >= -1.0 && s <= 1.0);
+            assert!((-1.0..=1.0).contains(&s));
         }
     }
 
@@ -291,7 +291,7 @@ mod tests {
 
         assert_eq!(sensors.len(), 16);
         for &s in &sensors {
-            assert!(s >= -1.0 && s <= 1.0);
+            assert!((-1.0..=1.0).contains(&s));
         }
     }
 

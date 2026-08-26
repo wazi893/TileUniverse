@@ -1,6 +1,8 @@
 """Tests for V2Cpu Python bindings."""
+import json
+
 import pytest
-from tileuniverse import V2Cpu, V2Trace
+from tileuniverse import V2Cpu, V2Trace, v2_ground_truth_jsonl
 
 
 def test_ldi_halt():
@@ -67,6 +69,30 @@ def test_trace_regs_at():
     trace = cpu.run_traced(100)
     regs = trace.regs_at(0)
     assert len(regs) == 16
+
+
+def test_ground_truth_jsonl():
+    doc = v2_ground_truth_jsonl("LDI R0, 41\nLDI R1, 1\nADD R0, R1\nHALT")
+    lines = doc.splitlines()
+    assert len(lines) >= 4  # header + LDI, LDI, ADD retirements
+    header = json.loads(lines[0])
+    assert header["type"] == "program"
+    assert len(header["program_words"]) == 4
+    assert len(header["initial_regs"]) == 16
+    steps = [json.loads(line) for line in lines[1:]]
+    # Folding reg-write deltas over initial_regs yields absolute state.
+    regs = list(header["initial_regs"])
+    for step in steps:
+        assert "asm" in step
+        for write in step["reg_writes"]:
+            regs[write["reg"]] = write["value"]
+    assert regs[0] == 42
+    assert regs[1] == 1
+
+
+def test_ground_truth_jsonl_non_halting_raises():
+    with pytest.raises(RuntimeError):
+        v2_ground_truth_jsonl("LDI R0, 1\nLDI R1, 2", max_cycles=16)
 
 
 def test_cycle_count():

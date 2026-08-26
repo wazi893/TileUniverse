@@ -124,6 +124,10 @@ pub struct DeviceAluProgram {
     pc_slot: u32,
     final_mux_slots: [u32; 4],
     super_mux_inject_right_slots: [u32; 4],
+    /// Upper-bank super-mux inject (left input); fed from `bank47_mux[(pc>>4)&3]` by the
+    /// bridge, mirroring `stage_f_inject` — decodes pc 64..128 physically.
+    super_mux_inject_slots: [u32; 4],
+    bank47_mux_slots: [[u32; 4]; 4],
     alu_a_term_slot: u32,
     alu_b_term_slot: u32,
     wb_alu_root_slot: u32,
@@ -222,6 +226,12 @@ impl DeviceAluProgram {
         let mut super_mux_inject_right_slots = layout
             .super_mux_inject_right_indices
             .map(|t| assign_slot(t as u32, &mut slot_of, &mut touched));
+        let mut super_mux_inject_slots = layout
+            .super_mux_inject_indices
+            .map(|t| assign_slot(t as u32, &mut slot_of, &mut touched));
+        let mut bank47_mux_slots = layout
+            .bank47_mux_indices
+            .map(|bank| bank.map(|t| assign_slot(t as u32, &mut slot_of, &mut touched)));
         let mut alu_a_term_slot = assign_slot(
             layout.alu_a_trunk_terminal_idx as u32,
             &mut slot_of,
@@ -282,13 +292,20 @@ impl DeviceAluProgram {
                     &op_n1, &op_n2, &op_n3,
                 );
             }
-            // Boundary cone→settle: the bridge writes super_mux_inject_right from final_mux,
-            // so smir is defined here (earlier writers dead) and final_mux is consumed here
-            // (cone must produce it).
-            for &s in &super_mux_inject_right_slots {
+            // Boundary cone→settle: the bridge writes super_mux_inject_right from final_mux
+            // AND super_mux_inject (left) from bank47_mux[(pc>>4)&3], so both inject sides
+            // are defined here (earlier writers dead) and final_mux + all bank47 muxes are
+            // consumed here (cone must produce them).
+            for &s in super_mux_inject_right_slots
+                .iter()
+                .chain(super_mux_inject_slots.iter())
+            {
                 live[s as usize] = false;
             }
-            for &f in &final_mux_slots {
+            for &f in final_mux_slots
+                .iter()
+                .chain(bank47_mux_slots.iter().flatten())
+            {
                 live[f as usize] = true;
             }
             // cone: fetch + decode from ROM at PC.
@@ -341,6 +358,8 @@ impl DeviceAluProgram {
             for &s in final_mux_slots
                 .iter()
                 .chain(super_mux_inject_right_slots.iter())
+                .chain(super_mux_inject_slots.iter())
+                .chain(bank47_mux_slots.iter().flatten())
             {
                 used[s as usize] = true;
             }
@@ -377,7 +396,11 @@ impl DeviceAluProgram {
             for s in final_mux_slots.iter_mut() {
                 *s = new_of[*s as usize];
             }
-            for s in super_mux_inject_right_slots.iter_mut() {
+            for s in super_mux_inject_right_slots
+                .iter_mut()
+                .chain(super_mux_inject_slots.iter_mut())
+                .chain(bank47_mux_slots.iter_mut().flatten())
+            {
                 *s = new_of[*s as usize];
             }
             touched = new_touched;
@@ -404,10 +427,22 @@ impl DeviceAluProgram {
             pc_slot,
             final_mux_slots,
             super_mux_inject_right_slots,
+            super_mux_inject_slots,
+            bank47_mux_slots,
             alu_a_term_slot,
             alu_b_term_slot,
             wb_alu_root_slot,
         }
+    }
+
+    /// Upper-bank bridge slots for the kernels, flattened: `[0..4)` = super_mux_inject
+    /// (left) inject targets; `[4 + bw*4 + lane]` = `bank47_mux[bw][lane]` sources.
+    fn ubank_slots(&self) -> Vec<u32> {
+        let mut v = self.super_mux_inject_slots.to_vec();
+        for bank in &self.bank47_mux_slots {
+            v.extend_from_slice(bank);
+        }
+        v
     }
 
     pub fn op_count(&self) -> usize {
@@ -530,6 +565,271 @@ impl DeviceAluProgram {
             }
         }
         vals
+    }
+
+    /// The input slots op `j` actually READS at eval time (mirrors the kernel's lazy
+    /// per-opcode operand loads; COP_RAM and unknown/default ops also read their own
+    /// output slot — they are state-carrying).
+    fn op_reads(&self, j: usize) -> Vec<u32> {
+        let (i0, i1, i2) = (self.op_in0[j], self.op_in1[j], self.op_in2[j]);
+        match self.op_code[j] as u8 {
+            COP_WIRE_R | COP_VIA | COP_NOT | COP_ZERO | COP_DEC3 | COP_WVIA => vec![i0],
+            COP_WIRE_L => vec![i1],
+            COP_WIRE_D | COP_WIRE_U => vec![i2],
+            COP_WIRE_H | COP_OR | COP_AND | COP_XOR | COP_ADD | COP_SUB | COP_SHR | COP_SHL
+            | COP_BITSEL | COP_CARRY => vec![i0, i1],
+            COP_WIRE_V => vec![i1, i2],
+            COP_MUX | COP_MUX16 => vec![i0, i1, i2],
+            COP_MUX4 => vec![i0, i2],
+            COP_RAM => vec![i0, i2, self.op_out[j]],
+            COP_THRESHOLD_VIA => vec![
+                i0,
+                self.op_n0[j],
+                self.op_n1[j],
+                self.op_n2[j],
+                self.op_n3[j],
+            ],
+            _ => vec![self.op_out[j]], // default kernel case keeps the current value
+        }
+    }
+
+    /// Decode-once-per-warp static analysis. Returns the **broadcast set** — the slots
+    /// written by the decode phases (cone + super-mux bridge + settle + the pc inject)
+    /// that the trunk reads, i.e. the decode→trunk interface a non-leader lane must copy
+    /// from the leader's rows — after PROVING the decode is a pure function of pc:
+    ///
+    /// 1. no decode op is state-carrying (COP_RAM / default-case ops read their own
+    ///    previous output) unless an earlier decode op rewrote that slot this pass, and
+    /// 2. no decode op reads a lane-dependent slot (the injected operand terminals or any
+    ///    trunk-written slot) that wasn't already rewritten this pass.
+    ///
+    /// Those two properties make leader-decode + interface-broadcast exact for ANY row
+    /// history — including divergence, reconvergence, and leadership changes — because a
+    /// decode run on any lane's rows then yields identical values given the same pc.
+    pub fn warpdecode_broadcast_slots(&self) -> Result<Vec<u32>, String> {
+        let n = self.op_code.len();
+        let zero_slot = (self.n_slots - 1) as u32;
+        let state_carrying = |code: u8| {
+            !matches!(
+                code,
+                COP_WIRE_R
+                    | COP_VIA
+                    | COP_WIRE_L
+                    | COP_WIRE_D
+                    | COP_WIRE_U
+                    | COP_WIRE_H
+                    | COP_OR
+                    | COP_WIRE_V
+                    | COP_AND
+                    | COP_XOR
+                    | COP_MUX
+                    | COP_NOT
+                    | COP_ZERO
+                    | COP_ADD
+                    | COP_SUB
+                    | COP_SHR
+                    | COP_SHL
+                    | COP_MUX16
+                    | COP_DEC3
+                    | COP_BITSEL
+                    | COP_CARRY
+                    | COP_WVIA
+                    | COP_THRESHOLD_VIA
+                    | COP_MUX4
+            )
+        };
+
+        // Lane-dependent slots at decode time: injected operand terminals + trunk outputs.
+        let mut lane_dep = vec![false; self.n_slots];
+        lane_dep[self.alu_a_term_slot as usize] = true;
+        lane_dep[self.alu_b_term_slot as usize] = true;
+        for j in self.settle_end..n {
+            lane_dep[self.op_out[j] as usize] = true;
+        }
+
+        // Walk the decode in order, proving every read is warp-uniform on the fast path.
+        let mut rewritten = vec![false; self.n_slots];
+        rewritten[self.pc_slot as usize] = true; // pc inject (warp-uniform pc)
+        for j in 0..self.settle_end {
+            if j == self.cone_end {
+                // Super-mux bridge runs between cone and settle (both banks; fm and
+                // bank47_mux are decode-written, so the copies are warp-uniform).
+                for &s in self
+                    .super_mux_inject_right_slots
+                    .iter()
+                    .chain(self.super_mux_inject_slots.iter())
+                {
+                    rewritten[s as usize] = true;
+                }
+            }
+            let code = self.op_code[j] as u8;
+            if state_carrying(code) && !rewritten[self.op_out[j] as usize] {
+                return Err(format!(
+                    "decode op {j} (code {code}) is state-carrying: reads its own \
+                     previous output (slot {})",
+                    self.op_out[j]
+                ));
+            }
+            for s in self.op_reads(j) {
+                if s != zero_slot && lane_dep[s as usize] && !rewritten[s as usize] {
+                    return Err(format!(
+                        "decode op {j} (code {code}) reads lane-dependent slot {s}"
+                    ));
+                }
+            }
+            rewritten[self.op_out[j] as usize] = true;
+        }
+
+        // Broadcast set = decode-written slots the trunk reads (a slot the trunk itself
+        // rewrites before reading would be a harmless copy, so no order analysis needed).
+        let mut decode_writes = vec![false; self.n_slots];
+        decode_writes[self.pc_slot as usize] = true;
+        for j in 0..self.settle_end {
+            decode_writes[self.op_out[j] as usize] = true;
+        }
+        for &s in self
+            .super_mux_inject_right_slots
+            .iter()
+            .chain(self.super_mux_inject_slots.iter())
+        {
+            decode_writes[s as usize] = true;
+        }
+        let mut in_bcast = vec![false; self.n_slots];
+        let mut bcast: Vec<u32> = Vec::new();
+        for j in self.settle_end..n {
+            for s in self.op_reads(j) {
+                if s != zero_slot
+                    && s != self.alu_a_term_slot
+                    && s != self.alu_b_term_slot
+                    && decode_writes[s as usize]
+                    && !in_bcast[s as usize]
+                {
+                    in_bcast[s as usize] = true;
+                    bcast.push(s);
+                }
+            }
+        }
+        bcast.sort_unstable();
+        Ok(bcast)
+    }
+
+    /// Host evaluation of one op range on a single-lane vals row (a 1:1 transliteration
+    /// of the kernel's `run_range` switch — any drift is caught by the oracle tests at
+    /// the first ALU instruction).
+    fn host_eval_range(&self, vals: &mut [u64], lo: usize, hi: usize) {
+        for j in lo..hi {
+            let v = |s: u32| vals[s as usize];
+            let (v0, v1, v2) = (v(self.op_in0[j]), v(self.op_in1[j]), v(self.op_in2[j]));
+            let out = self.op_out[j] as usize;
+            let r = match self.op_code[j] as u8 {
+                COP_WIRE_R | COP_VIA => v0,
+                COP_WIRE_L => v1,
+                COP_WIRE_D | COP_WIRE_U => v2,
+                COP_WIRE_H | COP_OR => v0 | v1,
+                COP_WIRE_V => v1 | v2,
+                COP_AND => v0 & v1,
+                COP_XOR => v0 ^ v1,
+                COP_MUX => {
+                    if v2 != 0 {
+                        v0
+                    } else {
+                        v1
+                    }
+                }
+                COP_NOT => !v0,
+                COP_ZERO => {
+                    if v0 == 0 {
+                        !0u64
+                    } else {
+                        0
+                    }
+                }
+                COP_ADD => v0.wrapping_add(v1),
+                COP_SUB => v0.wrapping_sub(v1),
+                COP_SHR => v0 >> (v1 & 63),
+                COP_SHL => v0 << (v1 & 63),
+                COP_MUX16 => {
+                    let sel = (v1 & 0xF) as u32;
+                    let data = if sel < 8 { v0 } else { v2 };
+                    (data >> ((sel & 7) * 8)) & 0xFF
+                }
+                COP_DEC3 => 1u64 << (v0 & 7),
+                COP_BITSEL => {
+                    if (v0 >> (v1 & 63)) & 1 != 0 {
+                        !0u64
+                    } else {
+                        0
+                    }
+                }
+                COP_CARRY => {
+                    if v0 > v1 {
+                        !0u64
+                    } else {
+                        0
+                    }
+                }
+                COP_WVIA => (v0 >> self.op_shift[j]) & self.op_mask[j],
+                COP_THRESHOLD_VIA => {
+                    let active = [self.op_n0[j], self.op_n1[j], self.op_n2[j], self.op_n3[j]]
+                        .iter()
+                        .filter(|&&s| v(s) != 0)
+                        .count() as u32;
+                    if active >= self.op_threshold[j] {
+                        v0
+                    } else {
+                        0
+                    }
+                }
+                COP_MUX4 => {
+                    let sel = (v2 & 3) as u32;
+                    (v0 >> (sel * 8)) & 0xFF
+                }
+                COP_RAM => {
+                    if v2 != 0 {
+                        v0
+                    } else {
+                        vals[out]
+                    }
+                }
+                _ => vals[out],
+            };
+            vals[out] = r;
+        }
+    }
+
+    /// Decode memoization (a decoded-µop cache for the tile CPU): the decode phases are a
+    /// PURE function of pc (proven by `warpdecode_broadcast_slots`), and a program only
+    /// has `prog_len` distinct pcs — so evaluate the decode op arrays ONCE per pc on the
+    /// host and snapshot the decode→trunk interface. Returns `(bcast_slots, table)` where
+    /// `table[pc * bcast.len() + t]` is interface slot `bcast[t]` after decoding `pc`.
+    /// At runtime NO lane ever evaluates cone/settle again — an ALU instruction is
+    /// `bcast.len()` copies + the trunk.
+    pub fn decode_interface_table(
+        &self,
+        sim: &Simulation,
+        prog_len: usize,
+    ) -> Result<(Vec<u32>, Vec<u64>), String> {
+        let bcast = self.warpdecode_broadcast_slots()?;
+        // One reusable row: decode purity (given pc) makes sequential reuse exact, the
+        // same argument that makes leadership changes safe in the warpdecode kernel.
+        let mut vals = self.seed_from_sim(sim, 1);
+        let mut table = Vec::with_capacity(prog_len * bcast.len());
+        for pc in 0..prog_len {
+            vals[self.pc_slot as usize] = pc as u64;
+            self.host_eval_range(&mut vals, 0, self.cone_end);
+            let bw = (pc >> 4) & 3;
+            for i in 0..4 {
+                vals[self.super_mux_inject_right_slots[i] as usize] =
+                    vals[self.final_mux_slots[i] as usize];
+                vals[self.super_mux_inject_slots[i] as usize] =
+                    vals[self.bank47_mux_slots[bw][i] as usize];
+            }
+            self.host_eval_range(&mut vals, self.cone_end, self.settle_end);
+            for &s in &bcast {
+                table.push(vals[s as usize]);
+            }
+        }
+        Ok((bcast, table))
     }
 }
 
@@ -895,8 +1195,16 @@ struct AluCtxPacked {
     int pc_slot;
     int fm0; int fm1; int fm2; int fm3;
     int smir0; int smir1; int smir2; int smir3;
+    // Upper-bank bridge slots: [0..4) = super_mux_inject (left) targets,
+    // [4 + bw*4 + lane] = bank47_mux[bw][lane] sources (bw = (pc>>4)&3).
+    const unsigned int* ubank;
     int a_term; int b_term; int wb_root;
     int lanes;
+    // MMIO console (addr 57/58), per-lane SoA: console[byte_idx * lanes + lane].
+    unsigned int* console;
+    unsigned int* console_len;
+    unsigned int* console_last;
+    int console_cap;
 };
 
 struct AluCtxSplit {
@@ -917,26 +1225,44 @@ struct AluCtxSplit {
     int pc_slot;
     int fm0; int fm1; int fm2; int fm3;
     int smir0; int smir1; int smir2; int smir3;
+    const unsigned int* ubank;
     int a_term; int b_term; int wb_root;
     int lanes;
+    unsigned int* console;
+    unsigned int* console_len;
+    unsigned int* console_last;
+    int console_cap;
 };
 
-// One device-ALU evaluation per lane: PC -> cone -> super-mux bridge -> settle ->
-// operand inject -> trunk_held -> read wb_alu_root. Mirrors DeviceCpu::alu.
-__device__ unsigned long long device_alu_eval(
-    const AluCtxPacked* c, unsigned long long pc, unsigned long long a, unsigned long long b, long long lane)
+// The device ALU, split at the decode->trunk seam (the decode-once-per-warp boundary):
+// `device_alu_decode` = PC -> cone -> super-mux bridge -> settle (pure function of pc);
+// `device_alu_trunk`  = operand inject -> trunk_held -> read wb_alu_root (per-lane data).
+// `device_alu_eval` composes them (identical to the original monolithic body).
+__device__ void device_alu_decode(const AluCtxPacked* c, unsigned long long pc, long long lane)
 {
     int lanes = c->lanes;
     c->vals[(size_t)c->pc_slot * lanes + lane] = pc;
     run_range_packed(c->vals, c->op_meta, c->op_extra, c->op_mask,
                      0, c->cone_end, lane, lanes);
-    // Super-mux bridge: final_mux -> super_mux_inject_right (low-bank, pc < 64).
+    // Super-mux bridge, BOTH banks (mirrors stage_f_inject; PC[6] tile selects):
+    // final_mux -> right (bank 0-3), bank47_mux[(pc>>4)&3] -> left (bank 4-7).
     c->vals[(size_t)c->smir0 * lanes + lane] = c->vals[(size_t)c->fm0 * lanes + lane];
     c->vals[(size_t)c->smir1 * lanes + lane] = c->vals[(size_t)c->fm1 * lanes + lane];
     c->vals[(size_t)c->smir2 * lanes + lane] = c->vals[(size_t)c->fm2 * lanes + lane];
     c->vals[(size_t)c->smir3 * lanes + lane] = c->vals[(size_t)c->fm3 * lanes + lane];
+    unsigned int bw = ((unsigned int)(pc >> 4)) & 3u;
+    for (int l = 0; l < 4; ++l) {
+        c->vals[(size_t)c->ubank[l] * lanes + lane] =
+            c->vals[(size_t)c->ubank[4 + bw * 4 + l] * lanes + lane];
+    }
     run_range_packed(c->vals, c->op_meta, c->op_extra, c->op_mask,
                      c->cone_end, c->settle_end, lane, lanes);
+}
+
+__device__ unsigned long long device_alu_trunk(
+    const AluCtxPacked* c, unsigned long long a, unsigned long long b, long long lane)
+{
+    int lanes = c->lanes;
     c->vals[(size_t)c->a_term * lanes + lane] = a;
     c->vals[(size_t)c->b_term * lanes + lane] = b;
     run_range_packed(c->vals, c->op_meta, c->op_extra, c->op_mask,
@@ -945,27 +1271,51 @@ __device__ unsigned long long device_alu_eval(
 }
 
 __device__ unsigned long long device_alu_eval(
-    const AluCtxSplit* c, unsigned long long pc, unsigned long long a, unsigned long long b, long long lane)
+    const AluCtxPacked* c, unsigned long long pc, unsigned long long a, unsigned long long b, long long lane)
+{
+    device_alu_decode(c, pc, lane);
+    return device_alu_trunk(c, a, b, lane);
+}
+
+__device__ void device_alu_decode(const AluCtxSplit* c, unsigned long long pc, long long lane)
 {
     int lanes = c->lanes;
     c->vals[(size_t)c->pc_slot * lanes + lane] = pc;
     run_range_split(c->vals, c->op_code, c->op_out, c->op_in0, c->op_in1, c->op_in2,
                     c->op_n0, c->op_n1, c->op_n2, c->op_n3, c->op_threshold,
                     c->op_shift, c->op_mask, 0, c->cone_end, lane, lanes);
-    // Super-mux bridge: final_mux -> super_mux_inject_right (low-bank, pc < 64).
+    // Super-mux bridge, BOTH banks (mirrors stage_f_inject; PC[6] tile selects).
     c->vals[(size_t)c->smir0 * lanes + lane] = c->vals[(size_t)c->fm0 * lanes + lane];
     c->vals[(size_t)c->smir1 * lanes + lane] = c->vals[(size_t)c->fm1 * lanes + lane];
     c->vals[(size_t)c->smir2 * lanes + lane] = c->vals[(size_t)c->fm2 * lanes + lane];
     c->vals[(size_t)c->smir3 * lanes + lane] = c->vals[(size_t)c->fm3 * lanes + lane];
+    unsigned int bw = ((unsigned int)(pc >> 4)) & 3u;
+    for (int l = 0; l < 4; ++l) {
+        c->vals[(size_t)c->ubank[l] * lanes + lane] =
+            c->vals[(size_t)c->ubank[4 + bw * 4 + l] * lanes + lane];
+    }
     run_range_split(c->vals, c->op_code, c->op_out, c->op_in0, c->op_in1, c->op_in2,
                     c->op_n0, c->op_n1, c->op_n2, c->op_n3, c->op_threshold,
                     c->op_shift, c->op_mask, c->cone_end, c->settle_end, lane, lanes);
+}
+
+__device__ unsigned long long device_alu_trunk(
+    const AluCtxSplit* c, unsigned long long a, unsigned long long b, long long lane)
+{
+    int lanes = c->lanes;
     c->vals[(size_t)c->a_term * lanes + lane] = a;
     c->vals[(size_t)c->b_term * lanes + lane] = b;
     run_range_split(c->vals, c->op_code, c->op_out, c->op_in0, c->op_in1, c->op_in2,
                     c->op_n0, c->op_n1, c->op_n2, c->op_n3, c->op_threshold,
                     c->op_shift, c->op_mask, c->settle_end, c->n_total, lane, lanes);
     return c->vals[(size_t)c->wb_root * lanes + lane];
+}
+
+__device__ unsigned long long device_alu_eval(
+    const AluCtxSplit* c, unsigned long long pc, unsigned long long a, unsigned long long b, long long lane)
+{
+    device_alu_decode(c, pc, lane);
+    return device_alu_trunk(c, a, b, lane);
 }
 
 // opcode -> branch_kind (== ctrl_b & 0x07). JMP=1,JZ=2,JNZ=3,JC=4,JNC=5,CALL=6,RET=7.
@@ -998,10 +1348,10 @@ __device__ unsigned int compute_branch_pc(
     }
 }
 
-// Per-opcode carry (device_carry): add-like a>result, sub-like result>a, bitwise unchanged,
-// SHL/SHR + non-ALU -> no update (*has=0).
+// Per-opcode carry (device_carry_ext): add-like a>result, sub-like result>a, bitwise
+// unchanged, SHL/SHR from ISS bit-position formulas (need imm8), non-ALU -> no update.
 __device__ void device_carry(
-    unsigned int opcode, unsigned long long a, unsigned long long result,
+    unsigned int opcode, unsigned int imm8, unsigned long long a, unsigned long long result,
     unsigned int carry_before, int* has, unsigned int* val)
 {
     switch (opcode) {
@@ -1010,12 +1360,22 @@ __device__ void device_carry(
             *has = 1; *val = (result > a) ? 1u : 0u; break;
         case 0x06: case 0x07: case 0x08: case 0x09: case 0x12: case 0x13: case 0x14:
             *has = 1; *val = carry_before; break;
+        case 0x0D: {
+            unsigned long long bit = (8ULL - (unsigned long long)imm8) & 63ULL;
+            *has = 1; *val = ((a >> bit) & 1ULL) ? 1u : 0u; break;
+        }
+        case 0x0E: {
+            unsigned long long bit = ((unsigned long long)(imm8 & 0x07u) - 1ULL) & 63ULL;
+            *has = 1; *val = ((a >> bit) & 1ULL) ? 1u : 0u; break;
+        }
         default: *has = 0; *val = 0; break;
     }
 }
 
 // Execute ONE instruction for this lane, mutating local arch state + global ram/vals.
 // Verbatim port of DeviceCpu::step (charter scope). regs[16] is local; ram is global SoA.
+// `decoded` != 0 means the instruction decode (cone+settle) is already present in this
+// lane's vals rows (leader-computed + broadcast) — ALU evals then run only the trunk.
 template <typename AluCtxT>
 __device__ void exec_one(
     const AluCtxT* c,
@@ -1023,7 +1383,7 @@ __device__ void exec_one(
     unsigned int* pc, unsigned long long* regs,
     unsigned int* flag_z, unsigned int* flag_c, unsigned int* lr,
     unsigned long long* ram, unsigned int* halted, unsigned long long* retired,
-    long long lane)
+    long long lane, int decoded)
 {
     if (*halted) return;
     int lanes = c->lanes;
@@ -1051,14 +1411,6 @@ __device__ void exec_one(
     unsigned long long a = regs[rd];
     unsigned long long b = regs[rs];
 
-    // GUARDED (charter-absent, modeled wrong): MUL (0x04 imm5==1), cmov (0x02 sub-fn 1..4).
-    // Halt the lane so a stray one surfaces as a divergence, never silently-wrong state.
-    if ((opcode == 0x04 && imm5 == 1) || (opcode == 0x02 && imm5 >= 1 && imm5 <= 4)) {
-        *halted = 1;
-        *retired += 1;
-        return;
-    }
-
     int has_wb = 0; unsigned int wb_r = 0; unsigned long long wb_v = 0;
     int has_z = 0; unsigned int z_v = 0;
     int has_c = 0; unsigned int c_v = 0;
@@ -1068,33 +1420,64 @@ __device__ void exec_one(
     } else if (opcode == 0x01) {
         *halted = 1;                                  // HALT
     } else if (opcode == 0x02) {
-        wb_v = (imm5 == 5) ? (unsigned long long)(*lr) : b;   // MOV / MFLR
-        has_wb = 1; wb_r = rd;
+        // MOV family: MOV(0)/MOVZ(1)/MOVNZ(2)/MOVC(3)/MOVNC(4) on PRE-instruction
+        // flags (no flag writes); MFLR(5); MTLR(6, pc-masked). Mirrors the ISS.
+        if (imm5 == 5) {
+            has_wb = 1; wb_r = rd; wb_v = (unsigned long long)(*lr);
+        } else if (imm5 == 6) {
+            // MTLR: lr = rs. This GPU DeviceCycle kernel is 8-bit by construction
+            // (PCM = 0xFF for every PC op below), so 0xFFULL is the correct in-domain
+            // mask, NOT a wide-mode bug (Sprint 390 re-verify). Wide programs use the
+            // authoritative ISS + physical executor (masked by pc_mask / pc_phys_mask).
+            *lr = (unsigned int)(b & 0xFFULL);
+        } else {
+            unsigned int cond;
+            switch (imm5) {
+                case 1: cond = fz0; break;
+                case 2: cond = !fz0; break;
+                case 3: cond = fc0; break;
+                case 4: cond = !fc0; break;
+                default: cond = 1u; break;
+            }
+            if (cond) { has_wb = 1; wb_r = rd; wb_v = b; }
+        }
     } else if (opcode == 0x03) {
         wb_v = (unsigned long long)imm16;             // LDI (writes Z; C unchanged)
         has_wb = 1; wb_r = rd;
         has_z = 1; z_v = (wb_v == 0) ? 1u : 0u;
+    } else if (opcode == 0x04 && imm5 == 1) {
+        // MUL: stage-X SOFTWARE authority on the real CPU (no tile path) — scalar here
+        // is authority-faithful. Writes Z only; C unchanged.
+        unsigned long long r = a * b;
+        has_wb = 1; wb_r = rd; wb_v = r;
+        has_z = 1; z_v = (r == 0) ? 1u : 0u;
     } else if (opcode >= 0x04 && opcode <= 0x0E) {
-        unsigned long long r = device_alu_eval(c, (unsigned long long)p, a, b, lane);  // ALU reg
+        unsigned long long r = decoded ? device_alu_trunk(c, a, b, lane)
+                                       : device_alu_eval(c, (unsigned long long)p, a, b, lane);  // ALU reg
         has_wb = 1; wb_r = rd; wb_v = r;
         has_z = 1; z_v = (r == 0) ? 1u : 0u;
-        device_carry(opcode, a, r, fc0, &has_c, &c_v);
+        device_carry(opcode, imm8, a, r, fc0, &has_c, &c_v);
     } else if (opcode == 0x0F) {
-        unsigned long long r = device_alu_eval(c, (unsigned long long)p, a, b, lane);  // CMP (flags only)
+        unsigned long long r = decoded ? device_alu_trunk(c, a, b, lane)
+                                       : device_alu_eval(c, (unsigned long long)p, a, b, lane);  // CMP (flags only)
         has_z = 1; z_v = (r == 0) ? 1u : 0u;
-        device_carry(0x0F, a, r, fc0, &has_c, &c_v);
+        device_carry(0x0F, imm8, a, r, fc0, &has_c, &c_v);
     } else if (opcode >= 0x10 && opcode <= 0x14) {
-        unsigned long long r = device_alu_eval(c, (unsigned long long)p, a, b, lane);  // ALU imm
+        unsigned long long r = decoded ? device_alu_trunk(c, a, b, lane)
+                                       : device_alu_eval(c, (unsigned long long)p, a, b, lane);  // ALU imm
         has_wb = 1; wb_r = rd; wb_v = r;
         has_z = 1; z_v = (r == 0) ? 1u : 0u;
-        device_carry(opcode, a, r, fc0, &has_c, &c_v);
+        device_carry(opcode, imm8, a, r, fc0, &has_c, &c_v);
     } else if (opcode == 0x16 || opcode == 0x18) {
         unsigned int byte_variant = (opcode == 0x18);                // LD / LDB
         unsigned int addr;
         if (has_offset) addr = (unsigned int)((b + offset) & 0x7F);
         else if (byte_variant) addr = imm8 & 0x7F;
         else addr = (unsigned int)(b & 0x7F);
-        unsigned long long v = ram[(size_t)addr * lanes + lane];
+        unsigned long long v;
+        if (addr == 57u) v = (unsigned long long)c->console_last[lane];       // console last
+        else if (addr == 58u) v = (unsigned long long)c->console_len[lane];   // console count
+        else v = ram[(size_t)addr * lanes + lane];
         has_wb = 1; wb_r = rd; wb_v = v;
         has_z = 1; z_v = (v == 0) ? 1u : 0u;
     } else if (opcode == 0x17 || opcode == 0x19) {
@@ -1103,7 +1486,16 @@ __device__ void exec_one(
         if (has_offset) addr = (unsigned int)((b + offset) & 0x7F);
         else if (byte_variant) addr = imm8 & 0x7F;
         else addr = (unsigned int)(b & 0x7F);
-        ram[(size_t)addr * lanes + lane] = a;
+        if (addr == 57u) {
+            unsigned int n = c->console_len[lane];                   // console: NOT a RAM write
+            if ((int)n < c->console_cap) c->console[(size_t)n * lanes + lane] = (unsigned int)(a & 0xFFULL);
+            c->console_len[lane] = n + 1u;
+            c->console_last[lane] = (unsigned int)(a & 0xFFULL);
+        } else if (addr == 58u) {
+            // console count is read-only
+        } else {
+            ram[(size_t)addr * lanes + lane] = a;
+        }
     } else {
         // 0x15 RET, 0x1A..0x1F branches: control-only (resolved in next-PC below).
     }
@@ -1143,6 +1535,7 @@ extern "C" __global__ void device_alu_packed(
     int pc_slot,
     int fm0, int fm1, int fm2, int fm3,
     int smir0, int smir1, int smir2, int smir3,
+    const unsigned int* __restrict__ ubank,
     int a_term, int b_term, int wb_root,
     const unsigned long long* __restrict__ pc_in,
     const unsigned long long* __restrict__ a_in,
@@ -1159,7 +1552,9 @@ extern "C" __global__ void device_alu_packed(
     c.cone_end = cone_end; c.settle_end = settle_end; c.n_total = n_total;
     c.pc_slot = pc_slot; c.fm0 = fm0; c.fm1 = fm1; c.fm2 = fm2; c.fm3 = fm3;
     c.smir0 = smir0; c.smir1 = smir1; c.smir2 = smir2; c.smir3 = smir3;
+    c.ubank = ubank;
     c.a_term = a_term; c.b_term = b_term; c.wb_root = wb_root; c.lanes = lanes;
+    c.console = 0; c.console_len = 0; c.console_last = 0; c.console_cap = 0;
     out[lane] = device_alu_eval(&c, pc_in[lane], a_in[lane], b_in[lane], lane);
 }
 
@@ -1181,6 +1576,7 @@ extern "C" __global__ void device_alu_split(
     int pc_slot,
     int fm0, int fm1, int fm2, int fm3,
     int smir0, int smir1, int smir2, int smir3,
+    const unsigned int* __restrict__ ubank,
     int a_term, int b_term, int wb_root,
     const unsigned long long* __restrict__ pc_in,
     const unsigned long long* __restrict__ a_in,
@@ -1199,7 +1595,9 @@ extern "C" __global__ void device_alu_split(
     c.cone_end = cone_end; c.settle_end = settle_end; c.n_total = n_total;
     c.pc_slot = pc_slot; c.fm0 = fm0; c.fm1 = fm1; c.fm2 = fm2; c.fm3 = fm3;
     c.smir0 = smir0; c.smir1 = smir1; c.smir2 = smir2; c.smir3 = smir3;
+    c.ubank = ubank;
     c.a_term = a_term; c.b_term = b_term; c.wb_root = wb_root; c.lanes = lanes;
+    c.console = 0; c.console_len = 0; c.console_last = 0; c.console_cap = 0;
     out[lane] = device_alu_eval(&c, pc_in[lane], a_in[lane], b_in[lane], lane);
 }
 
@@ -1214,6 +1612,7 @@ extern "C" __global__ void device_run_packed(
     int pc_slot,
     int fm0, int fm1, int fm2, int fm3,
     int smir0, int smir1, int smir2, int smir3,
+    const unsigned int* __restrict__ ubank,
     int a_term, int b_term, int wb_root,
     const unsigned int* __restrict__ program, int prog_len,
     unsigned int* __restrict__ st_pc,
@@ -1224,6 +1623,10 @@ extern "C" __global__ void device_run_packed(
     unsigned long long* __restrict__ st_ram,
     unsigned int* __restrict__ st_halted,
     unsigned long long* __restrict__ st_retired,
+    unsigned int* __restrict__ st_console,
+    unsigned int* __restrict__ st_console_len,
+    unsigned int* __restrict__ st_console_last,
+    int console_cap,
     long long max_instrs, int lanes)
 {
     long long lane = (long long)blockIdx.x * blockDim.x + threadIdx.x;
@@ -1235,7 +1638,10 @@ extern "C" __global__ void device_run_packed(
     c.cone_end = cone_end; c.settle_end = settle_end; c.n_total = n_total;
     c.pc_slot = pc_slot; c.fm0 = fm0; c.fm1 = fm1; c.fm2 = fm2; c.fm3 = fm3;
     c.smir0 = smir0; c.smir1 = smir1; c.smir2 = smir2; c.smir3 = smir3;
+    c.ubank = ubank;
     c.a_term = a_term; c.b_term = b_term; c.wb_root = wb_root; c.lanes = lanes;
+    c.console = st_console; c.console_len = st_console_len;
+    c.console_last = st_console_last; c.console_cap = console_cap;
 
     unsigned int pc = st_pc[lane];
     unsigned long long regs[16];
@@ -1250,7 +1656,7 @@ extern "C" __global__ void device_run_packed(
     for (long long i = 0; i < max_instrs; ++i) {
         if (halted) break;
         exec_one(&c, program, prog_len, &pc, regs, &fz, &fc, &lr,
-                 st_ram, &halted, &retired, lane);
+                 st_ram, &halted, &retired, lane, 0);
     }
 
     st_pc[lane] = pc;
@@ -1281,6 +1687,7 @@ extern "C" __global__ void device_run_split(
     int pc_slot,
     int fm0, int fm1, int fm2, int fm3,
     int smir0, int smir1, int smir2, int smir3,
+    const unsigned int* __restrict__ ubank,
     int a_term, int b_term, int wb_root,
     const unsigned int* __restrict__ program, int prog_len,
     unsigned int* __restrict__ st_pc,
@@ -1291,6 +1698,10 @@ extern "C" __global__ void device_run_split(
     unsigned long long* __restrict__ st_ram,
     unsigned int* __restrict__ st_halted,
     unsigned long long* __restrict__ st_retired,
+    unsigned int* __restrict__ st_console,
+    unsigned int* __restrict__ st_console_len,
+    unsigned int* __restrict__ st_console_last,
+    int console_cap,
     long long max_instrs, int lanes)
 {
     long long lane = (long long)blockIdx.x * blockDim.x + threadIdx.x;
@@ -1304,7 +1715,10 @@ extern "C" __global__ void device_run_split(
     c.cone_end = cone_end; c.settle_end = settle_end; c.n_total = n_total;
     c.pc_slot = pc_slot; c.fm0 = fm0; c.fm1 = fm1; c.fm2 = fm2; c.fm3 = fm3;
     c.smir0 = smir0; c.smir1 = smir1; c.smir2 = smir2; c.smir3 = smir3;
+    c.ubank = ubank;
     c.a_term = a_term; c.b_term = b_term; c.wb_root = wb_root; c.lanes = lanes;
+    c.console = st_console; c.console_len = st_console_len;
+    c.console_last = st_console_last; c.console_cap = console_cap;
 
     unsigned int pc = st_pc[lane];
     unsigned long long regs[16];
@@ -1319,7 +1733,212 @@ extern "C" __global__ void device_run_split(
     for (long long i = 0; i < max_instrs; ++i) {
         if (halted) break;
         exec_one(&c, program, prog_len, &pc, regs, &fz, &fc, &lr,
-                 st_ram, &halted, &retired, lane);
+                 st_ram, &halted, &retired, lane, 0);
+    }
+
+    st_pc[lane] = pc;
+    #pragma unroll
+    for (int r = 0; r < 16; ++r) st_regs[(size_t)r * lanes + lane] = regs[r];
+    st_fz[lane] = fz;
+    st_fc[lane] = fc;
+    st_lr[lane] = lr;
+    st_halted[lane] = halted;
+    st_retired[lane] = retired;
+}
+
+// Decode-once-per-warp (packed metadata): when every live lane in the warp sits at the
+// SAME pc (lockstep — the common same-program batch case), the instruction decode
+// (cone + bridge + settle, ~90% of the op stream) is computed ONCE by the warp leader;
+// the other lanes copy only the small decode->trunk interface (`bcast`) from the leader's
+// rows and run just the per-lane trunk. Any pc divergence falls back to the per-lane
+// path (bit-exact, no speedup). All 32 threads stay in the loop (no early return) so the
+// full-mask warp intrinsics are always valid; exited/halted lanes just no-op.
+extern "C" __global__ void device_run_warpdecode(
+    unsigned long long* __restrict__ vals,
+    const unsigned long long* __restrict__ op_meta,
+    const unsigned long long* __restrict__ op_extra,
+    const unsigned long long* __restrict__ op_mask,
+    int cone_end, int settle_end, int n_total,
+    int pc_slot,
+    int fm0, int fm1, int fm2, int fm3,
+    int smir0, int smir1, int smir2, int smir3,
+    const unsigned int* __restrict__ ubank,
+    int a_term, int b_term, int wb_root,
+    const unsigned int* __restrict__ bcast, int n_bcast,
+    const unsigned int* __restrict__ program, int prog_len,
+    unsigned int* __restrict__ st_pc,
+    unsigned long long* __restrict__ st_regs,
+    unsigned int* __restrict__ st_fz,
+    unsigned int* __restrict__ st_fc,
+    unsigned int* __restrict__ st_lr,
+    unsigned long long* __restrict__ st_ram,
+    unsigned int* __restrict__ st_halted,
+    unsigned long long* __restrict__ st_retired,
+    unsigned int* __restrict__ st_console,
+    unsigned int* __restrict__ st_console_len,
+    unsigned int* __restrict__ st_console_last,
+    int console_cap,
+    long long max_instrs, int lanes)
+{
+    const unsigned int FULL = 0xFFFFFFFFu;
+    long long lane = (long long)blockIdx.x * blockDim.x + threadIdx.x;
+    int valid = lane < lanes;
+    long long warp_base = lane - (long long)(threadIdx.x & 31);
+
+    AluCtxPacked c;
+    c.vals = vals;
+    c.op_meta = op_meta; c.op_extra = op_extra;
+    c.op_mask = op_mask;
+    c.cone_end = cone_end; c.settle_end = settle_end; c.n_total = n_total;
+    c.pc_slot = pc_slot; c.fm0 = fm0; c.fm1 = fm1; c.fm2 = fm2; c.fm3 = fm3;
+    c.smir0 = smir0; c.smir1 = smir1; c.smir2 = smir2; c.smir3 = smir3;
+    c.ubank = ubank;
+    c.a_term = a_term; c.b_term = b_term; c.wb_root = wb_root; c.lanes = lanes;
+    c.console = st_console; c.console_len = st_console_len;
+    c.console_last = st_console_last; c.console_cap = console_cap;
+
+    unsigned int pc = 0, fz = 0, fc = 0, lr = 0, halted = 1;
+    unsigned long long retired = 0;
+    unsigned long long regs[16];
+    #pragma unroll
+    for (int r = 0; r < 16; ++r) regs[r] = 0;
+    if (valid) {
+        pc = st_pc[lane];
+        #pragma unroll
+        for (int r = 0; r < 16; ++r) regs[r] = st_regs[(size_t)r * lanes + lane];
+        fz = st_fz[lane]; fc = st_fc[lane]; lr = st_lr[lane];
+        halted = st_halted[lane]; retired = st_retired[lane];
+    }
+
+    for (long long i = 0; i < max_instrs; ++i) {
+        int alive = valid && !halted;
+        unsigned int alive_mask = __ballot_sync(FULL, alive);
+        if (alive_mask == 0u) break;    // warp-uniform exit
+        int leader = __ffs(alive_mask) - 1;
+        unsigned int lead_pc = __shfl_sync(FULL, pc, leader);
+        int same = (!alive) || (pc == lead_pc);
+        int uniform = __all_sync(FULL, same);
+        // Every thread derives the leader's opcode identically (warp-uniform values).
+        unsigned int lead_word = (lead_pc < (unsigned int)prog_len) ? program[lead_pc] : 0u;
+        unsigned int lead_op = (lead_word >> 11) & 0x1F;
+        unsigned int lead_imm5 = lead_word & 0x1F;
+        int lead_alu = (lead_op >= 0x04u && lead_op <= 0x14u)
+                       && !(lead_op == 0x04u && lead_imm5 == 1u);
+        if (uniform && lead_alu) {
+            // FAST PATH: leader computes the shared decode; everyone else copies the
+            // decode->trunk interface; all live lanes run only the trunk.
+            long long lead_lane = warp_base + leader;
+            if (lane == lead_lane) {
+                device_alu_decode(&c, (unsigned long long)pc, lane);
+            }
+            __syncwarp(FULL);   // decode visible before the interface copies
+            if (alive && lane != lead_lane) {
+                for (int t = 0; t < n_bcast; ++t) {
+                    size_t s = (size_t)bcast[t] * lanes;
+                    vals[s + lane] = vals[s + lead_lane];
+                }
+            }
+            __syncwarp(FULL);   // copies done before any lane's trunk may clobber the rows
+            if (alive) {
+                exec_one(&c, program, prog_len, &pc, regs, &fz, &fc, &lr,
+                         st_ram, &halted, &retired, lane, 1);
+            }
+        } else {
+            // SLOW PATH (pc divergence): each live lane runs the full per-lane cycle.
+            if (alive) {
+                exec_one(&c, program, prog_len, &pc, regs, &fz, &fc, &lr,
+                         st_ram, &halted, &retired, lane, 0);
+            }
+        }
+    }
+
+    if (valid) {
+        st_pc[lane] = pc;
+        #pragma unroll
+        for (int r = 0; r < 16; ++r) st_regs[(size_t)r * lanes + lane] = regs[r];
+        st_fz[lane] = fz;
+        st_fc[lane] = fc;
+        st_lr[lane] = lr;
+        st_halted[lane] = halted;
+        st_retired[lane] = retired;
+    }
+}
+
+// Table-decode (decode memoization — a decoded-uop cache): the decode is a pure function
+// of pc, precomputed host-side for EVERY program address into `iface` (pc-major rows of
+// the decode->trunk interface). An ALU instruction is n_bcast table copies + the trunk
+// (no cone/settle op ever evaluates at runtime). Fully per-lane: no warp intrinsics, no
+// leader, and — unlike decode-once-per-warp — the fast path holds under ANY pc
+// divergence (each lane indexes the table with its OWN pc).
+extern "C" __global__ void device_run_tabledecode(
+    unsigned long long* __restrict__ vals,
+    const unsigned long long* __restrict__ op_meta,
+    const unsigned long long* __restrict__ op_extra,
+    const unsigned long long* __restrict__ op_mask,
+    int cone_end, int settle_end, int n_total,
+    int pc_slot,
+    int fm0, int fm1, int fm2, int fm3,
+    int smir0, int smir1, int smir2, int smir3,
+    const unsigned int* __restrict__ ubank,
+    int a_term, int b_term, int wb_root,
+    const unsigned int* __restrict__ bcast, int n_bcast,
+    const unsigned long long* __restrict__ iface,
+    const unsigned int* __restrict__ program, int prog_len,
+    unsigned int* __restrict__ st_pc,
+    unsigned long long* __restrict__ st_regs,
+    unsigned int* __restrict__ st_fz,
+    unsigned int* __restrict__ st_fc,
+    unsigned int* __restrict__ st_lr,
+    unsigned long long* __restrict__ st_ram,
+    unsigned int* __restrict__ st_halted,
+    unsigned long long* __restrict__ st_retired,
+    unsigned int* __restrict__ st_console,
+    unsigned int* __restrict__ st_console_len,
+    unsigned int* __restrict__ st_console_last,
+    int console_cap,
+    long long max_instrs, int lanes)
+{
+    long long lane = (long long)blockIdx.x * blockDim.x + threadIdx.x;
+    if (lane >= lanes) return;
+    AluCtxPacked c;
+    c.vals = vals;
+    c.op_meta = op_meta; c.op_extra = op_extra;
+    c.op_mask = op_mask;
+    c.cone_end = cone_end; c.settle_end = settle_end; c.n_total = n_total;
+    c.pc_slot = pc_slot; c.fm0 = fm0; c.fm1 = fm1; c.fm2 = fm2; c.fm3 = fm3;
+    c.smir0 = smir0; c.smir1 = smir1; c.smir2 = smir2; c.smir3 = smir3;
+    c.ubank = ubank;
+    c.a_term = a_term; c.b_term = b_term; c.wb_root = wb_root; c.lanes = lanes;
+    c.console = st_console; c.console_len = st_console_len;
+    c.console_last = st_console_last; c.console_cap = console_cap;
+
+    unsigned int pc = st_pc[lane];
+    unsigned long long regs[16];
+    #pragma unroll
+    for (int r = 0; r < 16; ++r) regs[r] = st_regs[(size_t)r * lanes + lane];
+    unsigned int fz = st_fz[lane];
+    unsigned int fc = st_fc[lane];
+    unsigned int lr = st_lr[lane];
+    unsigned int halted = st_halted[lane];
+    unsigned long long retired = st_retired[lane];
+
+    for (long long i = 0; i < max_instrs; ++i) {
+        if (halted) break;
+        unsigned int word = (pc < (unsigned int)prog_len) ? program[pc] : 0u;
+        unsigned int op = (word >> 11) & 0x1F;
+        unsigned int imm5 = word & 0x1F;
+        int is_alu = (op >= 0x04u && op <= 0x14u) && !(op == 0x04u && imm5 == 1u);
+        if (is_alu) {
+            const unsigned long long* row = iface + (size_t)pc * n_bcast;
+            for (int t = 0; t < n_bcast; ++t) {
+                vals[(size_t)bcast[t] * lanes + lane] = row[t];
+            }
+            exec_one(&c, program, prog_len, &pc, regs, &fz, &fc, &lr,
+                     st_ram, &halted, &retired, lane, 1);
+        } else {
+            exec_one(&c, program, prog_len, &pc, regs, &fz, &fc, &lr,
+                     st_ram, &halted, &retired, lane, 0);
+        }
     }
 
     st_pc[lane] = pc;
@@ -1428,6 +2047,8 @@ struct GpuOpBuffers {
     pc_slot: i32,
     fm: [i32; 4],
     smir: [i32; 4],
+    /// Upper-bank bridge slots (see `DeviceAluProgram::ubank_slots`).
+    d_ubank: cudarc::driver::CudaSlice<u32>,
     a_term: i32,
     b_term: i32,
     wb_root: i32,
@@ -1471,6 +2092,7 @@ impl GpuOpBuffers {
             pc_slot: program.pc_slot as i32,
             fm: program.final_mux_slots.map(|s| s as i32),
             smir: program.super_mux_inject_right_slots.map(|s| s as i32),
+            d_ubank: rt.upload(&program.ubank_slots())?,
             a_term: program.alu_a_term_slot as i32,
             b_term: program.alu_b_term_slot as i32,
             wb_root: program.wb_alu_root_slot as i32,
@@ -1575,6 +2197,7 @@ impl GpuDeviceAlu {
                         .arg(&smir1)
                         .arg(&smir2)
                         .arg(&smir3)
+                        .arg(&o.d_ubank)
                         .arg(&o.a_term)
                         .arg(&o.b_term)
                         .arg(&o.wb_root)
@@ -1627,6 +2250,7 @@ impl GpuDeviceAlu {
                         .arg(&smir1)
                         .arg(&smir2)
                         .arg(&smir3)
+                        .arg(&o.d_ubank)
                         .arg(&o.a_term)
                         .arg(&o.b_term)
                         .arg(&o.wb_root)
@@ -1658,7 +2282,17 @@ pub struct GpuDeviceCpu {
     host_vals: Vec<u64>,
     ram_words: usize,
     lanes: usize,
+    /// Decode-once-per-warp broadcast set (Some => the warpdecode kernel is loaded).
+    d_bcast: Option<cudarc::driver::CudaSlice<u32>>,
+    n_bcast: i32,
+    /// Memoized per-pc decode interface (Some => the tabledecode kernel is loaded).
+    d_iface: Option<cudarc::driver::CudaSlice<u64>>,
+    /// Per-lane console output captured by the most recent run (MMIO addr 57).
+    last_consoles: Vec<Vec<u8>>,
 }
+
+/// Per-lane MMIO console capacity in bytes (device runs asserting overflow on download).
+const CONSOLE_CAP: usize = 64;
 
 impl GpuDeviceCpu {
     pub fn new(
@@ -1680,6 +2314,74 @@ impl GpuDeviceCpu {
         )
     }
 
+    /// Decode-once-per-warp variant: in a lockstep warp (all live lanes at the same pc)
+    /// the leader computes the shared instruction decode once and the other lanes copy
+    /// only the decode→trunk interface. Bit-exact for ANY batch (pc divergence falls back
+    /// to the per-lane path); *faster* specifically for lockstep same-program batches.
+    /// Fails if the static analysis can't prove the decode is a pure function of pc.
+    pub fn new_warpdecode(
+        rt: &CudaRuntime,
+        program: &DeviceAluProgram,
+        sim: &Simulation,
+        rom_words: &[u32],
+        ram_words: usize,
+        lanes: usize,
+    ) -> CudaResult<Self> {
+        let bcast = program
+            .warpdecode_broadcast_slots()
+            .map_err(|e| CudaError::KernelCompilationFailed(format!("warpdecode analysis: {e}")))?;
+        Ok(Self {
+            func: load_kernel(rt, "device_run_warpdecode")?,
+            ops: GpuOpBuffers::upload(rt, program, GpuMetadataMode::Packed)?,
+            d_program: rt.upload(rom_words)?,
+            prog_len: rom_words.len() as i32,
+            host_vals: program.seed_from_sim(sim, lanes),
+            ram_words,
+            lanes,
+            n_bcast: bcast.len() as i32,
+            d_bcast: Some(rt.upload(&bcast)?),
+            d_iface: None,
+            last_consoles: Vec::new(),
+        })
+    }
+
+    /// Table-decode variant (decode memoization): the per-pc decode interface is
+    /// precomputed host-side (`decode_interface_table`), so no lane ever evaluates the
+    /// cone/settle op arrays at runtime — an ALU instruction is a small table copy + the
+    /// trunk. Per-lane and divergence-agnostic (each lane indexes the table with its own
+    /// pc). Fails if the static analysis can't prove the decode is a pure function of pc.
+    pub fn new_tabledecode(
+        rt: &CudaRuntime,
+        program: &DeviceAluProgram,
+        sim: &Simulation,
+        rom_words: &[u32],
+        ram_words: usize,
+        lanes: usize,
+    ) -> CudaResult<Self> {
+        let (bcast, table) = program
+            .decode_interface_table(sim, rom_words.len())
+            .map_err(|e| CudaError::KernelCompilationFailed(format!("tabledecode: {e}")))?;
+        Ok(Self {
+            func: load_kernel(rt, "device_run_tabledecode")?,
+            ops: GpuOpBuffers::upload(rt, program, GpuMetadataMode::Packed)?,
+            d_program: rt.upload(rom_words)?,
+            prog_len: rom_words.len() as i32,
+            host_vals: program.seed_from_sim(sim, lanes),
+            ram_words,
+            lanes,
+            n_bcast: bcast.len() as i32,
+            d_bcast: Some(rt.upload(&bcast)?),
+            d_iface: Some(rt.upload(&table)?),
+            last_consoles: Vec::new(),
+        })
+    }
+
+    /// Per-lane console output (MMIO addr 57 bytes) captured by the most recent
+    /// `run`/`run_timed`. Empty until a run completes.
+    pub fn consoles(&self) -> &[Vec<u8>] {
+        &self.last_consoles
+    }
+
     fn new_with_metadata_mode(
         rt: &CudaRuntime,
         program: &DeviceAluProgram,
@@ -1697,6 +2399,10 @@ impl GpuDeviceCpu {
             host_vals: program.seed_from_sim(sim, lanes),
             ram_words,
             lanes,
+            d_bcast: None,
+            n_bcast: 0,
+            d_iface: None,
+            last_consoles: Vec::new(),
         })
     }
 
@@ -1762,6 +2468,11 @@ impl GpuDeviceCpu {
         let mut d_ram = rt.upload(&h_ram)?;
         let mut d_halted = rt.upload(&h_halted)?;
         let mut d_retired = rt.upload(&h_retired)?;
+        // MMIO console (addr 57): per-lane byte buffer + length + last-written byte.
+        let cap_i = CONSOLE_CAP as i32;
+        let mut d_console: cudarc::driver::CudaSlice<u32> = rt.alloc_zeros(CONSOLE_CAP * lanes)?;
+        let mut d_console_len: cudarc::driver::CudaSlice<u32> = rt.alloc_zeros(lanes)?;
+        let mut d_console_last: cudarc::driver::CudaSlice<u32> = rt.alloc_zeros(lanes)?;
 
         let threads = 256u32;
         let blocks = (lanes as u32).div_ceil(threads);
@@ -1783,41 +2494,139 @@ impl GpuDeviceCpu {
                     d_extra,
                     d_mask,
                 } => {
-                    rt.stream()
-                        .launch_builder(&self.func)
-                        .arg(&d_vals)
-                        .arg(d_meta)
-                        .arg(d_extra)
-                        .arg(d_mask)
-                        .arg(&o.cone_end)
-                        .arg(&o.settle_end)
-                        .arg(&o.n_total)
-                        .arg(&o.pc_slot)
-                        .arg(&fm0)
-                        .arg(&fm1)
-                        .arg(&fm2)
-                        .arg(&fm3)
-                        .arg(&smir0)
-                        .arg(&smir1)
-                        .arg(&smir2)
-                        .arg(&smir3)
-                        .arg(&o.a_term)
-                        .arg(&o.b_term)
-                        .arg(&o.wb_root)
-                        .arg(&self.d_program)
-                        .arg(&self.prog_len)
-                        .arg(&mut d_pc)
-                        .arg(&mut d_regs)
-                        .arg(&mut d_fz)
-                        .arg(&mut d_fc)
-                        .arg(&mut d_lr)
-                        .arg(&mut d_ram)
-                        .arg(&mut d_halted)
-                        .arg(&mut d_retired)
-                        .arg(&max_i)
-                        .arg(&lanes_i)
-                        .launch(cfg)
-                        .map_err(|e| CudaError::LaunchFailed(format!("device_run: {e:?}")))?;
+                    if let (Some(d_bcast), Some(d_iface)) = (&self.d_bcast, &self.d_iface) {
+                        rt.stream()
+                            .launch_builder(&self.func)
+                            .arg(&d_vals)
+                            .arg(d_meta)
+                            .arg(d_extra)
+                            .arg(d_mask)
+                            .arg(&o.cone_end)
+                            .arg(&o.settle_end)
+                            .arg(&o.n_total)
+                            .arg(&o.pc_slot)
+                            .arg(&fm0)
+                            .arg(&fm1)
+                            .arg(&fm2)
+                            .arg(&fm3)
+                            .arg(&smir0)
+                            .arg(&smir1)
+                            .arg(&smir2)
+                            .arg(&smir3)
+                            .arg(&o.d_ubank)
+                            .arg(&o.a_term)
+                            .arg(&o.b_term)
+                            .arg(&o.wb_root)
+                            .arg(d_bcast)
+                            .arg(&self.n_bcast)
+                            .arg(d_iface)
+                            .arg(&self.d_program)
+                            .arg(&self.prog_len)
+                            .arg(&mut d_pc)
+                            .arg(&mut d_regs)
+                            .arg(&mut d_fz)
+                            .arg(&mut d_fc)
+                            .arg(&mut d_lr)
+                            .arg(&mut d_ram)
+                            .arg(&mut d_halted)
+                            .arg(&mut d_retired)
+                            .arg(&mut d_console)
+                            .arg(&mut d_console_len)
+                            .arg(&mut d_console_last)
+                            .arg(&cap_i)
+                            .arg(&max_i)
+                            .arg(&lanes_i)
+                            .launch(cfg)
+                            .map_err(|e| {
+                                CudaError::LaunchFailed(format!("device_run_tabledecode: {e:?}"))
+                            })?;
+                    } else if let Some(d_bcast) = &self.d_bcast {
+                        rt.stream()
+                            .launch_builder(&self.func)
+                            .arg(&d_vals)
+                            .arg(d_meta)
+                            .arg(d_extra)
+                            .arg(d_mask)
+                            .arg(&o.cone_end)
+                            .arg(&o.settle_end)
+                            .arg(&o.n_total)
+                            .arg(&o.pc_slot)
+                            .arg(&fm0)
+                            .arg(&fm1)
+                            .arg(&fm2)
+                            .arg(&fm3)
+                            .arg(&smir0)
+                            .arg(&smir1)
+                            .arg(&smir2)
+                            .arg(&smir3)
+                            .arg(&o.d_ubank)
+                            .arg(&o.a_term)
+                            .arg(&o.b_term)
+                            .arg(&o.wb_root)
+                            .arg(d_bcast)
+                            .arg(&self.n_bcast)
+                            .arg(&self.d_program)
+                            .arg(&self.prog_len)
+                            .arg(&mut d_pc)
+                            .arg(&mut d_regs)
+                            .arg(&mut d_fz)
+                            .arg(&mut d_fc)
+                            .arg(&mut d_lr)
+                            .arg(&mut d_ram)
+                            .arg(&mut d_halted)
+                            .arg(&mut d_retired)
+                            .arg(&mut d_console)
+                            .arg(&mut d_console_len)
+                            .arg(&mut d_console_last)
+                            .arg(&cap_i)
+                            .arg(&max_i)
+                            .arg(&lanes_i)
+                            .launch(cfg)
+                            .map_err(|e| {
+                                CudaError::LaunchFailed(format!("device_run_warpdecode: {e:?}"))
+                            })?;
+                    } else {
+                        rt.stream()
+                            .launch_builder(&self.func)
+                            .arg(&d_vals)
+                            .arg(d_meta)
+                            .arg(d_extra)
+                            .arg(d_mask)
+                            .arg(&o.cone_end)
+                            .arg(&o.settle_end)
+                            .arg(&o.n_total)
+                            .arg(&o.pc_slot)
+                            .arg(&fm0)
+                            .arg(&fm1)
+                            .arg(&fm2)
+                            .arg(&fm3)
+                            .arg(&smir0)
+                            .arg(&smir1)
+                            .arg(&smir2)
+                            .arg(&smir3)
+                            .arg(&o.d_ubank)
+                            .arg(&o.a_term)
+                            .arg(&o.b_term)
+                            .arg(&o.wb_root)
+                            .arg(&self.d_program)
+                            .arg(&self.prog_len)
+                            .arg(&mut d_pc)
+                            .arg(&mut d_regs)
+                            .arg(&mut d_fz)
+                            .arg(&mut d_fc)
+                            .arg(&mut d_lr)
+                            .arg(&mut d_ram)
+                            .arg(&mut d_halted)
+                            .arg(&mut d_retired)
+                            .arg(&mut d_console)
+                            .arg(&mut d_console_len)
+                            .arg(&mut d_console_last)
+                            .arg(&cap_i)
+                            .arg(&max_i)
+                            .arg(&lanes_i)
+                            .launch(cfg)
+                            .map_err(|e| CudaError::LaunchFailed(format!("device_run: {e:?}")))?;
+                    }
                 }
                 GpuOpStorage::Split {
                     d_code,
@@ -1860,6 +2669,7 @@ impl GpuDeviceCpu {
                         .arg(&smir1)
                         .arg(&smir2)
                         .arg(&smir3)
+                        .arg(&o.d_ubank)
                         .arg(&o.a_term)
                         .arg(&o.b_term)
                         .arg(&o.wb_root)
@@ -1873,6 +2683,10 @@ impl GpuDeviceCpu {
                         .arg(&mut d_ram)
                         .arg(&mut d_halted)
                         .arg(&mut d_retired)
+                        .arg(&mut d_console)
+                        .arg(&mut d_console_len)
+                        .arg(&mut d_console_last)
+                        .arg(&cap_i)
                         .arg(&max_i)
                         .arg(&lanes_i)
                         .launch(cfg)
@@ -1893,6 +2707,22 @@ impl GpuDeviceCpu {
         let r_ram = rt.download(&d_ram)?;
         let r_halted = rt.download(&d_halted)?;
         let r_retired = rt.download(&d_retired)?;
+        let r_console = rt.download(&d_console)?;
+        let r_clen = rt.download(&d_console_len)?;
+        let mut consoles = Vec::with_capacity(lanes);
+        for lane in 0..lanes {
+            let n = r_clen[lane] as usize;
+            assert!(
+                n <= CONSOLE_CAP,
+                "lane {lane}: console overflow ({n} bytes > CONSOLE_CAP {CONSOLE_CAP})"
+            );
+            consoles.push(
+                (0..n)
+                    .map(|i| (r_console[i * lanes + lane] & 0xFF) as u8)
+                    .collect::<Vec<u8>>(),
+            );
+        }
+        self.last_consoles = consoles;
 
         let mut out = Vec::with_capacity(lanes);
         for lane in 0..lanes {
@@ -2376,6 +3206,431 @@ mod tests {
             "   A/B @ K={kab}: full {full_secs:.3}s vs pruned {pruned_secs:.3}s = {:.2}x speedup",
             full_secs / pruned_secs
         );
+        Ok(())
+    }
+
+    /// Warpdecode static analysis sanity: the decode purity proof passes on a charter
+    /// program and the broadcast set (decode→trunk interface) is small relative to the
+    /// decode op count — the premise of the whole optimization.
+    #[test]
+    fn warpdecode_broadcast_set_is_small() {
+        let case = charter_cases()[1]; // sum_loop
+        let (_cpu, _sim, plan, _program) = build_charter_plan(case.source);
+        let dprog = DeviceAluProgram::from_plan(&plan);
+        let bcast = dprog
+            .warpdecode_broadcast_slots()
+            .expect("decode must be a pure function of pc");
+        let (n_cone, n_settle, n_trunk) = dprog.phase_op_counts();
+        eprintln!(
+            "warpdecode: broadcast set = {} slots (decode ops cone={n_cone}+settle={n_settle}, \
+             trunk={n_trunk})",
+            bcast.len()
+        );
+        assert!(!bcast.is_empty(), "trunk must read SOME decode output");
+        assert!(
+            bcast.len() < (n_cone + n_settle) / 4,
+            "broadcast set ({}) too large vs decode ops ({}) — design A win erodes",
+            bcast.len(),
+            n_cone + n_settle
+        );
+    }
+
+    /// Warpdecode per-instruction oracle: ONE GPU instruction under the decode-once
+    /// kernel == one `DeviceCpu::step()`, K=32 lanes (one full warp) with DISTINCT
+    /// registers at the SAME pc — the fast path with real data divergence — across many
+    /// real charter instruction/state combinations.
+    #[test]
+    fn device_run_warpdecode_step_matches_devicecpu() -> Result<(), Box<dyn std::error::Error>> {
+        let Some(rt) = cuda_or_skip() else {
+            return Ok(());
+        };
+        const LANES: usize = 32;
+        const RW: usize = 128;
+        let case = charter_cases()[1]; // sum_loop
+        let (_cpu, sim, plan, program) = build_charter_plan(case.source);
+        let dprog = DeviceAluProgram::from_plan(&plan);
+        let mut gpu = GpuDeviceCpu::new_warpdecode(&rt, &dprog, &sim, &program, RW, LANES)?;
+
+        let (_rc, rsim, rplan) = build_plan_from_words(&program);
+        let mut refcpu = DeviceCpu::new(rplan, &rsim, program.clone());
+        let (_oc, osim, oplan) = build_plan_from_words(&program);
+        let mut oracle = DeviceCpu::new(oplan, &osim, program.clone());
+
+        let mut steps = 0u64;
+        let mut checked = 0u64;
+        while !refcpu.state.halted && steps < case.max_cycles && checked < 40 {
+            let base = refcpu.state.clone();
+            let mut inits = Vec::with_capacity(LANES);
+            for l in 0..LANES {
+                let mut s = base.clone();
+                for r in 0..16 {
+                    s.regs[r] = s.regs[r].wrapping_add((l as u64).wrapping_mul(0x100 + r as u64));
+                }
+                inits.push(s);
+            }
+            let gpu_out = gpu.run(&rt, &inits, 1)?;
+            for (l, init) in inits.iter().enumerate() {
+                oracle.state = init.clone();
+                oracle.step();
+                let diff = gpu_out[l].diff(&oracle.state);
+                assert!(
+                    diff.is_empty(),
+                    "{}: step {steps} lane {l} warpdecode GPU != DeviceCpu::step: {diff:?}",
+                    case.name
+                );
+            }
+            checked += 1;
+            refcpu.step();
+            steps += 1;
+        }
+        assert!(checked > 0, "no steps were validated");
+        Ok(())
+    }
+
+    /// Warpdecode run-to-halt on the FULL charter (lockstep batches: the fast path runs
+    /// for every ALU instruction): every lane's final state == the `DeviceCpu` oracle.
+    #[test]
+    fn device_run_warpdecode_matches_devicecpu_charter() -> Result<(), Box<dyn std::error::Error>> {
+        let Some(rt) = cuda_or_skip() else {
+            return Ok(());
+        };
+        const LANES: usize = 64;
+        const RW: usize = 128;
+        for case in charter_cases() {
+            let (_cpu, sim, plan, program) = build_charter_plan(case.source);
+            let dprog = DeviceAluProgram::from_plan(&plan);
+            let mut gpu = GpuDeviceCpu::new_warpdecode(&rt, &dprog, &sim, &program, RW, LANES)?;
+
+            let mut oracle = DeviceCpu::new(plan, &sim, program.clone());
+            oracle.run_to_halt(case.max_cycles);
+            assert!(oracle.state.halted, "{}: oracle did not halt", case.name);
+            assert_eq!(
+                oracle.state.regs[0], case.expected_r0,
+                "{}: oracle R0",
+                case.name
+            );
+
+            let inits = vec![zero_state(RW); LANES];
+            let out = gpu.run(&rt, &inits, case.max_cycles)?;
+            for (l, st) in out.iter().enumerate() {
+                let diff = st.diff(&oracle.state);
+                assert!(
+                    diff.is_empty(),
+                    "{}: lane {l} warpdecode GPU != oracle: {diff:?}",
+                    case.name
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Warpdecode divergence + reconvergence: a data-dependent branch splits the warp
+    /// (slow path), both sides take EQUAL-LENGTH paths through different pcs, then
+    /// reconverge onto a common ALU instruction at the same loop iteration (fast path
+    /// resumes on rows with DIFFERENT decode histories — the broadcast must repair every
+    /// stale interface slot). Each lane == its own `DeviceCpu` oracle.
+    #[test]
+    fn device_run_warpdecode_divergent_paths() -> Result<(), Box<dyn std::error::Error>> {
+        let Some(rt) = cuda_or_skip() else {
+            return Ok(());
+        };
+        const LANES: usize = 64;
+        const RW: usize = 128;
+        // 0: ADD R0,R1 (sets Z)   1: JZ 4          2: LDI R2,7   3: JMP 6
+        // 4: NOP                  5: LDI R2,9      6: ADD R0,R2  7: HALT
+        // Z path (R0+R1==0): 0,1,4,5,6,7. non-Z path: 0,1,2,3,6,7 — both reach pc=6 at
+        // loop iteration 4, so the warp genuinely reconverges into the fast path.
+        let add_r0_r1 = (0x04u32 << 11) | (1 << 5);
+        let jz_4 = (0x1Bu32 << 11) | 4;
+        let ldi_r2_7 = (0x03u32 << 11) | (2 << 8) | 7;
+        let jmp_6 = (0x1Au32 << 11) | 6;
+        let nop = 0u32;
+        let ldi_r2_9 = (0x03u32 << 11) | (2 << 8) | 9;
+        let add_r0_r2 = (0x04u32 << 11) | (2 << 5);
+        let halt = 0x01u32 << 11;
+        let program = vec![
+            add_r0_r1, jz_4, ldi_r2_7, jmp_6, nop, ldi_r2_9, add_r0_r2, halt,
+        ];
+        let d0 = decode_v2_word(program[0]);
+        assert!(
+            d0.opcode == 0x04 && d0.imm5 != 1 && d0.rd == 0 && d0.rs == 1,
+            "{d0:?}"
+        );
+        let d1 = decode_v2_word(program[1]);
+        assert!(d1.opcode == 0x1B, "{d1:?}");
+
+        let (_cpu, sim, plan) = build_plan_from_words(&program);
+        let dprog = DeviceAluProgram::from_plan(&plan);
+        let mut gpu = GpuDeviceCpu::new_warpdecode(&rt, &dprog, &sim, &program, RW, LANES)?;
+
+        // Even lanes take the Z path (R0+R1 == 0), odd lanes the non-Z path with
+        // distinct data — divergence INSIDE every warp.
+        let mut inits = Vec::with_capacity(LANES);
+        for l in 0..LANES {
+            let mut s = zero_state(RW);
+            if l % 2 == 1 {
+                s.regs[0] = (l as u64) * 3 + 1;
+                s.regs[1] = (l as u64) * 5 + 2;
+            }
+            inits.push(s);
+        }
+        let out = gpu.run(&rt, &inits, 32)?;
+
+        let (_oc, osim, oplan) = build_plan_from_words(&program);
+        let mut oracle = DeviceCpu::new(oplan, &osim, program.clone());
+        for (l, init) in inits.iter().enumerate() {
+            oracle.state = init.clone();
+            oracle.run_to_halt(32);
+            let diff = out[l].diff(&oracle.state);
+            assert!(
+                diff.is_empty(),
+                "lane {l} warpdecode GPU != oracle: {diff:?}"
+            );
+            let expected_r2 = if l % 2 == 0 { 9 } else { 7 };
+            assert_eq!(out[l].regs[2], expected_r2, "lane {l} took the wrong path");
+        }
+        Ok(())
+    }
+
+    /// Tabledecode run-to-halt on the FULL charter: every lane's final state == the
+    /// `DeviceCpu` oracle, with NO cone/settle evaluation at runtime (decode memoized
+    /// per pc at build time).
+    #[test]
+    fn device_run_tabledecode_matches_devicecpu_charter() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let Some(rt) = cuda_or_skip() else {
+            return Ok(());
+        };
+        const LANES: usize = 64;
+        const RW: usize = 128;
+        for case in charter_cases() {
+            let (_cpu, sim, plan, program) = build_charter_plan(case.source);
+            let dprog = DeviceAluProgram::from_plan(&plan);
+            let mut gpu = GpuDeviceCpu::new_tabledecode(&rt, &dprog, &sim, &program, RW, LANES)?;
+
+            let mut oracle = DeviceCpu::new(plan, &sim, program.clone());
+            oracle.run_to_halt(case.max_cycles);
+            assert!(oracle.state.halted, "{}: oracle did not halt", case.name);
+
+            let inits = vec![zero_state(RW); LANES];
+            let out = gpu.run(&rt, &inits, case.max_cycles)?;
+            for (l, st) in out.iter().enumerate() {
+                let diff = st.diff(&oracle.state);
+                assert!(
+                    diff.is_empty(),
+                    "{}: lane {l} tabledecode GPU != oracle: {diff:?}",
+                    case.name
+                );
+            }
+        }
+        Ok(())
+    }
+
+    /// Tabledecode under divergence: unlike decode-once-per-warp there is NO slow path —
+    /// each lane indexes the memoized table with its own pc, so the same program as the
+    /// warpdecode divergence test must come out bit-exact lane-by-lane.
+    #[test]
+    fn device_run_tabledecode_divergent_paths() -> Result<(), Box<dyn std::error::Error>> {
+        let Some(rt) = cuda_or_skip() else {
+            return Ok(());
+        };
+        const LANES: usize = 64;
+        const RW: usize = 128;
+        let add_r0_r1 = (0x04u32 << 11) | (1 << 5);
+        let jz_4 = (0x1Bu32 << 11) | 4;
+        let ldi_r2_7 = (0x03u32 << 11) | (2 << 8) | 7;
+        let jmp_6 = (0x1Au32 << 11) | 6;
+        let nop = 0u32;
+        let ldi_r2_9 = (0x03u32 << 11) | (2 << 8) | 9;
+        let add_r0_r2 = (0x04u32 << 11) | (2 << 5);
+        let halt = 0x01u32 << 11;
+        let program = vec![
+            add_r0_r1, jz_4, ldi_r2_7, jmp_6, nop, ldi_r2_9, add_r0_r2, halt,
+        ];
+
+        let (_cpu, sim, plan) = build_plan_from_words(&program);
+        let dprog = DeviceAluProgram::from_plan(&plan);
+        let mut gpu = GpuDeviceCpu::new_tabledecode(&rt, &dprog, &sim, &program, RW, LANES)?;
+
+        let mut inits = Vec::with_capacity(LANES);
+        for l in 0..LANES {
+            let mut s = zero_state(RW);
+            if l % 2 == 1 {
+                s.regs[0] = (l as u64) * 3 + 1;
+                s.regs[1] = (l as u64) * 5 + 2;
+            }
+            inits.push(s);
+        }
+        let out = gpu.run(&rt, &inits, 32)?;
+
+        let (_oc, osim, oplan) = build_plan_from_words(&program);
+        let mut oracle = DeviceCpu::new(oplan, &osim, program.clone());
+        for (l, init) in inits.iter().enumerate() {
+            oracle.state = init.clone();
+            oracle.run_to_halt(32);
+            let diff = out[l].diff(&oracle.state);
+            assert!(
+                diff.is_empty(),
+                "lane {l} tabledecode GPU != oracle: {diff:?}"
+            );
+            let expected_r2 = if l % 2 == 0 { 9 } else { 7 };
+            assert_eq!(out[l].regs[2], expected_r2, "lane {l} took the wrong path");
+        }
+        Ok(())
+    }
+
+    /// Extended-corpus GPU coverage (past the charter set): MUL (fact_iterative,
+    /// sum_squares — scalar stage-X authority, like the real CPU), the UPPER-BANK bridge
+    /// (array_sum_squares: 80 program words, pc crosses 64, two-sided super-mux inject),
+    /// and the MMIO console (compiled putchar program) — on BOTH the per-lane and
+    /// tabledecode kernels. Every lane == the `DeviceCpu` oracle (itself validated
+    /// per-retired-instruction against the real `TileCpuV2` in v2_device_cycle tests).
+    #[test]
+    fn device_run_gpu_extended_corpus() -> Result<(), Box<dyn std::error::Error>> {
+        let Some(rt) = cuda_or_skip() else {
+            return Ok(());
+        };
+        const LANES: usize = 32;
+        const RW: usize = 128;
+        let corpus = |name: &str| {
+            crate::tile_cpu::V2_COMPILED_BENCHMARKS
+                .iter()
+                .find(|c| c.name == name)
+                .unwrap_or_else(|| panic!("missing corpus program {name}"))
+        };
+        let fact = corpus("fact_iterative");
+        let sumsq = corpus("sum_squares");
+        let arr = corpus("array_sum_squares");
+        let cases: [(&str, &str, u64, u64, &str); 4] = [
+            (
+                fact.name,
+                fact.source,
+                fact.max_cycles,
+                fact.expected_r0,
+                "",
+            ),
+            (
+                sumsq.name,
+                sumsq.source,
+                sumsq.max_cycles,
+                sumsq.expected_r0,
+                "",
+            ),
+            (arr.name, arr.source, arr.max_cycles, arr.expected_r0, ""),
+            (
+                "console_hi",
+                r#"
+                    int main() { putchar(72); putchar(73); putchar(33); return 0; }
+                "#,
+                10_000,
+                0,
+                "HI!",
+            ),
+        ];
+        for (name, source, max_cycles, expected_r0, expected_console) in cases {
+            let (_cpu, sim, plan, program) = build_charter_plan(source);
+            let dprog = DeviceAluProgram::from_plan(&plan);
+
+            let mut oracle = DeviceCpu::new(plan, &sim, program.clone());
+            oracle.run_to_halt(max_cycles);
+            assert!(oracle.state.halted, "{name}: oracle did not halt");
+            assert_eq!(oracle.state.regs[0], expected_r0, "{name}: oracle R0");
+            assert_eq!(
+                String::from_utf8_lossy(&oracle.console),
+                expected_console,
+                "{name}: oracle console"
+            );
+
+            let inits = vec![zero_state(RW); LANES];
+            for tabledecode in [false, true] {
+                let variant = if tabledecode {
+                    "tabledecode"
+                } else {
+                    "per-lane"
+                };
+                let mut gpu = if tabledecode {
+                    GpuDeviceCpu::new_tabledecode(&rt, &dprog, &sim, &program, RW, LANES)?
+                } else {
+                    GpuDeviceCpu::new(&rt, &dprog, &sim, &program, RW, LANES)?
+                };
+                let out = gpu.run(&rt, &inits, max_cycles)?;
+                for (l, st) in out.iter().enumerate() {
+                    let diff = st.diff(&oracle.state);
+                    assert!(
+                        diff.is_empty(),
+                        "{name}/{variant}: lane {l} GPU != oracle: {diff:?}"
+                    );
+                    assert_eq!(
+                        gpu.consoles()[l],
+                        oracle.console,
+                        "{name}/{variant}: lane {l} console"
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Warpdecode A/B benchmark (the decode-once payoff): per-lane vs warpdecode on a
+    /// lockstep sum_loop batch across the saturation band, asserting bit-exact outputs.
+    #[test]
+    #[cfg_attr(
+        not(feature = "slow-tests"),
+        ignore = "informational perf report; run with --features slow-tests"
+    )]
+    fn device_run_warpdecode_bench() -> Result<(), Box<dyn std::error::Error>> {
+        let Some(rt) = cuda_or_skip() else {
+            return Ok(());
+        };
+        const RW: usize = 128;
+        let case = charter_cases()[1]; // sum_loop
+        let (_cpu, sim, plan, program) = build_charter_plan(case.source);
+        let dprog = DeviceAluProgram::from_plan(&plan);
+        let bcast = dprog.warpdecode_broadcast_slots().expect("analysis");
+        let (n_cone, n_settle, n_trunk) = dprog.phase_op_counts();
+
+        let mut oracle = DeviceCpu::new(plan, &sim, program.clone());
+        let mut alu_instrs = 0u64;
+        let mut steps = 0u64;
+        while !oracle.state.halted && steps < case.max_cycles {
+            let op = decode_v2_word(program[oracle.state.pc as usize]).opcode;
+            if (0x04..=0x14).contains(&op) {
+                alu_instrs += 1;
+            }
+            oracle.step();
+            steps += 1;
+        }
+        let retired = oracle.state.retired;
+        eprintln!(
+            "warpdecode A/B — {} | decode = cone {n_cone} + settle {n_settle} ops, trunk = \
+             {n_trunk} ops, broadcast interface = {} slots | retired/lane={retired}",
+            case.name,
+            bcast.len()
+        );
+
+        for &k in &[4_096usize, 16_384, 32_768, 65_536, 262_144] {
+            let inits = vec![zero_state(RW); k];
+            let mut g_pl = GpuDeviceCpu::new(&rt, &dprog, &sim, &program, RW, k)?;
+            let (out_pl, pl_secs) = g_pl.run_timed(&rt, &inits, case.max_cycles)?;
+            let mut g_wd = GpuDeviceCpu::new_warpdecode(&rt, &dprog, &sim, &program, RW, k)?;
+            let (out_wd, wd_secs) = g_wd.run_timed(&rt, &inits, case.max_cycles)?;
+            let mut g_td = GpuDeviceCpu::new_tabledecode(&rt, &dprog, &sim, &program, RW, k)?;
+            let (out_td, td_secs) = g_td.run_timed(&rt, &inits, case.max_cycles)?;
+            assert_eq!(out_pl, out_wd, "warpdecode must be bit-exact vs per-lane");
+            assert_eq!(out_pl, out_td, "tabledecode must be bit-exact vs per-lane");
+            assert_eq!(out_wd[0].regs[0], case.expected_r0, "K={k} R0");
+
+            let total_instrs = retired * k as u64;
+            let mips_pl = (total_instrs as f64 / pl_secs) / 1.0e6;
+            let mips_wd = (total_instrs as f64 / wd_secs) / 1.0e6;
+            let mips_td = (total_instrs as f64 / td_secs) / 1.0e6;
+            eprintln!(
+                "   K={k:>6}: per-lane {mips_pl:>8.1} M lane-instr/s | warpdecode \
+                 {mips_wd:>8.1} ({:.2}x) | tabledecode {mips_td:>8.1} ({:.2}x)",
+                pl_secs / wd_secs,
+                pl_secs / td_secs
+            );
+        }
         Ok(())
     }
 }

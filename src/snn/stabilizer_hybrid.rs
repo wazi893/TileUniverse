@@ -176,7 +176,7 @@ impl FullQuantumCluster {
     /// Create a new cluster with n qubits, initialized to |0...0⟩.
     pub fn new(n_qubits: usize, id: usize) -> Self {
         assert!(
-            n_qubits >= 1 && n_qubits <= 20,
+            (1..=20).contains(&n_qubits),
             "Cluster size must be 1-20 qubits"
         );
 
@@ -665,7 +665,7 @@ impl FullQuantumCluster {
                 prob_0 += prob;
                 // Coherence: sum of α*β^* where α is |0⟩ amp, β is |1⟩ amp
                 let j = i | mask;
-                coherence = coherence + self.state[i] * self.state[j].conj();
+                coherence += self.state[i] * self.state[j].conj();
             } else {
                 prob_1 += prob;
             }
@@ -873,9 +873,10 @@ impl Default for AdaptiveClusterConfig {
 }
 
 /// Configuration for bidirectional feedback from clusters to backbone.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum FeedbackMode {
     /// No feedback (Sprint 58.0 behavior)
+    #[default]
     None,
     /// Modulate backbone phases via S gate based on cluster Z expectation
     Phase,
@@ -883,12 +884,6 @@ pub enum FeedbackMode {
     Amplitude,
     /// Enable/disable synapses based on cluster measurements
     Gated,
-}
-
-impl Default for FeedbackMode {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 // =============================================================================
@@ -1243,42 +1238,42 @@ impl HybridQuantumNetwork {
     /// This prepares the qubit in the magic state, enabling subsequent
     /// non-Clifford operations via gate teleportation.
     pub fn inject_magic_state(&mut self, cluster_id: usize, qubit: usize, state: MagicState) {
-        if let Some(cluster) = self.clusters.get_mut(cluster_id) {
-            if qubit < cluster.n_qubits() {
-                // Reset qubit to |0⟩ first (measure and correct)
-                cluster.measure(qubit, &mut self.rng);
+        if let Some(cluster) = self.clusters.get_mut(cluster_id)
+            && qubit < cluster.n_qubits()
+        {
+            // Reset qubit to |0⟩ first (measure and correct)
+            cluster.measure(qubit, &mut self.rng);
 
-                // Prepare magic state: |ψ⟩ = α|0⟩ + β|1⟩
-                let (alpha, beta) = state.amplitudes();
+            // Prepare magic state: |ψ⟩ = α|0⟩ + β|1⟩
+            let (alpha, beta) = state.amplitudes();
 
-                // Apply the magic state preparation
-                // For each basis state |...0...⟩, create superposition α|...0...⟩ + β|...1...⟩
-                let mask = 1 << qubit;
-                let dim = cluster.dim();
+            // Apply the magic state preparation
+            // For each basis state |...0...⟩, create superposition α|...0...⟩ + β|...1...⟩
+            let mask = 1 << qubit;
+            let dim = cluster.dim();
 
-                // Collect updates first to avoid borrow issues
-                let mut updates: Vec<(usize, Complex64, usize, Complex64)> = Vec::new();
+            // Collect updates first to avoid borrow issues
+            let mut updates: Vec<(usize, Complex64, usize, Complex64)> = Vec::new();
 
-                for i in 0..dim {
-                    if (i & mask) == 0 {
-                        // This is a |...0...⟩ state
-                        let partner = i | mask;
-                        let orig = cluster.state[i];
+            for i in 0..dim {
+                if (i & mask) == 0 {
+                    // This is a |...0...⟩ state
+                    let partner = i | mask;
+                    let orig = cluster.state[i];
 
-                        if orig.norm_squared() > 1e-15 {
-                            updates.push((i, orig * alpha, partner, orig * beta));
-                        }
+                    if orig.norm_squared() > 1e-15 {
+                        updates.push((i, orig * alpha, partner, orig * beta));
                     }
                 }
-
-                // Apply updates
-                for (i, val_i, partner, val_partner) in updates {
-                    cluster.state[i] = val_i;
-                    cluster.state[partner] = val_partner;
-                }
-
-                cluster.normalize();
             }
+
+            // Apply updates
+            for (i, val_i, partner, val_partner) in updates {
+                cluster.state[i] = val_i;
+                cluster.state[partner] = val_partner;
+            }
+
+            cluster.normalize();
         }
     }
 

@@ -20,7 +20,6 @@ fn main() {
         println!(
             "Build with: cargo run --example epic94_gpu_nn_benchmark --features cuda --release"
         );
-        return;
     }
 
     #[cfg(feature = "cuda")]

@@ -232,7 +232,7 @@ pub fn run_organism(
                 let t = HEAT_EMITTER_TMPL;
                 let cx = origin_x + (t.width as u32 / 2);
                 let cy = origin_y + (t.height as u32 / 2);
-                let val = (i + 1).min(10) as u32; // mild, deterministic
+                let val = (i + 1).min(10); // mild, deterministic
                 let clamped = val.min(255);
                 sim.set_heat_field_for_test(cx as usize, cy as usize, clamped);
                 actions.push(format!("seed_heat x={} y={} value={}", cx, cy, clamped));
@@ -249,7 +249,7 @@ pub fn run_organism(
             }
             OrganismKind::ChargeCrawler => {
                 // Grow by placing a wire_bus 1 step to the right per round, reject on OOB/collision
-                let x = origin_x + (i * 4) as u32; // wire_bus width = 4
+                let x = origin_x + (i * 4); // wire_bus width = 4
                 let y = origin_y;
                 match place_circuit(
                     sim,

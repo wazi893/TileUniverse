@@ -1,6 +1,6 @@
 # QEC Module Status
 
-**Last Updated**: Sprint 78 (January 2026)
+**Last Updated**: 2026-08-25 (Union-Find growth + peel)
 
 This document provides an honest assessment of the Quantum Error Correction module's current capabilities and limitations.
 
@@ -57,10 +57,14 @@ The QEC module provides stabilizer-based quantum error correction simulation wit
 - `PhenomenologicalGraphBuilder` for standard surface code decoding
 - Available for surface codes
 
-**Union-Find Decoders**
-- `UnionFindDecoder`: Basic weighted cluster growth
-- `UnionFindDecoderV2`: Improved edge-weighted matching
-- `UnionFindDecoderDN`: Delfosse-Nickerson style
+**Union-Find Decoder** (`UnionFindDecoder`)
+- Delfosse–Nickerson synchronized cluster growth on the qubit-edge syndrome graph, then leaf-peeling on the grown forest
+- Geometry taken from `SurfaceCode` supports (no parallel lattice)
+- `UnionFindDecoderV2` / `UnionFindDecoderDN` are deprecated aliases of the same decoder
+
+**Greedy matching** (`GreedyMatchingDecoder`)
+- Nearest-neighbor pairing on the same syndrome graph (defect–defect wins ties)
+- Baseline / visualization decoder; always clears, not Union-Find and not MWPM
 
 **Lookup Decoder**
 - Pre-computed syndrome-to-correction mapping
@@ -129,7 +133,7 @@ Tests verify correctness and monotonic improvement, not specific threshold value
 | Clifford gates | O(n) | Per gate |
 | Measurement | O(n) | Deterministic fast path |
 | MWPM decoding | O(n^3) worst | Average O(n) for low error rates |
-| Union-Find decoding | O(n * alpha(n)) | Nearly linear |
+| Union-Find decoding | O(n α(n)) growth, peel linear in grown edges | Nearly linear; approximation to MWPM |
 
 ## API Quick Reference
 
@@ -185,4 +189,5 @@ let correction = decoder.decode(&x_syndrome, &z_syndrome);
 | `src/qec/syndrome_graph.rs` | Graph builders for MWPM |
 | `src/qec/stabilizer.rs` | Core stabilizer tableau |
 | `src/qec/codes.rs` | Repetition, Steane, Surface codes |
-| `src/qec/decoder.rs` | Union-Find and lookup decoders |
+| `src/qec/decoder.rs` | Union-Find wrapper, greedy matching, lookup |
+| `src/qec/union_find.rs` | Syndrome lattice, cluster growth, peeling |

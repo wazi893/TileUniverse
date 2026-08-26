@@ -1,6 +1,8 @@
 use engine::simulation::Simulation;
-use engine::tile_cpu::{TileCpuV2, V2Builder, V2SynthConfig, assemble_v2};
-use pyo3::exceptions::PyValueError;
+use engine::tile_cpu::{
+    TileCpuV2, V2Builder, V2SynthConfig, assemble_v2, capture_v2_ground_truth_jsonl,
+};
+use pyo3::exceptions::{PyRuntimeError, PyValueError};
 use pyo3::prelude::*;
 use std::cell::RefCell;
 
@@ -340,8 +342,26 @@ impl PyV2Trace {
 // Registration
 // ---------------------------------------------------------------------------
 
+/// Assemble `source`, run it to completion, and return the ground-truth trace
+/// as a JSONL string: a header record (schema version, program words, initial
+/// register file, cycle/retired counts) followed by one machine-readable
+/// record per retired instruction (PC, flags, register/RAM write deltas, MMIO
+/// events). Deltas fold over the header's initial_regs to absolute state.
+///
+/// Raises ValueError on assembly errors, RuntimeError if the program does not
+/// halt within `max_cycles`.
+#[pyfunction]
+#[pyo3(signature = (source, *, max_cycles=10000))]
+fn v2_ground_truth_jsonl(source: &str, max_cycles: u64) -> PyResult<String> {
+    let program =
+        assemble_v2(source).map_err(|e| PyValueError::new_err(format!("Assembly error: {}", e)))?;
+    capture_v2_ground_truth_jsonl(&program, max_cycles)
+        .map_err(|e| PyRuntimeError::new_err(e.to_string()))
+}
+
 pub fn register(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<PyV2Cpu>()?;
     m.add_class::<PyV2Trace>()?;
+    m.add_function(wrap_pyfunction!(v2_ground_truth_jsonl, m)?)?;
     Ok(())
 }

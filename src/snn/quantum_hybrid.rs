@@ -25,12 +25,13 @@ use num_bigint::BigUint;
 use num_traits::One;
 
 /// Quantum interference mode
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum InterferenceMode {
     /// No interference - pure spike-proportional sampling
     None,
     /// Soft mixing - small rotations that gently blend adjacent probabilities
     /// Good for exploration while preserving spike count information
+    #[default]
     SoftMix,
     /// Grover-like amplitude amplification - enhances the dominant action
     /// while maintaining some probability for others
@@ -47,12 +48,6 @@ pub enum InterferenceMode {
     Triggered,
     /// Original H+CZ circuit (creates destructive interference - not recommended)
     HadamardCZ,
-}
-
-impl Default for InterferenceMode {
-    fn default() -> Self {
-        Self::SoftMix // Best default for learning
-    }
 }
 
 /// Configuration for the Quantum-SNN hybrid system

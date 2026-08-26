@@ -7,8 +7,6 @@
 //
 // =============================================================================
 
-use std::sync::atomic::Ordering;
-
 use engine::algorithms::{DJOracleType, bernstein_vazirani_circuit, deutsch_jozsa_circuit};
 use engine::quantum::QState;
 use engine::simulation::Simulation;

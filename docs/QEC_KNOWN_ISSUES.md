@@ -1,6 +1,6 @@
 # QEC Module Known Issues and Improvement Roadmap
 
-**Last Updated**: Sprint 78 (January 2026)
+**Last Updated**: 2026-08-25 (Sprint 399 — Union-Find growth + peel)
 
 This document tracks known limitations, gaps, and planned improvements for the QEC module.
 
@@ -16,7 +16,7 @@ This document tracks known limitations, gaps, and planned improvements for the Q
 
 **Impact**: Using MWPM with circuit-level noise (`GateErrorModel`) currently applies a phenomenological graph, which is an approximation. This may underestimate error correction performance for circuit-level simulations.
 
-**Workaround**: For accurate circuit-level MWPM, use Union-Find decoder instead (it's graph-agnostic).
+**Workaround**: For circuit-level noise, Union-Find on the phenomenological graph is still an approximation (same graph limitation). A spacetime detector graph is required for either decoder.
 
 **Future Work**: Implement `CircuitLevelGraphBuilder` that constructs detector graphs from the actual syndrome measurement circuit with proper time-like edges.
 
@@ -86,8 +86,9 @@ This document tracks known limitations, gaps, and planned improvements for the Q
 **Status**: Partial coverage
 
 **Implemented**:
-- Union-Find (multiple variants)
-- MWPM via weighted matching
+- Union-Find (Delfosse–Nickerson growth + peel; V2/DN are aliases)
+- Greedy nearest-neighbor matching (baseline / player)
+- MWPM via fusion-blossom (`MWPMDecoderFB`, feature `mwpm`)
 - Lookup (for small codes)
 - 1D repetition (for Bacon-Shor)
 

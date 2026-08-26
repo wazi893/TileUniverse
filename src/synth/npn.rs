@@ -45,7 +45,7 @@ pub struct Npn4Class {
 
 /// Precomputed NPN4 classification for all 65536 4-input truth tables.
 /// Built on first access (~1ms). Thread-safe via LazyLock.
-static NPN4_TABLE: LazyLock<Box<[Npn4Class; 65536]>> = LazyLock::new(|| build_npn4_table());
+static NPN4_TABLE: LazyLock<Box<[Npn4Class; 65536]>> = LazyLock::new(build_npn4_table);
 
 /// Classify a 4-input truth table into its NPN4 equivalence class.
 /// O(1) — single array lookup.

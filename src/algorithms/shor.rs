@@ -343,10 +343,10 @@ pub fn run_shor_quantum(n: u64, a: u64, seed: u64) -> u64 {
         let outcome = apply_gate_scalar(&mut state, gate, &mut rng);
 
         // Collect measurement bits
-        if let GateOutcome::Measured { qubit, bit } = outcome {
-            if bit != 0 {
-                measured |= 1u64 << qubit;
-            }
+        if let GateOutcome::Measured { qubit, bit } = outcome
+            && bit != 0
+        {
+            measured |= 1u64 << qubit;
         }
     }
 
@@ -442,7 +442,7 @@ pub fn factor_with_shor(n: u64) -> Option<(u64, u64)> {
 
         // Try multiple quantum trials (probabilistic)
         for trial in 0..20 {
-            let seed = (a * 1000 + trial) as u64;
+            let seed = a * 1000 + trial;
             let measured = run_shor_quantum(n, a, seed);
 
             // Extract period candidates

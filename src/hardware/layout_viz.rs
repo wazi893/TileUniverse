@@ -57,7 +57,7 @@ impl LayoutVisualizer {
         for q in 0..length {
             qubit_line.push_str(&format!("[{:2}]", q));
             if q + 1 < length {
-                qubit_line.push_str("─");
+                qubit_line.push('─');
             }
         }
         lines.push(qubit_line);
@@ -134,7 +134,7 @@ impl LayoutVisualizer {
                     row_line.push_str(&format!("[{:2}]", q));
                 }
                 if col + 1 < width {
-                    row_line.push_str("─");
+                    row_line.push('─');
                 }
             }
             lines.push(row_line);
@@ -145,7 +145,7 @@ impl LayoutVisualizer {
                 for col in 0..width {
                     vert_line.push_str(" │  ");
                     if col + 1 < width {
-                        vert_line.push_str(" ");
+                        vert_line.push(' ');
                     }
                 }
                 lines.push(vert_line);

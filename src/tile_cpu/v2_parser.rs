@@ -774,7 +774,7 @@ pub fn compile_source(src: &str) -> Result<Vec<u32>, CompileError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tile_cpu::v2_compiler::{add, call, int, lt, mul, sub, var};
+    use crate::tile_cpu::v2_compiler::{call, int, lt, mul, sub, var};
     use crate::tile_cpu::v2_iss::V2Iss;
 
     const FACT_SRC: &str = r#"

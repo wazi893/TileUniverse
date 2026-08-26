@@ -21,7 +21,7 @@ use crate::slim_simulation::SlimSimulation;
 use crate::tile_meta::TileType;
 
 /// CPU state for execution
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct CpuState {
     pub pc: u8,
     pub registers: [u8; 4],
@@ -29,19 +29,6 @@ pub struct CpuState {
     pub carry_flag: bool,
     pub halted: bool,
     pub cycles: u64,
-}
-
-impl Default for CpuState {
-    fn default() -> Self {
-        Self {
-            pc: 0,
-            registers: [0; 4],
-            zero_flag: false,
-            carry_flag: false,
-            halted: false,
-            cycles: 0,
-        }
-    }
 }
 
 /// TILE-8 CPU built from tiles

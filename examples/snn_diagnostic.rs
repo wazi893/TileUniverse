@@ -144,10 +144,10 @@ fn main() {
             format!("Action {}", winner)
         );
 
-        if let Some(last) = last_winner {
-            if last != winner {
-                patterns_differ = true;
-            }
+        if let Some(last) = last_winner
+            && last != winner
+        {
+            patterns_differ = true;
         }
         last_winner = Some(winner);
     }

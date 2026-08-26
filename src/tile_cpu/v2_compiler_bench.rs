@@ -603,6 +603,102 @@ mod tests {
         assert_eq!(phys_r0, iss_r0, "r0 parity");
     }
 
+    /// Like [`phys_run`] but returns the wide control-transfer authority counters so a
+    /// test can assert the compiled program's `.W` branch targets were physically
+    /// authoritative (no software fallback). Sprint 391 (Phase B1-I).
+    fn phys_run_with_authority(src: &str, max_cycles: u64) -> (u64, String, u64, u64) {
+        let program = compile_source(src).expect("compile_source failed");
+        let console = Rc::new(V2MmioCombinedDevice::new(0x000B_E5C0));
+        let mut sim = Simulation::with_size_layered(128, 640, 16);
+        let cpu = V2Builder::new()
+            .with_origin(0, 0)
+            .with_program(&program)
+            .with_rom_size(128)
+            .with_ram_size(128)
+            .with_wide_pc()
+            .with_mmio(V2MmioHandle::from_rc(console.clone()))
+            .with_synth_blocks(V2SynthConfig::max_authority())
+            .build(&mut sim);
+        for _ in 0..max_cycles {
+            if cpu.is_halted() {
+                break;
+            }
+            cpu.step(&mut sim);
+        }
+        assert!(
+            cpu.is_halted(),
+            "physical program did not halt in {max_cycles} cycles"
+        );
+        (
+            cpu.read_reg(&sim, 0),
+            console.ref_pack.console_string(),
+            cpu.wide_target_checks(),
+            cpu.wide_target_mismatches(),
+        )
+    }
+
+    /// Sprint 391 (Phase B1-I): END-TO-END wide-immediate target authority on the
+    /// **compiled corpus**. The Brainfuck interpreter (a > 256-word program whose loops
+    /// and `if`s the compiler lowers to `.W` conditional/unconditional branches with
+    /// wide targets) runs on the physical tile CPU printing "12345" bit-for-bit with the
+    /// ISS — AND its wide immediate branch targets held with **no software fallback**
+    /// (`wide_target_mismatches == 0`, `wide_target_checks > 0`). Function returns still
+    /// use JMPR (register-indirect, Phase C) which is software-delivered and does not
+    /// touch these counters, so the assertion isolates the immediate-target authority.
+    #[test]
+    fn test_v2_gate_f_brainfuck_wide_target_authority() {
+        let bf = "+++++++[>+++++++<-]>.+.+.+.+.";
+        let src = bf_program(bf, 4);
+        let (iss_r0, iss_con) = iss_run(&src, 2_000_000);
+        assert_eq!(iss_con, "12345", "ISS console");
+
+        let (phys_r0, phys_con, checks, mismatches) = phys_run_with_authority(&src, 1_000_000);
+        assert_eq!(phys_con, iss_con, "console parity (physical vs ISS)");
+        assert_eq!(phys_r0, iss_r0, "r0 parity (physical vs ISS)");
+        assert!(
+            checks > 0,
+            "the BF interpreter's compiled .W immediate branches must exercise the target path"
+        );
+        assert_eq!(
+            mismatches, 0,
+            "compiled wide immediate branch targets must be physically authoritative"
+        );
+    }
+
+    /// Sprint 391 (Phase B1-I): a compiled iterative program with dense `.W` conditional
+    /// control flow (a `while` loop) computes fib(10) = 55 on the physical tile CPU,
+    /// bit-exact with the ISS, with wide immediate targets physically authoritative.
+    #[test]
+    fn test_v2_compiled_fib_loop_wide_target_authority() {
+        let src = r#"
+            int main() {
+                int a = 0;
+                int b = 1;
+                int i = 0;
+                while (i < 10) {
+                    int t = a + b;
+                    a = b;
+                    b = t;
+                    i = i + 1;
+                }
+                return a;
+            }
+        "#;
+        let (iss_r0, _iss_con) = iss_run(src, 200_000);
+        assert_eq!(iss_r0, 55, "ISS fib(10) = 55");
+
+        let (phys_r0, _con, checks, mismatches) = phys_run_with_authority(src, 200_000);
+        assert_eq!(phys_r0, iss_r0, "physical fib(10) must match the ISS");
+        assert!(
+            checks > 0,
+            "the loop's compiled .W branches must be exercised"
+        );
+        assert_eq!(
+            mismatches, 0,
+            "compiled wide conditional targets must be physically authoritative"
+        );
+    }
+
     #[test]
     fn test_v2_compiled_bench_correctness_and_goldens() {
         for case in V2_COMPILED_BENCHMARKS {
@@ -616,16 +712,15 @@ mod tests {
             if let Some(&(_, gw, gi, gc)) = V2_COMPILED_BENCH_GOLDENS
                 .iter()
                 .find(|(n, ..)| *n == case.name)
+                && (gw, gi, gc) != (0, 0, 0)
             {
-                if (gw, gi, gc) != (0, 0, 0) {
-                    assert_eq!(o.program_words, gw, "{}: program_words", case.name);
-                    assert_eq!(
-                        o.metrics.instructions_executed, gi,
-                        "{}: instructions_executed",
-                        case.name
-                    );
-                    assert_eq!(o.metrics.cycles, gc, "{}: cycles", case.name);
-                }
+                assert_eq!(o.program_words, gw, "{}: program_words", case.name);
+                assert_eq!(
+                    o.metrics.instructions_executed, gi,
+                    "{}: instructions_executed",
+                    case.name
+                );
+                assert_eq!(o.metrics.cycles, gc, "{}: cycles", case.name);
             }
         }
     }

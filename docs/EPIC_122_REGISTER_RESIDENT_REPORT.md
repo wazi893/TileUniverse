@@ -3,16 +3,21 @@
 **Date:** January 2026
 **Status:** Complete
 **Hardware:** NVIDIA RTX 5090 (32GB, Blackwell)
+**Live confirmation refresh:** 2026-07-03, repo `4eaca9b`; see
+`benchmarks/results/FELLOWSHIP_BENCH_CONFIRMATION_2026-07-03.md`
 
 ---
 
 ## Executive Summary
 
-We achieved **115 trillion tile evaluations per second** for spatial boolean logic simulation - a **4.2x improvement** over the previous EPIC 120 baseline (27.5T tiles/sec). This was accomplished through **register-resident tiling** that eliminates per-step memory traffic.
+The original EPIC 122 run recorded **115 trillion tile evaluations per second** for spatial
+boolean logic simulation. A live 2026-07-03 confirmation on the current repo/driver now prints
+**96.51T tiles/sec** in the full variant ladder and **97.07T tiles/sec** through the single-variant
+CLI path. Treat 115T as historical; use ~97T as the current quote.
 
 | Metric | EPIC 120 (Before) | EPIC 122 (After) | Improvement |
 |--------|-------------------|------------------|-------------|
-| Throughput | 27.5T tiles/sec | 115.2T tiles/sec | **4.2x** |
+| Throughput | 23.21T tiles/sec (2026-07-03 shuffle) | 96.51T ladder / 97.07T CLI | **4.2x vs live shuffle; 485.3x vs repo u64 baseline** |
 | Grid size | 16K x 16K | 32K x 32K | 4x more tiles |
 | Effective bytes/tile | 0.065 | ~0.016 | **4x better** |
 
@@ -90,7 +95,7 @@ __shared__ unsigned long long halo_shared[2][32];  // Inter-warp exchange
 unsigned long long r[REG_ROWS_V3];  // Maximum register utilization
 // ... 30 of 32 rows pure register-only vertical access
 ```
-**Result**: 100-115T tiles/sec (4x baseline)
+**Result**: originally 100-115T tiles/sec; current 2026-07-03 confirmation is 96.51-97.07T tiles/sec.
 
 ---
 
@@ -104,13 +109,16 @@ unsigned long long r[REG_ROWS_V3];  // Maximum register utilization
 | Register V2 | 69.2T | 2.5x |
 | **Register V3** | **101.0T** | **3.7x** |
 
-### 32K x 32K Grid (1B tiles) - Peak Performance
-| Variant | Throughput | vs Baseline |
+### 32K x 32K Grid (1B tiles) - Current Live Confirmation
+| Variant | Throughput | vs Shuffle |
 |---------|------------|-------------|
-| Shuffle (baseline) | 27.7T | 1.0x |
-| Register V1 | 58.3T | 2.1x |
-| Register V2 | 71.2T | 2.6x |
-| **Register V3** | **115.2T** | **4.2x** |
+| Shuffle (baseline) | 23.21T | 1.0x |
+| Register V1 | 47.21T | 2.0x |
+| Register V2 | 60.68T | 2.6x |
+| **Register V3** | **96.51T** | **4.2x** |
+
+The repo CLI single-variant path also confirmed Register V3 at **97.07T tiles/sec** with
+`improvement_vs_u64: 485.3`.
 
 ---
 
@@ -166,7 +174,9 @@ RTX 5090: 1.8 TB/s memory bandwidth
 | 1-bit packed (L2) | 0.065 | 28T tiles/sec |
 | **Register-resident** | **0.016** | **112T tiles/sec** |
 
-We achieved 115T, slightly exceeding theoretical due to measurement variance.
+The original report recorded 115T, slightly exceeding this simple theoretical estimate. The
+2026-07-03 confirmation records 96.51-97.07T, below the estimate but still in the same
+register-resident regime.
 
 ---
 
@@ -191,7 +201,7 @@ We achieved 115T, slightly exceeding theoretical due to measurement variance.
 
 ## Conclusion
 
-EPIC 122 demonstrates that **register-resident tiling** is the key to breaking the memory bandwidth barrier. By keeping data in registers across thousands of iterations, we achieved 115T tiles/sec - enough to simulate a **billion-tile world at 100+ FPS**.
+EPIC 122 demonstrates that **register-resident tiling** is the key to breaking the memory bandwidth barrier. By keeping data in registers across thousands of iterations, the current confirmed throughput is about **97T tiles/sec** - enough to simulate a **billion-tile world near 90 FPS** on this benchmark.
 
 The 4.2x improvement over EPIC 120 shows that there's still significant optimization headroom even after hitting "theoretical maximum" on a previous design. The lesson: question whether memory access is truly necessary, and redesign to eliminate it.
 

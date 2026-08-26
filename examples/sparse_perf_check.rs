@@ -11,7 +11,6 @@ fn main() {
     #[cfg(not(feature = "cuda"))]
     {
         println!("Requires --features cuda");
-        return;
     }
 
     #[cfg(feature = "cuda")]

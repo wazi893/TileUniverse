@@ -44,9 +44,10 @@ use crate::experiments::noise_model::NoiseConfig;
 ///
 /// Each variant represents a different mitigation technique or combination.
 /// Strategies can be applied individually or combined for enhanced performance.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub enum MitigationStrategy {
     /// No mitigation - run circuit as-is
+    #[default]
     None,
 
     /// Zero-Noise Extrapolation
@@ -134,12 +135,6 @@ impl MitigationStrategy {
             MitigationStrategy::Readout(_) => 1.0,
             MitigationStrategy::ZNEPlusReadout { zne, .. } => zne.noise_factors.len() as f64,
         }
-    }
-}
-
-impl Default for MitigationStrategy {
-    fn default() -> Self {
-        MitigationStrategy::None
     }
 }
 

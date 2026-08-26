@@ -437,7 +437,7 @@ mod tests {
         let max_qubits = allocator.max_qubits();
         // max_cpus = 304
         // max_qubits = 7 + log2(304) ≈ 7 + 8 = 15
-        assert!(max_qubits >= 14 && max_qubits <= 16);
+        assert!((14..=16).contains(&max_qubits));
     }
 
     #[test]

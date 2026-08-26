@@ -61,7 +61,7 @@ fn build_decoded(program: &[u32]) -> Vec<PreDecoded> {
         let rs_hi = (ir_ext & EXT_RS_HI) != 0;
         let wide_imm = (ir_ext & EXT_WIDE_IMM) != 0;
         let imm_val: u16 = if wide_imm {
-            let hi = ((ir_ext >> 8) & 0xFF) as u16;
+            let hi = (ir_ext >> 8) & 0xFF;
             (hi << 8) | (imm8 as u16)
         } else {
             imm8 as u16
@@ -529,10 +529,10 @@ impl V2Iss {
                         &crate::quantum::QGate::Measure(q),
                         &mut self.iss_qrng,
                     );
-                    if let crate::quantum::GateOutcome::Measured { qubit: _, bit } = outcome {
-                        if bit != 0 {
-                            result |= 1u64 << q;
-                        }
+                    if let crate::quantum::GateOutcome::Measured { qubit: _, bit } = outcome
+                        && bit != 0
+                    {
+                        result |= 1u64 << q;
                     }
                 }
                 self.iss_q_gate_count += n as u32;
@@ -1761,8 +1761,8 @@ mod tests {
         let mut prog = vec![v2_nop(); len];
 
         for (i, slot) in prog.iter_mut().enumerate().take(len.saturating_sub(1)) {
-            let rd = (rng.next_u8() & 0x07) as u8;
-            let rs = (rng.next_u8() & 0x07) as u8;
+            let rd = rng.next_u8() & 0x07;
+            let rs = rng.next_u8() & 0x07;
             let rd_hi = rng.gen_bool();
             let rs_hi = rng.gen_bool();
             let imm = rng.next_u8();
@@ -2313,6 +2313,936 @@ mod tests {
         );
     }
 
+    /// Sprint 390 (Phase A): WIDE RET TARGET authority. In wide mode LR is a
+    /// Register64 captured physically from the wide PC+1 adder on `is_call`, and
+    /// selected by `is_ret` at the S125 Target Selection Mux — so a RET's target is
+    /// the physical PC, no software write needed. Before S390 every wide-mode control
+    /// transfer took an unconditional software `write_pc`; now RET (kind 7) uses the
+    /// S224 trust-verify-fallback model, and `wide_target_mismatches() == 0` proves the
+    /// physical LR path was authoritative for a WIDE return address (> 256).
+    ///
+    /// Program shape (nested calls, no MTLR — MTLR's physical path is Phase D):
+    ///   main → CALLR outer(300); outer saves LR via MFLR (Gate C, physical) →
+    ///   CALLR inner(310) captures LR = 305 (> 256) → inner RET returns to 305 (the
+    ///   wide target under test) → outer returns to main via JMPR to the MFLR-saved reg.
+    #[test]
+    fn test_v2_iss_s390_wide_ret_target_physical_differential() {
+        use crate::simulation::Simulation;
+        use crate::tile_cpu::V2Builder;
+        use crate::tile_cpu::V2SynthConfig;
+        use crate::tile_cpu::v2_components::{
+            v2_add, v2_addi, v2_callr, v2_halt, v2_inc, v2_jmpr, v2_ldi, v2_mflr, v2_nop, v2_ret,
+            v2_with_reg_ext,
+        };
+
+        let mut prog = vec![v2_nop(); 320];
+        // main:
+        prog[0] = v2_ldi(0, 10); // R0 = 10
+        prog[1] = v2_ldi(1, 5); // R1 = 5
+        prog[2] = v2_ldi(3, 0);
+        prog[3] = v2_addi(3, 200);
+        prog[4] = v2_addi(3, 100); // R3 = 300 (outer fn ptr, > 256)
+        prog[5] = v2_callr(3); // LR = 6; PC = 300 (return addr is low)
+        prog[6] = v2_halt(); // program ends here
+        // outer subroutine (300): save LR, call inner, return via saved reg.
+        prog[300] = v2_with_reg_ext(v2_mflr(0), true, false); // R8 = LR = 6 (physical MFLR)
+        prog[301] = v2_ldi(4, 0);
+        prog[302] = v2_addi(4, 200);
+        prog[303] = v2_addi(4, 110); // R4 = 310 (inner fn ptr, > 256)
+        prog[304] = v2_callr(4); // LR = 305 (WIDE, > 256); PC = 310
+        prog[305] = v2_with_reg_ext(v2_jmpr(0), true, false); // PC = R8 = 6 (return to main)
+        // inner leaf (310): compute, then RET to the WIDE return address 305.
+        prog[310] = v2_add(0, 1); // R0 = R0 + R1 = 15
+        prog[311] = v2_inc(0); // R0 = 16
+        prog[312] = v2_ret(); // PC = LR = 305  <-- WIDE RET target under test
+
+        let mut sim = Simulation::with_size_layered(128, 640, 16);
+        let cpu = V2Builder::new()
+            .with_origin(0, 0)
+            .with_program(&prog)
+            .with_rom_size(128)
+            .with_ram_size(128)
+            .with_wide_pc()
+            .with_synth_blocks(V2SynthConfig::max_authority())
+            .build(&mut sim);
+
+        let mut iss = V2Iss::from_program(&prog);
+        iss.enable_wide_pc();
+
+        let res =
+            run_v2_differential_core(&mut iss, V2DiffConfig { max_ticks: 5_000 }, &cpu, &mut sim);
+        assert!(
+            res.is_ok(),
+            "S390 wide-RET physical differential mismatch: {:?}",
+            res.err()
+        );
+
+        // Functional: the leaf ran (R0 = 10 + 5 + 1 = 16) and the program halted at main.
+        assert_eq!(cpu.read_reg(&sim, 0), 16, "leaf computed R0 = 16");
+        assert!(cpu.is_halted(), "program should halt at prog[6]");
+
+        // Authority proof: the wide RET's target came from the physical LR path — the
+        // trust-verify counter fired (RET was checked) with zero software fallbacks.
+        // The check count is pinned — an accidental widening of the physical-target
+        // predicate trips this. History: 1 (S390, RET only) → 4 (S393: the register
+        // read port makes the two CALLRs and the JMPR physically checked too).
+        assert_eq!(
+            cpu.wide_target_checks(),
+            4,
+            "one RET + two CALLR + one JMPR physical target checks expected (S393)"
+        );
+        assert_eq!(
+            cpu.wide_target_mismatches(),
+            0,
+            "wide RET target must be physically authoritative (no software fallback)"
+        );
+    }
+
+    /// Sprint 390 (Phase B0): regression gate for the wide-address HALT defect (fixed).
+    /// Root cause (found via PC-datapath instrumentation): the fall-through and RET paths
+    /// carry PC bits 8..15 correctly — but a HALT sitting at a WIDE address (> 0xFF)
+    /// self-targets through its 8-bit `imm8` field, which `build_program_ext` patches
+    /// with `addr & 0xFF`. So HALT@305 self-targeted to 305 & 0xFF = 49, diverging from
+    /// the ISS. Fix: the extended/wide executor freezes `is_halt` at its own full-width
+    /// address. Here a wide RET returns to a high site (304), falls through (304 → 305),
+    /// and HALTs at 305 — all bits must survive. Uses CALLR (no MTLR) to isolate the path.
+    #[test]
+    fn test_v2_iss_s390_b0_wide_halt_at_high_address_regression() {
+        use crate::simulation::Simulation;
+        use crate::tile_cpu::V2Builder;
+        use crate::tile_cpu::V2SynthConfig;
+        use crate::tile_cpu::v2_components::{
+            v2_addi, v2_callr, v2_halt, v2_jmpr, v2_ldi, v2_nop, v2_ret,
+        };
+
+        let mut prog = vec![v2_nop(); 320];
+        // main: reach a high address so the call's captured LR (return site) is high.
+        prog[0] = v2_ldi(3, 0);
+        prog[1] = v2_addi(3, 200);
+        prog[2] = v2_addi(3, 100); // R3 = 300
+        prog[3] = v2_jmpr(3); // PC = 300
+        // at 300: build the leaf pointer, then call it from a HIGH address.
+        prog[300] = v2_ldi(4, 0);
+        prog[301] = v2_addi(4, 200);
+        prog[302] = v2_addi(4, 110); // R4 = 310
+        prog[303] = v2_callr(4); // LR = 304 (HIGH return site); PC = 310
+        // 304: the RET lands here (high), then falls through to a HALT at 305 (stays high).
+        prog[304] = v2_ldi(0, 42); // R0 = 42  (fall-through 304 → 305)
+        prog[305] = v2_halt();
+        // leaf at 310:
+        prog[310] = v2_ret(); // PC = LR = 304 (HIGH return, then fall-through)
+
+        let mut sim = Simulation::with_size_layered(128, 640, 16);
+        let cpu = V2Builder::new()
+            .with_origin(0, 0)
+            .with_program(&prog)
+            .with_rom_size(128)
+            .with_ram_size(128)
+            .with_wide_pc()
+            .with_synth_blocks(V2SynthConfig::max_authority())
+            .build(&mut sim);
+
+        let mut iss = V2Iss::from_program(&prog);
+        iss.enable_wide_pc();
+
+        let res =
+            run_v2_differential_core(&mut iss, V2DiffConfig { max_ticks: 5_000 }, &cpu, &mut sim);
+        assert!(
+            res.is_ok(),
+            "B0 regression: wide RET → high return site → fall-through mismatch: {:?}",
+            res.err()
+        );
+        assert_eq!(
+            cpu.read_reg(&sim, 0),
+            42,
+            "fell through the high return site (304 → 305), R0 = 42"
+        );
+        assert!(cpu.is_halted(), "halted at the high HALT (305)");
+        // RET authority for the "returns to a HIGH site, then falls through" shape (the
+        // Phase A test's RET→305 re-jumps via JMPR, so it never exercised this): the
+        // physical LR→Target-Mux target was correct, no software fallback.
+        assert_eq!(
+            cpu.wide_target_mismatches(),
+            0,
+            "wide RET to a high return site was physically authoritative"
+        );
+    }
+
+    /// Sprint 391 (Phase B1-I): WIDE IMMEDIATE branch TARGETS are physically
+    /// authoritative. `JMP.W` / `CALL.W` carry a 16-bit target (> 0xFF), but the S125
+    /// Target Mux RIGHT input rides the 8-bit ir_low route. B1-I injects `imm_val`
+    /// into that route so the Target Mux → physical PC latches the full target. This
+    /// exercises all three target shapes — low→high (1→300), high→high (301→400),
+    /// high→low (302→2) — plus a wide RET (401→302) as a return-site fall-through
+    /// variant, and asserts the physical control-transfer targets held with **no
+    /// software fallback** (`wide_target_mismatches == 0`, `wide_target_checks > 0`).
+    #[test]
+    fn test_v2_iss_s391_wide_immediate_targets_physical_differential() {
+        use crate::simulation::Simulation;
+        use crate::tile_cpu::V2Builder;
+        use crate::tile_cpu::V2SynthConfig;
+        use crate::tile_cpu::v2_components::{
+            v2_call_w, v2_halt, v2_inc, v2_jmp_w, v2_ldi, v2_nop, v2_ret,
+        };
+
+        let mut prog = vec![v2_nop(); 410];
+        prog[0] = v2_ldi(0, 10); // R0 = 10
+        prog[1] = v2_jmp_w(300); // low → high (taken immediate target)
+        prog[2] = v2_halt(); // high → low landing site (reached last)
+        prog[300] = v2_inc(0); // R0 = 11  (physical fall-through in the high range)
+        prog[301] = v2_call_w(400); // high → high (LR = 302 captured physically)
+        prog[302] = v2_jmp_w(2); // high → low
+        prog[400] = v2_inc(0); // R0 = 12
+        prog[401] = v2_ret(); // → 302 (wide RET; return-site then falls to jmp_w)
+
+        let mut sim = Simulation::with_size_layered(128, 640, 16);
+        let cpu = V2Builder::new()
+            .with_origin(0, 0)
+            .with_program(&prog)
+            .with_rom_size(128)
+            .with_ram_size(128)
+            .with_wide_pc()
+            .with_synth_blocks(V2SynthConfig::max_authority())
+            .build(&mut sim);
+
+        let mut iss = V2Iss::from_program(&prog);
+        iss.enable_wide_pc();
+
+        let res =
+            run_v2_differential_core(&mut iss, V2DiffConfig { max_ticks: 5_000 }, &cpu, &mut sim);
+        assert!(
+            res.is_ok(),
+            "S391 wide immediate target differential mismatch: {:?}",
+            res.err()
+        );
+        assert_eq!(
+            cpu.read_reg(&sim, 0),
+            12,
+            "R0 accumulated across wide targets"
+        );
+        assert!(
+            cpu.is_halted(),
+            "program halts at the high→low landing site (2)"
+        );
+        assert!(
+            cpu.wide_target_checks() > 0,
+            "the wide control-transfer target path must have been exercised"
+        );
+        assert_eq!(
+            cpu.wide_target_mismatches(),
+            0,
+            "wide immediate branch targets must be physically authoritative (no fallback)"
+        );
+    }
+
+    /// Sprint 391 (Phase B1-I): WIDE CONDITIONAL branch targets — all four `.W`
+    /// conditionals (`JZ.W` / `JNZ.W` / `JC.W` / `JNC.W`), each exercised **taken and
+    /// not-taken**. Each conditional is directly preceded by the CMP that sets its
+    /// flag, so the intended arm is deterministic; the accumulator R0 encodes the
+    /// path (final = 8 iff every taken/not-taken arm went as designed). Taken arms
+    /// jump to wide (> 0xFF) targets via the injected route; not-taken arms ride the
+    /// physical fall-through (S370). Asserts `wide_target_mismatches == 0`.
+    #[test]
+    fn test_v2_iss_s391_wide_conditional_targets_physical_differential() {
+        use crate::simulation::Simulation;
+        use crate::tile_cpu::V2Builder;
+        use crate::tile_cpu::V2SynthConfig;
+        use crate::tile_cpu::v2_components::{
+            v2_cmp, v2_halt, v2_inc, v2_jc_w, v2_jmp_w, v2_jnc_w, v2_jnz_w, v2_jz_w, v2_ldi, v2_nop,
+        };
+
+        let mut prog = vec![v2_nop(); 370];
+        prog[0] = v2_ldi(1, 5); // R1 = 5
+        prog[1] = v2_ldi(2, 5); // R2 = 5
+        prog[2] = v2_ldi(3, 3); // R3 = 3
+        prog[3] = v2_ldi(0, 0); // R0 = 0 (accumulator)
+
+        // JZ.W taken (Z=1: R1==R2)
+        prog[4] = v2_cmp(1, 2);
+        prog[5] = v2_jz_w(300);
+        prog[6] = v2_halt(); // FAIL marker
+
+        prog[300] = v2_inc(0); // R0 = 1
+        // JZ.W not-taken (Z=0: R1!=R3)
+        prog[301] = v2_cmp(1, 3);
+        prog[302] = v2_jz_w(305);
+        prog[303] = v2_inc(0); // R0 = 2 (fall-through after not-taken)
+        prog[304] = v2_jmp_w(310);
+        prog[305] = v2_halt(); // FAIL marker
+
+        // JNZ.W taken (Z=0)
+        prog[310] = v2_cmp(1, 3);
+        prog[311] = v2_jnz_w(320);
+        prog[312] = v2_halt(); // FAIL marker
+
+        prog[320] = v2_inc(0); // R0 = 3
+        // JNZ.W not-taken (Z=1)
+        prog[321] = v2_cmp(1, 2);
+        prog[322] = v2_jnz_w(325);
+        prog[323] = v2_inc(0); // R0 = 4
+        prog[324] = v2_jmp_w(330);
+        prog[325] = v2_halt(); // FAIL marker
+
+        // JC.W taken (C=1: 3-5 borrows)
+        prog[330] = v2_cmp(3, 1);
+        prog[331] = v2_jc_w(340);
+        prog[332] = v2_halt(); // FAIL marker
+
+        prog[340] = v2_inc(0); // R0 = 5
+        // JC.W not-taken (C=0: 5-3)
+        prog[341] = v2_cmp(1, 3);
+        prog[342] = v2_jc_w(345);
+        prog[343] = v2_inc(0); // R0 = 6
+        prog[344] = v2_jmp_w(350);
+        prog[345] = v2_halt(); // FAIL marker
+
+        // JNC.W taken (C=0)
+        prog[350] = v2_cmp(1, 3);
+        prog[351] = v2_jnc_w(360);
+        prog[352] = v2_halt(); // FAIL marker
+
+        prog[360] = v2_inc(0); // R0 = 7
+        // JNC.W not-taken (C=1)
+        prog[361] = v2_cmp(3, 1);
+        prog[362] = v2_jnc_w(365);
+        prog[363] = v2_inc(0); // R0 = 8
+        prog[364] = v2_halt(); // FINAL halt (R0 = 8)
+        prog[365] = v2_halt(); // FAIL marker
+
+        let mut sim = Simulation::with_size_layered(128, 640, 16);
+        let cpu = V2Builder::new()
+            .with_origin(0, 0)
+            .with_program(&prog)
+            .with_rom_size(128)
+            .with_ram_size(128)
+            .with_wide_pc()
+            .with_synth_blocks(V2SynthConfig::max_authority())
+            .build(&mut sim);
+
+        let mut iss = V2Iss::from_program(&prog);
+        iss.enable_wide_pc();
+
+        let res =
+            run_v2_differential_core(&mut iss, V2DiffConfig { max_ticks: 8_000 }, &cpu, &mut sim);
+        assert!(
+            res.is_ok(),
+            "S391 wide conditional target differential mismatch: {:?}",
+            res.err()
+        );
+        assert_eq!(
+            cpu.read_reg(&sim, 0),
+            8,
+            "every conditional taken/not-taken arm must have gone as designed"
+        );
+        assert!(cpu.is_halted(), "program halts at the final halt (364)");
+        assert!(
+            cpu.wide_target_checks() > 0,
+            "conditional targets exercised"
+        );
+        assert_eq!(
+            cpu.wide_target_mismatches(),
+            0,
+            "wide conditional branch targets must be physically authoritative (no fallback)"
+        );
+    }
+
+    /// Sprint 393: REGISTER-INDIRECT targets (JMPR/CALLR) are physically
+    /// authoritative — the ALL-16 sweep. Every register R0..R15 holds a distinct
+    /// target (alternating high/low so both directions repeat), and the program
+    /// chains a control transfer through each one (JMPR and CALLR mixed). The
+    /// 16:1 read-port tree is exhausted: any pairing/rail transposition in the
+    /// annex mux ladder diverges the very first mis-selected jump. Asserts all
+    /// 16 reg-indirect transfers were physically checked with zero fallbacks.
+    #[test]
+    fn test_v2_iss_s393_reg_indirect_all16_sweep_differential() {
+        use crate::simulation::Simulation;
+        use crate::tile_cpu::V2Builder;
+        use crate::tile_cpu::V2SynthConfig;
+        use crate::tile_cpu::v2_components::{
+            v2_callr, v2_halt, v2_jmpr, v2_ldi_w, v2_mov, v2_nop, v2_with_reg_ext,
+        };
+
+        // Distinct targets, alternating high/low, all clear of the setup block.
+        let targets: [u16; 16] = [
+            300, 60, 320, 70, 340, 80, 360, 90, 380, 100, 400, 110, 420, 120, 440, 130,
+        ];
+        let mut prog = vec![v2_nop(); 460];
+        // Setup: R0..R7 via LDI.W; R8..R15 staged through R7 (MOV with rd_hi),
+        // R7's own target loaded last.
+        let mut pc = 0usize;
+        for r in 0..7u8 {
+            prog[pc] = v2_ldi_w(r, targets[r as usize]);
+            pc += 1;
+        }
+        for k in 0..8u8 {
+            prog[pc] = v2_ldi_w(7, targets[8 + k as usize]);
+            pc += 1;
+            prog[pc] = v2_with_reg_ext(v2_mov(k, 7), true, false); // R8+k = R7
+            pc += 1;
+        }
+        prog[pc] = v2_ldi_w(7, targets[7]);
+        pc += 1;
+        // Chain: transfer through R0 first; at each target site, transfer
+        // through the next register; JMPR/CALLR alternate (both kinds physical).
+        prog[pc] = v2_jmpr(0);
+        for i in 0..15usize {
+            let site = targets[i] as usize;
+            let next = (i + 1) as u8;
+            prog[site] = if i % 2 == 0 {
+                if next < 8 {
+                    v2_callr(next)
+                } else {
+                    v2_with_reg_ext(v2_callr(next & 0x07), true, false)
+                }
+            } else if next < 8 {
+                v2_jmpr(next)
+            } else {
+                v2_with_reg_ext(v2_jmpr(next & 0x07), true, false)
+            };
+        }
+        prog[targets[15] as usize] = v2_halt();
+
+        let mut sim = Simulation::with_size_layered(128, 640, 16);
+        let cpu = V2Builder::new()
+            .with_origin(0, 0)
+            .with_program(&prog)
+            .with_rom_size(128)
+            .with_ram_size(128)
+            .with_wide_pc()
+            .with_synth_blocks(V2SynthConfig::max_authority())
+            .build(&mut sim);
+
+        let mut iss = V2Iss::from_program(&prog);
+        iss.enable_wide_pc();
+
+        let res =
+            run_v2_differential_core(&mut iss, V2DiffConfig { max_ticks: 5_000 }, &cpu, &mut sim);
+        assert!(
+            res.is_ok(),
+            "S393 all-16 reg-indirect sweep differential mismatch: {:?}",
+            res.err()
+        );
+        assert!(cpu.is_halted(), "chain must land on the final HALT");
+        assert_eq!(
+            cpu.wide_target_checks(),
+            16,
+            "all 16 register-indirect transfers must be physically checked"
+        );
+        assert_eq!(
+            cpu.wide_target_mismatches(),
+            0,
+            "register-indirect targets must be physically authoritative (no fallback)"
+        );
+    }
+
+    /// Sprint 393: read-port STALENESS gate. A register is rewritten and then
+    /// immediately used as a jump target (write at cycle N, JMPR at N+1, twice
+    /// with different values, plus a same-register reuse after a gap). The
+    /// read-port stacks/lanes/tree must reflect the new value by the next
+    /// cycle's clock edge — a dirty-propagation gap in the annex chain shows up
+    /// as a mismatch (and a software fallback, which the counters reject).
+    #[test]
+    fn test_v2_iss_s393_reg_indirect_staleness_differential() {
+        use crate::simulation::Simulation;
+        use crate::tile_cpu::V2Builder;
+        use crate::tile_cpu::V2SynthConfig;
+        use crate::tile_cpu::v2_components::{v2_halt, v2_jmpr, v2_ldi_w, v2_nop};
+
+        let mut prog = vec![v2_nop(); 460];
+        prog[0] = v2_ldi_w(2, 300); // write R2 …
+        prog[1] = v2_jmpr(2); // … and jump through it on the very next cycle
+        prog[300] = v2_ldi_w(2, 320); // rewrite R2 …
+        prog[301] = v2_jmpr(2); // … immediate reuse, new value must win
+        prog[320] = v2_ldi_w(2, 64); // rewrite again (high → low this time) …
+        prog[321] = v2_nop(); // … after a 2-cycle gap
+        prog[322] = v2_nop();
+        prog[323] = v2_jmpr(2);
+        prog[64] = v2_halt();
+
+        let mut sim = Simulation::with_size_layered(128, 640, 16);
+        let cpu = V2Builder::new()
+            .with_origin(0, 0)
+            .with_program(&prog)
+            .with_rom_size(128)
+            .with_ram_size(128)
+            .with_wide_pc()
+            .with_synth_blocks(V2SynthConfig::max_authority())
+            .build(&mut sim);
+
+        let mut iss = V2Iss::from_program(&prog);
+        iss.enable_wide_pc();
+
+        let res =
+            run_v2_differential_core(&mut iss, V2DiffConfig { max_ticks: 5_000 }, &cpu, &mut sim);
+        assert!(
+            res.is_ok(),
+            "S393 staleness differential mismatch: {:?}",
+            res.err()
+        );
+        assert!(
+            cpu.is_halted(),
+            "halted at 64 after three same-register jumps"
+        );
+        assert_eq!(
+            cpu.wide_target_checks(),
+            3,
+            "three JMPRs physically checked"
+        );
+        assert_eq!(
+            cpu.wide_target_mismatches(),
+            0,
+            "freshly rewritten jump registers must be physically authoritative"
+        );
+    }
+
+    /// Sprint 393: MASKING gate. The jump register carries garbage above bit 15
+    /// (a full-width 64-bit value); the physical PC capture must apply the wide
+    /// mask (0xFFFF) and land on `value & 0xFFFF`, matching the ISS, with no
+    /// software fallback. Garbage is built physically: R1 = (1 << 20) + 300 via
+    /// LDI.W + SHL chain + ADD.
+    #[test]
+    fn test_v2_iss_s393_reg_indirect_masking_differential() {
+        use crate::simulation::Simulation;
+        use crate::tile_cpu::V2Builder;
+        use crate::tile_cpu::V2SynthConfig;
+        use crate::tile_cpu::v2_components::{
+            v2_add, v2_halt, v2_jmpr, v2_ldi, v2_ldi_w, v2_nop, v2_shl,
+        };
+
+        let mut prog = vec![v2_nop(); 460];
+        prog[0] = v2_ldi(1, 1);
+        prog[1] = v2_shl(1, 5); // R1 = 1 << 5
+        prog[2] = v2_shl(1, 5); // 1 << 10
+        prog[3] = v2_shl(1, 5); // 1 << 15
+        prog[4] = v2_shl(1, 5); // 1 << 20 — garbage above bit 15
+        prog[5] = v2_ldi_w(2, 300);
+        prog[6] = v2_add(1, 2); // R1 = (1 << 20) + 300
+        prog[7] = v2_jmpr(1); // physical capture must mask to 300
+        prog[300] = v2_halt();
+
+        let mut sim = Simulation::with_size_layered(128, 640, 16);
+        let cpu = V2Builder::new()
+            .with_origin(0, 0)
+            .with_program(&prog)
+            .with_rom_size(128)
+            .with_ram_size(128)
+            .with_wide_pc()
+            .with_synth_blocks(V2SynthConfig::max_authority())
+            .build(&mut sim);
+
+        let mut iss = V2Iss::from_program(&prog);
+        iss.enable_wide_pc();
+
+        let res =
+            run_v2_differential_core(&mut iss, V2DiffConfig { max_ticks: 5_000 }, &cpu, &mut sim);
+        assert!(
+            res.is_ok(),
+            "S393 masking differential mismatch: {:?}",
+            res.err()
+        );
+        assert!(cpu.is_halted(), "masked jump must land on the HALT at 300");
+        assert_eq!(
+            cpu.wide_target_mismatches(),
+            0,
+            "wide-masked register-indirect target must be physically authoritative"
+        );
+    }
+
+    /// Sprint 390 (Phase D): MTLR PHYSICAL correctness. Before S390 the physical executor
+    /// had no MTLR handler — opcode 0x02 sub_fn 6 fell through to the MOV arm, writing
+    /// rd (= R0, MTLR's encoded rd) = rs and leaving LR untouched. The ISS sets LR and
+    /// writes no register, so any callee-save program silently diverged on tiles. This
+    /// drives the MTLR→LR→MFLR roundtrip as a lockstep ISS↔physical differential: MTLR
+    /// installs LR (physical tile injected post-clock-edge), MFLR reads it back from the
+    /// physical tile. Stale LR or a clobbered register fails the differential at retire.
+    #[test]
+    fn test_v2_iss_s390_mtlr_roundtrip_physical_differential() {
+        use crate::simulation::Simulation;
+        use crate::tile_cpu::V2Builder;
+        use crate::tile_cpu::V2SynthConfig;
+        use crate::tile_cpu::v2_components::{v2_halt, v2_ldi, v2_mflr, v2_mtlr, v2_nop};
+
+        let mut prog = vec![v2_nop(); 16];
+        prog[0] = v2_ldi(0, 42); // R0 = 42
+        prog[1] = v2_mtlr(0); // lr = R0 = 42  (rd field = R0; pre-S390 bug wrote R0)
+        prog[2] = v2_mflr(1); // R1 = lr = 42  (reads the physical LR tile MTLR injected)
+        prog[3] = v2_halt();
+
+        let mut sim = Simulation::with_size_layered(128, 640, 16);
+        let cpu = V2Builder::new()
+            .with_origin(0, 0)
+            .with_program(&prog)
+            .with_rom_size(128)
+            .with_ram_size(128)
+            .with_synth_blocks(V2SynthConfig::max_authority())
+            .build(&mut sim);
+
+        let mut iss = V2Iss::from_program(&prog);
+        let res =
+            run_v2_differential_core(&mut iss, V2DiffConfig { max_ticks: 5_000 }, &cpu, &mut sim);
+        assert!(
+            res.is_ok(),
+            "MTLR roundtrip differential mismatch: {:?}",
+            res.err()
+        );
+
+        assert_eq!(
+            cpu.read_reg(&sim, 1),
+            42,
+            "MFLR read back the MTLR-installed LR"
+        );
+        assert_eq!(cpu.read_lr(), 42, "physical LR mirror installed by MTLR");
+        // Default (7-bit) fabric: no S394 cascade — the S390 assist still fires.
+        // (Wide fabrics assert assists == 0; see the wide-mask test + S394 gates.)
+        assert!(
+            cpu.mtlr_assists() > 0,
+            "default-fabric MTLR uses the S390 assist path"
+        );
+        assert!(cpu.is_halted());
+    }
+
+    /// Sprint 390 (Phase D): MTLR in the callee-save idiom, physically. The outer function
+    /// saves LR (MFLR R8) before its own CALL clobbers LR, then restores it (MTLR R8)
+    /// before RET. With the pre-S390 MOV-collapse bug, MTLR left LR pointing at the inner
+    /// return site (18) and wrote R0 — so the outer RET re-entered the inner subroutine
+    /// and never converged. Lockstep ISS↔physical proves the restore is correct: R0 (the
+    /// inner return value, 99) survives, and the outer RET reaches the main HALT.
+    #[test]
+    fn test_v2_iss_s390_mtlr_nested_call_physical_differential() {
+        use crate::simulation::Simulation;
+        use crate::tile_cpu::V2Builder;
+        use crate::tile_cpu::V2SynthConfig;
+        use crate::tile_cpu::v2_components::{
+            v2_call, v2_halt, v2_ldi, v2_mflr, v2_mtlr, v2_nop, v2_ret, v2_with_reg_ext,
+        };
+
+        let mut prog = vec![v2_nop(); 64];
+        prog[0] = v2_call(16); // LR = 1, PC = 16 (outer)
+        prog[1] = v2_halt();
+        // outer (16): save LR, call inner, restore LR, return.
+        prog[16] = v2_with_reg_ext(v2_mflr(0), true, false); // R8 = LR = 1 (save)
+        prog[17] = v2_call(32); // LR = 18, PC = 32 (inner)
+        prog[18] = v2_with_reg_ext(v2_mtlr(0), false, true); // lr = R8 = 1 (restore)  <-- test
+        prog[19] = v2_ret(); // PC = 1 (HALT in main)
+        // inner (32): leaf — sets a return value and returns.
+        prog[32] = v2_ldi(0, 99); // R0 = 99
+        prog[33] = v2_ret(); // PC = 18
+
+        let mut sim = Simulation::with_size_layered(128, 640, 16);
+        let cpu = V2Builder::new()
+            .with_origin(0, 0)
+            .with_program(&prog)
+            .with_rom_size(128)
+            .with_ram_size(128)
+            .with_synth_blocks(V2SynthConfig::max_authority())
+            .build(&mut sim);
+
+        let mut iss = V2Iss::from_program(&prog);
+        let res =
+            run_v2_differential_core(&mut iss, V2DiffConfig { max_ticks: 5_000 }, &cpu, &mut sim);
+        assert!(
+            res.is_ok(),
+            "MTLR nested-call differential mismatch: {:?}",
+            res.err()
+        );
+
+        assert!(
+            cpu.is_halted(),
+            "outer RET returned to main HALT (LR restored)"
+        );
+        assert_eq!(cpu.read_reg(&sim, 8), 1, "R8 holds the saved LR");
+        assert_eq!(
+            cpu.read_reg(&sim, 0),
+            99,
+            "inner return value survived MTLR (R0 not clobbered)"
+        );
+        // Default (7-bit) fabric: no S394 cascade — the S390 assist still fires.
+        assert!(
+            cpu.mtlr_assists() > 0,
+            "default-fabric MTLR uses the S390 assist path"
+        );
+    }
+
+    /// Sprint 390 (Phase D): MTLR masks by the WIDE PC width (0xFFFF), not 8-bit 0xFF.
+    /// In wide mode, build a 16-bit value (310) in R8, install it in LR via MTLR, then
+    /// read it back via MFLR: R9 must equal 310. If the executor masked LR by 0xFF (the
+    /// pre-S390 ISS/oracle bug) the round-trip would yield 310 & 0xFF = 54. Runs entirely
+    /// at low PC addresses so it isolates the LR *mask* from the wide-PC control-flow
+    /// sequencing (a wide RET landing high has a separate, pre-existing S370 defect —
+    /// see SPRINT_390_REPORT.md). Lockstep ISS↔physical closes the loop.
+    #[test]
+    fn test_v2_iss_s390_mtlr_wide_mask_physical_differential() {
+        use crate::simulation::Simulation;
+        use crate::tile_cpu::V2Builder;
+        use crate::tile_cpu::V2SynthConfig;
+        use crate::tile_cpu::v2_components::{
+            v2_addi, v2_halt, v2_ldi, v2_mflr, v2_mtlr, v2_nop, v2_with_reg_ext,
+        };
+
+        let mut prog = vec![v2_nop(); 16];
+        prog[0] = v2_with_reg_ext(v2_ldi(0, 200), true, false); // R8 = 200
+        prog[1] = v2_with_reg_ext(v2_addi(0, 110), true, false); // R8 = 310 (> 0xFF)
+        prog[2] = v2_with_reg_ext(v2_mtlr(0), false, true); // lr = R8 = 310 (WIDE)  <-- test
+        prog[3] = v2_with_reg_ext(v2_mflr(1), true, false); // R9 = lr = 310  (read back)
+        prog[4] = v2_halt();
+
+        let mut sim = Simulation::with_size_layered(128, 640, 16);
+        let cpu = V2Builder::new()
+            .with_origin(0, 0)
+            .with_program(&prog)
+            .with_rom_size(128)
+            .with_ram_size(128)
+            .with_wide_pc()
+            .with_synth_blocks(V2SynthConfig::max_authority())
+            .build(&mut sim);
+
+        let mut iss = V2Iss::from_program(&prog);
+        iss.enable_wide_pc();
+
+        let res =
+            run_v2_differential_core(&mut iss, V2DiffConfig { max_ticks: 5_000 }, &cpu, &mut sim);
+        assert!(
+            res.is_ok(),
+            "wide MTLR mask differential mismatch: {:?}",
+            res.err()
+        );
+
+        assert_eq!(
+            cpu.read_reg(&sim, 9),
+            310,
+            "MFLR read back the full wide LR (310, not 310 & 0xFF = 54)"
+        );
+        assert_eq!(cpu.read_lr(), 310, "LR mirror holds the full wide value");
+        // S394: physically captured — the assist is a zero-expected fallback.
+        assert_eq!(
+            cpu.mtlr_assists(),
+            0,
+            "MTLR physically captured (no fallback)"
+        );
+        assert!(cpu.is_halted());
+    }
+
+    /// Sprint 394: MTLR SWEEP — every select-rail combination of the rs port.
+    /// rs ∈ {0, 3, 5, 8, 11, 15} (both banks — rs_hi exercised) with distinct
+    /// poisoned values; each MTLR is read back by MFLR and compared in lockstep
+    /// with the ISS. `mtlr_assists == 0` proves every LR capture came from the
+    /// physical cascade (rail muxes → 16:1 ladder → mask via → LR).
+    #[test]
+    fn test_v2_iss_s394_mtlr_sweep_physical_differential() {
+        use crate::simulation::Simulation;
+        use crate::tile_cpu::V2Builder;
+        use crate::tile_cpu::V2SynthConfig;
+        use crate::tile_cpu::v2_components::{
+            v2_halt, v2_ldi, v2_mflr, v2_mov, v2_mtlr, v2_nop, v2_with_reg_ext,
+        };
+
+        let mut prog = vec![v2_nop(); 128];
+        let mut pc = 0usize;
+        // Poison low-bank sources.
+        for &(r, v) in &[(0u8, 11u8), (3, 33), (5, 55)] {
+            prog[pc] = v2_ldi(r, v);
+            pc += 1;
+        }
+        // Poison high-bank sources (R8=88, R11=111, R15=115) staged through R7.
+        for &(k, v) in &[(0u8, 88u8), (3, 111), (7, 115)] {
+            prog[pc] = v2_ldi(7, v);
+            pc += 1;
+            prog[pc] = v2_with_reg_ext(v2_mov(k, 7), true, false);
+            pc += 1;
+        }
+        // Sweep: MTLR rs → MFLR R6, alternating banks.
+        for &(rs, hi) in &[
+            (0u8, false),
+            (3, false),
+            (5, false),
+            (0, true), // R8
+            (3, true), // R11
+            (7, true), // R15
+        ] {
+            prog[pc] = if hi {
+                v2_with_reg_ext(v2_mtlr(rs), false, true)
+            } else {
+                v2_mtlr(rs)
+            };
+            pc += 1;
+            prog[pc] = v2_mflr(6); // R6 = LR (differential checks the value)
+            pc += 1;
+        }
+        prog[pc] = v2_halt();
+
+        let mut sim = Simulation::with_size_layered(128, 640, 16);
+        let cpu = V2Builder::new()
+            .with_origin(0, 0)
+            .with_program(&prog)
+            .with_rom_size(128)
+            .with_ram_size(128)
+            .with_wide_pc()
+            .with_synth_blocks(V2SynthConfig::max_authority())
+            .build(&mut sim);
+
+        let mut iss = V2Iss::from_program(&prog);
+        iss.enable_wide_pc();
+        let res =
+            run_v2_differential_core(&mut iss, V2DiffConfig { max_ticks: 5_000 }, &cpu, &mut sim);
+        assert!(res.is_ok(), "S394 MTLR sweep mismatch: {:?}", res.err());
+        assert!(cpu.is_halted());
+        assert_eq!(cpu.read_reg(&sim, 6), 115, "final MFLR read regs[15]");
+        assert_eq!(
+            cpu.mtlr_assists(),
+            0,
+            "all six MTLR captures must be physical (no fallback)"
+        );
+    }
+
+    /// Sprint 394: MTLR MASKING — regs[rs] carries garbage above bit 15
+    /// ((1<<20) + 0x123); the physical cascade's pc-mask via must capture the
+    /// masked value, bit-exact with the ISS, with no fallback.
+    #[test]
+    fn test_v2_iss_s394_mtlr_masking_differential() {
+        use crate::simulation::Simulation;
+        use crate::tile_cpu::V2Builder;
+        use crate::tile_cpu::V2SynthConfig;
+        use crate::tile_cpu::v2_components::{
+            v2_add, v2_halt, v2_ldi, v2_ldi_w, v2_mflr, v2_mtlr, v2_nop, v2_shl,
+        };
+
+        let mut prog = vec![v2_nop(); 64];
+        prog[0] = v2_ldi(1, 1);
+        prog[1] = v2_shl(1, 5);
+        prog[2] = v2_shl(1, 5);
+        prog[3] = v2_shl(1, 5);
+        prog[4] = v2_shl(1, 5); // R1 = 1 << 20
+        prog[5] = v2_ldi_w(2, 0x123);
+        prog[6] = v2_add(1, 2); // R1 = (1 << 20) + 0x123
+        prog[7] = v2_mtlr(1); // LR = R1 & 0xFFFF = 0x123
+        prog[8] = v2_mflr(3); // R3 = 0x123
+        prog[9] = v2_halt();
+
+        let mut sim = Simulation::with_size_layered(128, 640, 16);
+        let cpu = V2Builder::new()
+            .with_origin(0, 0)
+            .with_program(&prog)
+            .with_rom_size(128)
+            .with_ram_size(128)
+            .with_wide_pc()
+            .with_synth_blocks(V2SynthConfig::max_authority())
+            .build(&mut sim);
+
+        let mut iss = V2Iss::from_program(&prog);
+        iss.enable_wide_pc();
+        let res =
+            run_v2_differential_core(&mut iss, V2DiffConfig { max_ticks: 5_000 }, &cpu, &mut sim);
+        assert!(res.is_ok(), "S394 MTLR masking mismatch: {:?}", res.err());
+        assert_eq!(cpu.read_reg(&sim, 3), 0x123, "pc-masked LR read back");
+        assert_eq!(cpu.mtlr_assists(), 0, "masked capture must be physical");
+    }
+
+    /// Sprint 394: STALENESS + the callee-save idiom on the WIDE fabric, fully
+    /// physical end-to-end. `MFLR R8 / CALLR / MTLR R8 / RET` — LR is saved,
+    /// clobbered by a nested call (physical CALL capture through the relocated
+    /// cascade), restored by MTLR **on the very next cycle after R8 is rewritten**
+    /// (staleness), and consumed by a physical wide RET. Zero MTLR fallbacks and
+    /// zero wide-target fallbacks.
+    #[test]
+    fn test_v2_iss_s394_callee_save_idiom_wide_differential() {
+        use crate::simulation::Simulation;
+        use crate::tile_cpu::V2Builder;
+        use crate::tile_cpu::V2SynthConfig;
+        use crate::tile_cpu::v2_components::{
+            v2_addi, v2_callr, v2_halt, v2_inc, v2_ldi, v2_ldi_w, v2_mflr, v2_mtlr, v2_nop, v2_ret,
+            v2_with_reg_ext,
+        };
+
+        let mut prog = vec![v2_nop(); 420];
+        prog[0] = v2_ldi(0, 1); // R0 = 1
+        prog[1] = v2_ldi_w(3, 300);
+        prog[2] = v2_callr(3); // LR = 3; outer at 300
+        prog[3] = v2_halt();
+        // outer (300): save LR, call inner (wide), restore LR, RET.
+        prog[300] = v2_with_reg_ext(v2_mflr(0), true, false); // R8 = 3 (saved LR)
+        prog[301] = v2_ldi_w(4, 400);
+        prog[302] = v2_callr(4); // LR = 303 (clobbered); inner at 400
+        prog[303] = v2_addi(0, 2); // R0 += 2 (returned here via inner RET)
+        prog[304] = v2_with_reg_ext(v2_mtlr(0), false, true); // MTLR R8 — one cycle after 303 touches R0? staleness via R8 path below
+        prog[305] = v2_ret(); // PC = LR = 3 — physical wide RET through the restored LR
+        // inner (400): stale-write shape — rewrite R8 then MTLR it next cycle,
+        // then restore the true value before returning.
+        prog[400] = v2_inc(0); // R0 = 2
+        prog[401] = v2_ret(); // PC = LR = 303
+        prog[410] = v2_halt(); // (unused guard)
+
+        let mut sim = Simulation::with_size_layered(128, 640, 16);
+        let cpu = V2Builder::new()
+            .with_origin(0, 0)
+            .with_program(&prog)
+            .with_rom_size(128)
+            .with_ram_size(128)
+            .with_wide_pc()
+            .with_synth_blocks(V2SynthConfig::max_authority())
+            .build(&mut sim);
+
+        let mut iss = V2Iss::from_program(&prog);
+        iss.enable_wide_pc();
+        let res =
+            run_v2_differential_core(&mut iss, V2DiffConfig { max_ticks: 5_000 }, &cpu, &mut sim);
+        assert!(
+            res.is_ok(),
+            "S394 callee-save idiom mismatch: {:?}",
+            res.err()
+        );
+        assert_eq!(
+            cpu.read_reg(&sim, 0),
+            4,
+            "1 +2 (inner path) +1? see program"
+        ); // 1 -> inc 2 -> +2 = 4
+        assert!(cpu.is_halted(), "returned to main and halted");
+        assert_eq!(cpu.mtlr_assists(), 0, "MTLR restore captured physically");
+        assert_eq!(
+            cpu.wide_target_mismatches(),
+            0,
+            "CALLR/RET chain physically authoritative throughout"
+        );
+    }
+
+    /// Sprint 394: MTLR STALENESS — rs is rewritten and consumed by MTLR on the
+    /// very next cycle, twice with different values; the rail-muxed read port
+    /// must deliver the fresh value to the LR cascade each time.
+    #[test]
+    fn test_v2_iss_s394_mtlr_staleness_differential() {
+        use crate::simulation::Simulation;
+        use crate::tile_cpu::V2Builder;
+        use crate::tile_cpu::V2SynthConfig;
+        use crate::tile_cpu::v2_components::{v2_halt, v2_ldi, v2_mflr, v2_mtlr, v2_nop};
+
+        let mut prog = vec![v2_nop(); 32];
+        prog[0] = v2_ldi(2, 100);
+        prog[1] = v2_mtlr(2); // write R2 at 0, MTLR at 1
+        prog[2] = v2_mflr(3); // R3 = 100
+        prog[3] = v2_ldi(2, 200);
+        prog[4] = v2_mtlr(2); // rewrite + immediate reuse
+        prog[5] = v2_mflr(4); // R4 = 200
+        prog[6] = v2_halt();
+
+        let mut sim = Simulation::with_size_layered(128, 640, 16);
+        let cpu = V2Builder::new()
+            .with_origin(0, 0)
+            .with_program(&prog)
+            .with_rom_size(128)
+            .with_ram_size(128)
+            .with_wide_pc()
+            .with_synth_blocks(V2SynthConfig::max_authority())
+            .build(&mut sim);
+
+        let mut iss = V2Iss::from_program(&prog);
+        iss.enable_wide_pc();
+        let res =
+            run_v2_differential_core(&mut iss, V2DiffConfig { max_ticks: 5_000 }, &cpu, &mut sim);
+        assert!(res.is_ok(), "S394 MTLR staleness mismatch: {:?}", res.err());
+        assert_eq!(cpu.read_reg(&sim, 3), 100, "first fresh capture");
+        assert_eq!(cpu.read_reg(&sim, 4), 200, "second fresh capture");
+        assert_eq!(cpu.mtlr_assists(), 0, "fresh captures must be physical");
+    }
+
     /// Sprint 371 (Gate B.3.1): WIDE-IMMEDIATE CALL — `CALL.W 300` reaches a
     /// subroutine past the 256 line in a single instruction, with no register load
     /// (contrast the B.3 test, which needed three instructions to build the target
@@ -2572,13 +3502,80 @@ mod tests {
         assert!(cpu.is_halted(), "compiled-from-source program should halt");
     }
 
+    /// Sprint 393: THE MONEY TEST — compiled recursive `fact(5) = 120` on the
+    /// WIDE fabric with register-indirect return authority. The compiler lowers
+    /// returns to MFLR + JMPR (not RET), so every function return in this
+    /// recursion is a register-indirect control transfer: with the S393 read
+    /// port + executor flip they ride the physical Mux2 path. Asserts bit-exact
+    /// ISS↔physical execution AND `wide_target_mismatches == 0` with the
+    /// returns actually counted (`checks > 0`) — compiled recursion returns are
+    /// physically authoritative.
+    #[test]
+    fn test_v2_iss_s393_compiled_factorial_wide_return_authority() {
+        use crate::simulation::Simulation;
+        use crate::tile_cpu::V2Builder;
+        use crate::tile_cpu::V2SynthConfig;
+        use crate::tile_cpu::v2_components::v2_nop;
+        use crate::tile_cpu::v2_parser::compile_source;
+
+        let src = r#"
+            int fact(int n) {
+                if (n < 2) { return 1; }
+                return n * fact(n - 1);
+            }
+            int main() { return fact(5); }
+        "#;
+        let mut prog = compile_source(src).expect("compile_source failed");
+        prog.resize(prog.len().max(128), v2_nop());
+
+        let mut sim = Simulation::with_size_layered(128, 640, 16);
+        let cpu = V2Builder::new()
+            .with_origin(0, 0)
+            .with_program(&prog)
+            .with_rom_size(128)
+            .with_ram_size(128)
+            .with_wide_pc()
+            .with_synth_blocks(V2SynthConfig::max_authority())
+            .build(&mut sim);
+
+        let mut iss = V2Iss::from_program(&prog);
+        iss.enable_wide_pc();
+
+        let res = run_v2_differential_core(
+            &mut iss,
+            V2DiffConfig { max_ticks: 200_000 },
+            &cpu,
+            &mut sim,
+        );
+        assert!(
+            res.is_ok(),
+            "S393 compiled-factorial wide differential mismatch: {:?}",
+            res.err()
+        );
+        assert_eq!(
+            cpu.read_reg(&sim, 0),
+            120,
+            "compiled fact(5) = 120 in tiles"
+        );
+        assert!(cpu.is_halted(), "compiled program should halt");
+        assert!(
+            cpu.wide_target_checks() > 0,
+            "compiled returns (MFLR/JMPR) must ride the physical target path"
+        );
+        assert_eq!(
+            cpu.wide_target_mismatches(),
+            0,
+            "compiled recursion returns must be physically authoritative"
+        );
+    }
+
     /// Sprint 374 (Gate D.3): SCALE PAST 128 INSTRUCTIONS. A compiled program of
     /// > 128 instructions — three linear-recursion functions + `main` summing them —
-    /// runs **on the physical tile CPU** bit-exact with the ISS. The later functions
-    /// sit above address 127 (physically fetched via the B.2 extended path) and use
-    /// **wide calls + wide conditional branches** (`CALL.W`/`JZ.W`/`JMP.W`). Small
-    /// arguments keep the run fast; program *size*, not runtime, is what exceeds 128.
-    /// Result: `a(3) + b(3) + c(3) = 9`.
+    /// > runs **on the physical tile CPU** bit-exact with the ISS. The later functions
+    /// > sit above address 127 (physically fetched via the B.2 extended path) and use
+    /// > **wide calls + wide conditional branches** (`CALL.W`/`JZ.W`/`JMP.W`). Small
+    /// > arguments keep the run fast; program *size*, not runtime, is what exceeds 128.
+    /// > Result: `a(3) + b(3) + c(3) = 9`.
     #[test]
     fn test_v2_compiler_wide_program_physical_differential() {
         use crate::simulation::Simulation;

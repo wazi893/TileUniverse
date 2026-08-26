@@ -988,7 +988,7 @@ pub fn build_pixel_indices(full_order: &[usize], k: usize) -> Vec<usize> {
         indices.push(full_order[i]);
     }
     // Last k: most class-1-specific (bottom of sorted list)
-    let start = if n > k { n - k } else { 0 };
+    let start = n.saturating_sub(k);
     for i in start..n {
         if indices.len() >= 2 * k {
             break;

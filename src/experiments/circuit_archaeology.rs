@@ -142,7 +142,7 @@ pub fn detect_patterns(circuit: &[QGate], n_qubits: u8) -> PatternAnalysis {
         0.0
     };
     let randomness_score = if total > 0 {
-        gate_dist.get("H").unwrap_or(&0).clone() as f32 / total as f32
+        *gate_dist.get("H").unwrap_or(&0) as f32 / total as f32
     } else {
         0.0
     };
@@ -170,11 +170,11 @@ fn detect_bell_pairs(circuit: &[QGate]) -> usize {
         if let QGate::H(q) = circuit[i] {
             // Look for CNOT with this qubit as control
             for j in (i + 1)..circuit.len().min(i + 4) {
-                if let QGate::CNot(ctrl, _) = circuit[j] {
-                    if ctrl == q {
-                        count += 1;
-                        break;
-                    }
+                if let QGate::CNot(ctrl, _) = circuit[j]
+                    && ctrl == q
+                {
+                    count += 1;
+                    break;
                 }
             }
         }
@@ -200,7 +200,7 @@ fn detect_hadamard_sandwich(circuit: &[QGate]) -> usize {
         if positions.len() >= 2 {
             for i in 0..positions.len() - 1 {
                 let gap = positions[i + 1] - positions[i];
-                if gap >= 2 && gap <= 10 {
+                if (2..=10).contains(&gap) {
                     // Check if there are non-H gates between
                     let has_gates = (positions[i] + 1..positions[i + 1])
                         .any(|j| !matches!(circuit[j], QGate::H(_)));
@@ -221,10 +221,10 @@ fn detect_uniform_superposition(circuit: &[QGate], n_qubits: u8) -> usize {
 
     // Check first n_qubits gates
     for gate in circuit.iter().take(n_qubits as usize * 2) {
-        if let QGate::H(q) = gate {
-            if *q < n_qubits {
-                h_qubits.insert(*q);
-            }
+        if let QGate::H(q) = gate
+            && *q < n_qubits
+        {
+            h_qubits.insert(*q);
         }
     }
 
@@ -603,7 +603,7 @@ pub fn analyze_population_patterns(
 pub fn circuit_to_string(circuit: &[QGate]) -> String {
     circuit
         .iter()
-        .map(|g| gate_to_string(g))
+        .map(gate_to_string)
         .collect::<Vec<_>>()
         .join("-")
 }
@@ -664,8 +664,8 @@ pub fn circuit_diagram(circuit: &[QGate], n_qubits: u8) -> String {
             }
             QGate::CNot(c, t) => {
                 if (*c as usize) < lines.len() && (*t as usize) < lines.len() {
-                    lines[*c as usize].push_str("●");
-                    lines[*t as usize].push_str("⊕");
+                    lines[*c as usize].push('●');
+                    lines[*t as usize].push('⊕');
                     for i in 0..n_qubits {
                         if i != *c && i != *t {
                             if (i > *c && i < *t) || (i < *c && i > *t) {

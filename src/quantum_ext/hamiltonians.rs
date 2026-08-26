@@ -278,7 +278,7 @@ impl Hamiltonian {
                 vec![Pauli::I, Pauli::Z, Pauli::I, Pauli::Z],
             ),
             PauliTerm::new(
-                0.17432077259242010,
+                0.174_320_772_592_420_1,
                 vec![Pauli::I, Pauli::I, Pauli::Z, Pauli::Z],
             ),
             // Four-body exchange terms (crucial for electron correlation)
@@ -699,10 +699,10 @@ pub fn measure_pauli_expectation(
         let mut measurement_outcome = 0u64;
         for q in 0..pauli_term.n_qubits() {
             let result = apply_gate_scalar(&mut state, &QGate::Measure(q), &mut rng);
-            if let GateOutcome::Measured { bit, .. } = result {
-                if bit == 1 {
-                    measurement_outcome |= 1 << q;
-                }
+            if let GateOutcome::Measured { bit, .. } = result
+                && bit == 1
+            {
+                measurement_outcome |= 1 << q;
             }
         }
 

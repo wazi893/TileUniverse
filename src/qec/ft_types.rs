@@ -472,7 +472,7 @@ impl fmt::Display for UnknownReason {
 ///         error_rate: 1e-3,
 ///     });
 /// ```
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub enum SimulationFidelity {
     /// Abstract error model using analytical QEC formulas.
     ///
@@ -480,6 +480,7 @@ pub enum SimulationFidelity {
     /// `p_logical = 0.1 × (p_phys / p_threshold)^((d+1)/2)` per cycle
     ///
     /// Use for resource estimation of large circuits.
+    #[default]
     Abstract,
 
     /// Phenomenological noise model with decoder execution.
@@ -528,12 +529,6 @@ impl SimulationFidelity {
     /// Check if decoder simulation is enabled
     pub fn uses_decoder(&self) -> bool {
         matches!(self, Self::PhenomenologicalDecoder { .. })
-    }
-}
-
-impl Default for SimulationFidelity {
-    fn default() -> Self {
-        Self::Abstract
     }
 }
 

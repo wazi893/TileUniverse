@@ -85,10 +85,9 @@ pub fn load_run(dir: &Path) -> Result<GuiRunInfo, std::io::Error> {
 
 pub fn load_frame(dir: &Path, index: usize) -> Result<GuiFrame, std::io::Error> {
     let stream = open_recorded_frames(dir).map_err(|_| std::io::Error::other("open frames"))?;
-    let meta = stream
+    let meta = *stream
         .meta(index as u32)
-        .ok_or_else(|| std::io::Error::other("index"))?
-        .clone();
+        .ok_or_else(|| std::io::Error::other("index"))?;
     let bytes = stream
         .frame_bytes(index as u32)
         .ok_or_else(|| std::io::Error::other("bytes"))?

@@ -76,7 +76,7 @@ fn build_preset_seed(sim: &mut Simulation) -> Result<DemoPresetInfo, DemoError> 
     }
     // A single row with a spawner, vm slot, and status
     let row = y0 + 3;
-    sim.set_tile_type(x0 + 0, row, TileType::VmSpawner);
+    sim.set_tile_type(x0, row, TileType::VmSpawner);
     sim.set_tile_type(x0 + 1, row, TileType::Wire);
     sim.set_tile_type(x0 + 3, row, TileType::VmStatus);
     Ok(DemoPresetInfo {
@@ -94,7 +94,7 @@ fn build_preset_datacenter(sim: &mut Simulation) -> Result<DemoPresetInfo, DemoE
     let rows = 4usize;
     for r in 0..rows {
         let y = base_y + r;
-        sim.set_tile_type(base_x + 0, y, TileType::VmSpawner);
+        sim.set_tile_type(base_x, y, TileType::VmSpawner);
         sim.set_tile_type(base_x + 1, y, TileType::Wire);
         sim.set_tile_type(base_x + 3, y, TileType::VmStatus);
     }

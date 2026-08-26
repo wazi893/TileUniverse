@@ -858,7 +858,7 @@ impl SymbolicNumber {
                 format!("{}↑↑{}", base, height.to_notation())
             }
             Self::KnuthArrow { a, arrows, b } => {
-                let arrow_str: String = std::iter::repeat('↑').take(*arrows as usize).collect();
+                let arrow_str: String = std::iter::repeat_n('↑', *arrows as usize).collect();
                 format!("{}{}{}", a, arrow_str, b.to_notation())
             }
             Self::Graham => "G (Graham's number)".to_string(),
@@ -1972,10 +1972,10 @@ impl SymbolicBinomial {
         if let SymbolicNumber::Literal(0) = &self.k {
             return SimplifiedBinomial::One;
         }
-        if let SymbolicNumber::Big(k) = &self.k {
-            if k == &BigUint::from(0u32) {
-                return SimplifiedBinomial::One;
-            }
+        if let SymbolicNumber::Big(k) = &self.k
+            && k == &BigUint::from(0u32)
+        {
+            return SimplifiedBinomial::One;
         }
 
         // Check if k equals n (both same literal or structural equality)
@@ -1997,20 +1997,20 @@ impl SymbolicBinomial {
         if let SymbolicNumber::Literal(1) = &self.k {
             return SimplifiedBinomial::N(self.n.clone());
         }
-        if let SymbolicNumber::Big(k) = &self.k {
-            if k == &BigUint::from(1u32) {
-                return SimplifiedBinomial::N(self.n.clone());
-            }
+        if let SymbolicNumber::Big(k) = &self.k
+            && k == &BigUint::from(1u32)
+        {
+            return SimplifiedBinomial::N(self.n.clone());
         }
 
         // Check if k is 2
         if let SymbolicNumber::Literal(2) = &self.k {
             return SimplifiedBinomial::NChoose2(self.n.clone());
         }
-        if let SymbolicNumber::Big(k) = &self.k {
-            if k == &BigUint::from(2u32) {
-                return SimplifiedBinomial::NChoose2(self.n.clone());
-            }
+        if let SymbolicNumber::Big(k) = &self.k
+            && k == &BigUint::from(2u32)
+        {
+            return SimplifiedBinomial::NChoose2(self.n.clone());
         }
 
         // Check for invalid case: k > n (when both are concrete literals)
@@ -2300,10 +2300,10 @@ impl SymbolicDickeState {
         if matches!(&self.k_excitations, SymbolicNumber::Literal(0)) {
             return None;
         }
-        if let SymbolicNumber::Big(k) = &self.k_excitations {
-            if k == &BigUint::from(0u32) {
-                return None;
-            }
+        if let SymbolicNumber::Big(k) = &self.k_excitations
+            && k == &BigUint::from(0u32)
+        {
+            return None;
         }
 
         // New k = k - 1
@@ -2390,10 +2390,10 @@ impl SymbolicDickeState {
         if matches!(&self.k_excitations, SymbolicNumber::Literal(0)) {
             return true;
         }
-        if let SymbolicNumber::Big(k) = &self.k_excitations {
-            if k == &BigUint::from(0u32) {
-                return true;
-            }
+        if let SymbolicNumber::Big(k) = &self.k_excitations
+            && k == &BigUint::from(0u32)
+        {
+            return true;
         }
         // k=n
         self.n_qubits.structurally_equal(&self.k_excitations)

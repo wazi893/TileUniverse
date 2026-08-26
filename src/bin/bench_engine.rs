@@ -77,80 +77,76 @@ enum BenchMode {
 fn parse_mode(args: &[String]) -> BenchMode {
     let mut it = args.iter();
     while let Some(a) = it.next() {
-        if a == "--mode" {
-            if let Some(v) = it.next() {
-                let s = v.to_ascii_lowercase();
-                return match s.as_str() {
-                    "logicevalonly" | "logic-eval-only" | "eval" => BenchMode::LogicEvalOnly,
-                    "logicdirtyonly" | "logic-dirty-only" | "dirty" => BenchMode::LogicDirtyOnly,
-                    "fielddiffuseonly" | "diffuse" => BenchMode::FieldDiffuseOnly,
-                    "ecosystemonly" | "ecosystem" => BenchMode::EcosystemOnly,
-                    "fieldreactonly" | "react" => BenchMode::FieldReactOnly,
-                    "fieldinteractonly" | "interact" => BenchMode::FieldInteractOnly,
-                    "fieldsall" | "fields" => BenchMode::FieldsAll,
-                    "fielddecayonly" | "decay" => BenchMode::FieldDecayOnly,
-                    "fieldfeedbackonly" | "feedback" => BenchMode::FieldFeedbackOnly,
-                    "quantumscalaronly" | "quantum" | "qscalar" => BenchMode::QuantumScalarOnly,
-                    "quantumbackendonly" | "qbackend" => BenchMode::QuantumBackendOnly,
-                    "combinedlogicquantum" | "combined" | "lq" => BenchMode::CombinedLogicQuantum,
-                    "kernelfarmbench" | "farm" => BenchMode::KernelFarmBench,
-                    #[cfg(feature = "cuda")]
-                    "cudagpu" | "cuda" | "gpu" => BenchMode::CudaGpu,
-                    #[cfg(feature = "cuda")]
-                    "cudagpuresident" | "cuda-resident" | "gpu-resident" => {
-                        BenchMode::CudaGpuResident
-                    }
-                    #[cfg(feature = "cuda")]
-                    "cudatensor" | "cuda-tensor" | "tensor" => BenchMode::CudaTensor,
-                    #[cfg(feature = "cuda")]
-                    "cudabatched" | "cuda-batched" | "batched" => BenchMode::CudaBatched,
-                    #[cfg(feature = "cuda")]
-                    "cudawmma" | "cuda-wmma" | "wmma" => BenchMode::CudaWmma,
-                    #[cfg(feature = "cuda")]
-                    "cudafp32modern" | "cuda-fp32-modern" | "fp32-modern" | "fp32modern" => {
-                        BenchMode::CudaFp32Modern
-                    }
-                    #[cfg(feature = "cuda")]
-                    "cudawmmaaligned" | "cuda-wmma-aligned" | "wmma-aligned" | "wmmaaligned" => {
-                        BenchMode::CudaWmmaAligned
-                    }
-                    #[cfg(feature = "cuda")]
-                    "cudawmmapacked" | "cuda-wmma-packed" | "wmma-packed" | "wmmapacked" => {
-                        BenchMode::CudaWmmaPacked
-                    }
-                    #[cfg(feature = "cuda")]
-                    "cudaepicsummary" | "cuda-epic-summary" | "epic-summary" | "epicsummary"
-                    | "summary" => BenchMode::CudaEpicSummary,
-                    "parallellogic" | "parallel-logic" | "parallel" => BenchMode::ParallelLogic,
-                    #[cfg(feature = "cuda")]
-                    "gputileeval" | "gpu-tile-eval" | "gpu-tile" | "tile-gpu" => {
-                        BenchMode::GpuTileEval
-                    }
-                    #[cfg(feature = "cuda")]
-                    "gputilemulti" | "gpu-tile-multi" | "tile-multi" | "multi-world" => {
-                        BenchMode::GpuTileMulti
-                    }
-                    #[cfg(feature = "cuda")]
-                    "gputiledepth" | "gpu-tile-depth" | "tile-depth" | "depth-batch" => {
-                        BenchMode::GpuTileDepth
-                    }
-                    #[cfg(feature = "cuda")]
-                    "gputilestencil" | "gpu-tile-stencil" | "tile-stencil" | "stencil" => {
-                        BenchMode::GpuTileStencil
-                    }
-                    #[cfg(feature = "cuda")]
-                    "gpucorrectness" | "gpu-correctness" | "correctness" | "validate" => {
-                        BenchMode::GpuCorrectness
-                    }
-                    #[cfg(feature = "cuda")]
-                    "packedtiles" | "packed-tiles" | "packed-1bit" | "packed" | "1bit" => {
-                        BenchMode::PackedTiles
-                    }
-                    #[cfg(feature = "cuda")]
-                    "ising" | "tileanneal" | "anneal" | "spin" => BenchMode::Ising,
-                    _ => BenchMode::FullTick,
-                };
-            }
+        if a == "--mode"
+            && let Some(v) = it.next()
+        {
+            let s = v.to_ascii_lowercase();
+            return match s.as_str() {
+                "logicevalonly" | "logic-eval-only" | "eval" => BenchMode::LogicEvalOnly,
+                "logicdirtyonly" | "logic-dirty-only" | "dirty" => BenchMode::LogicDirtyOnly,
+                "fielddiffuseonly" | "diffuse" => BenchMode::FieldDiffuseOnly,
+                "ecosystemonly" | "ecosystem" => BenchMode::EcosystemOnly,
+                "fieldreactonly" | "react" => BenchMode::FieldReactOnly,
+                "fieldinteractonly" | "interact" => BenchMode::FieldInteractOnly,
+                "fieldsall" | "fields" => BenchMode::FieldsAll,
+                "fielddecayonly" | "decay" => BenchMode::FieldDecayOnly,
+                "fieldfeedbackonly" | "feedback" => BenchMode::FieldFeedbackOnly,
+                "quantumscalaronly" | "quantum" | "qscalar" => BenchMode::QuantumScalarOnly,
+                "quantumbackendonly" | "qbackend" => BenchMode::QuantumBackendOnly,
+                "combinedlogicquantum" | "combined" | "lq" => BenchMode::CombinedLogicQuantum,
+                "kernelfarmbench" | "farm" => BenchMode::KernelFarmBench,
+                #[cfg(feature = "cuda")]
+                "cudagpu" | "cuda" | "gpu" => BenchMode::CudaGpu,
+                #[cfg(feature = "cuda")]
+                "cudagpuresident" | "cuda-resident" | "gpu-resident" => BenchMode::CudaGpuResident,
+                #[cfg(feature = "cuda")]
+                "cudatensor" | "cuda-tensor" | "tensor" => BenchMode::CudaTensor,
+                #[cfg(feature = "cuda")]
+                "cudabatched" | "cuda-batched" | "batched" => BenchMode::CudaBatched,
+                #[cfg(feature = "cuda")]
+                "cudawmma" | "cuda-wmma" | "wmma" => BenchMode::CudaWmma,
+                #[cfg(feature = "cuda")]
+                "cudafp32modern" | "cuda-fp32-modern" | "fp32-modern" | "fp32modern" => {
+                    BenchMode::CudaFp32Modern
+                }
+                #[cfg(feature = "cuda")]
+                "cudawmmaaligned" | "cuda-wmma-aligned" | "wmma-aligned" | "wmmaaligned" => {
+                    BenchMode::CudaWmmaAligned
+                }
+                #[cfg(feature = "cuda")]
+                "cudawmmapacked" | "cuda-wmma-packed" | "wmma-packed" | "wmmapacked" => {
+                    BenchMode::CudaWmmaPacked
+                }
+                #[cfg(feature = "cuda")]
+                "cudaepicsummary" | "cuda-epic-summary" | "epic-summary" | "epicsummary"
+                | "summary" => BenchMode::CudaEpicSummary,
+                "parallellogic" | "parallel-logic" | "parallel" => BenchMode::ParallelLogic,
+                #[cfg(feature = "cuda")]
+                "gputileeval" | "gpu-tile-eval" | "gpu-tile" | "tile-gpu" => BenchMode::GpuTileEval,
+                #[cfg(feature = "cuda")]
+                "gputilemulti" | "gpu-tile-multi" | "tile-multi" | "multi-world" => {
+                    BenchMode::GpuTileMulti
+                }
+                #[cfg(feature = "cuda")]
+                "gputiledepth" | "gpu-tile-depth" | "tile-depth" | "depth-batch" => {
+                    BenchMode::GpuTileDepth
+                }
+                #[cfg(feature = "cuda")]
+                "gputilestencil" | "gpu-tile-stencil" | "tile-stencil" | "stencil" => {
+                    BenchMode::GpuTileStencil
+                }
+                #[cfg(feature = "cuda")]
+                "gpucorrectness" | "gpu-correctness" | "correctness" | "validate" => {
+                    BenchMode::GpuCorrectness
+                }
+                #[cfg(feature = "cuda")]
+                "packedtiles" | "packed-tiles" | "packed-1bit" | "packed" | "1bit" => {
+                    BenchMode::PackedTiles
+                }
+                #[cfg(feature = "cuda")]
+                "ising" | "tileanneal" | "anneal" | "spin" => BenchMode::Ising,
+                _ => BenchMode::FullTick,
+            };
         }
     }
     BenchMode::FullTick
@@ -159,12 +155,11 @@ fn parse_mode(args: &[String]) -> BenchMode {
 fn parse_arg_usize(args: &[String], name: &str, default: usize) -> usize {
     let mut it = args.iter();
     while let Some(a) = it.next() {
-        if a == name {
-            if let Some(v) = it.next() {
-                if let Ok(n) = v.parse::<usize>() {
-                    return n;
-                }
-            }
+        if a == name
+            && let Some(v) = it.next()
+            && let Ok(n) = v.parse::<usize>()
+        {
+            return n;
         }
     }
     default
@@ -173,12 +168,11 @@ fn parse_arg_usize(args: &[String], name: &str, default: usize) -> usize {
 fn parse_arg_u32(args: &[String], name: &str, default: u32) -> u32 {
     let mut it = args.iter();
     while let Some(a) = it.next() {
-        if a == name {
-            if let Some(v) = it.next() {
-                if let Ok(n) = v.parse::<u32>() {
-                    return n;
-                }
-            }
+        if a == name
+            && let Some(v) = it.next()
+            && let Ok(n) = v.parse::<u32>()
+        {
+            return n;
         }
     }
     default
@@ -187,12 +181,11 @@ fn parse_arg_u32(args: &[String], name: &str, default: u32) -> u32 {
 fn parse_arg_u8(args: &[String], name: &str, default: u8) -> u8 {
     let mut it = args.iter();
     while let Some(a) = it.next() {
-        if a == name {
-            if let Some(v) = it.next() {
-                if let Ok(n) = v.parse::<u8>() {
-                    return n;
-                }
-            }
+        if a == name
+            && let Some(v) = it.next()
+            && let Ok(n) = v.parse::<u8>()
+        {
+            return n;
         }
     }
     default
@@ -202,10 +195,10 @@ fn parse_arg_backend(args: &[String], name: &str, default: &str) -> String {
     let mut it = args.iter();
     let mut out = default.to_string();
     while let Some(a) = it.next() {
-        if a == name {
-            if let Some(v) = it.next() {
-                out = v.to_string();
-            }
+        if a == name
+            && let Some(v) = it.next()
+        {
+            out = v.to_string();
         }
     }
     out
@@ -214,10 +207,10 @@ fn parse_arg_backend(args: &[String], name: &str, default: &str) -> String {
 fn parse_arg_string(args: &[String], name: &str, default: &str) -> String {
     let mut it = args.iter();
     while let Some(a) = it.next() {
-        if a == name {
-            if let Some(v) = it.next() {
-                return v.to_string();
-            }
+        if a == name
+            && let Some(v) = it.next()
+        {
+            return v.to_string();
         }
     }
     default.to_string()
@@ -226,12 +219,11 @@ fn parse_arg_string(args: &[String], name: &str, default: &str) -> String {
 fn parse_arg_i32(args: &[String], name: &str, default: i32) -> i32 {
     let mut it = args.iter();
     while let Some(a) = it.next() {
-        if a == name {
-            if let Some(v) = it.next() {
-                if let Ok(n) = v.parse::<i32>() {
-                    return n;
-                }
-            }
+        if a == name
+            && let Some(v) = it.next()
+            && let Ok(n) = v.parse::<i32>()
+        {
+            return n;
         }
     }
     default
@@ -255,11 +247,11 @@ fn parse_arg_f32(args: &[String], name: &str, default: f32) -> f32 {
 fn parse_arg_bool(args: &[String], name: &str, default: bool) -> bool {
     let mut it = args.iter();
     while let Some(a) = it.next() {
-        if a == name {
-            if let Some(v) = it.next() {
-                let s = v.to_ascii_lowercase();
-                return s == "1" || s == "on" || s == "true" || s == "yes";
-            }
+        if a == name
+            && let Some(v) = it.next()
+        {
+            let s = v.to_ascii_lowercase();
+            return s == "1" || s == "on" || s == "true" || s == "yes";
         }
     }
     default
@@ -448,10 +440,10 @@ fn main() {
         let mut it = args.iter();
         let mut d = "branchless".to_string();
         while let Some(a) = it.next() {
-            if a == "--dispatch" {
-                if let Some(v) = it.next() {
-                    d = v.to_string();
-                }
+            if a == "--dispatch"
+                && let Some(v) = it.next()
+            {
+                d = v.to_string();
             }
         }
         d
@@ -460,22 +452,22 @@ fn main() {
         let mut it = args.iter();
         let mut u = "on".to_string();
         while let Some(a) = it.next() {
-            if a == "--unchecked" {
-                if let Some(v) = it.next() {
-                    u = v.to_string();
-                }
+            if a == "--unchecked"
+                && let Some(v) = it.next()
+            {
+                u = v.to_string();
             }
         }
-        u.to_ascii_lowercase() == "on"
+        u.eq_ignore_ascii_case("on")
     };
     let fields_dispatch = {
         let mut it = args.iter();
         let mut f = "interior".to_string();
         while let Some(a) = it.next() {
-            if a == "--fields-dispatch" {
-                if let Some(v) = it.next() {
-                    f = v.to_string();
-                }
+            if a == "--fields-dispatch"
+                && let Some(v) = it.next()
+            {
+                f = v.to_string();
             }
         }
         f

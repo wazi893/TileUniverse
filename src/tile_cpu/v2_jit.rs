@@ -148,6 +148,25 @@ fn hash_program(program: &[u32]) -> u64 {
 // MMIO detection
 // ---------------------------------------------------------------------------
 
+/// Sprint 390 (Phase D): check if a program uses MFLR/MTLR (opcode 0x02, sub_fn 5/6).
+/// This Cranelift JIT models a charter compute datapath and has NO LR-store codegen —
+/// the MOV catch-all in the 0x02 arm collapses sub_fn 5/6 into `MOV rd, rs`, which would
+/// silently corrupt (write rd, ignore LR). Rather than emit LR codegen into a JIT that
+/// does not model the LR register, decline such programs so they run on the authoritative
+/// ISS. No compute benchmark uses MFLR/MTLR (the compiler returns via JMPR), so this is
+/// inert for the perf corpus.
+pub fn program_uses_lr_ops(program: &[u32]) -> bool {
+    for &word in program {
+        let opcode = ((word >> 11) & 0x1F) as u8;
+        let imm8 = (word & 0xFF) as u8;
+        let sub_fn = imm8 & 0x1F;
+        if opcode == 0x02 && (sub_fn == 5 || sub_fn == 6) {
+            return true;
+        }
+    }
+    false
+}
+
 /// Check if a program uses MMIO addresses (>= 41).
 /// If so, JIT cannot handle it — fall back to ISS.
 pub fn program_uses_mmio(program: &[u32]) -> bool {
@@ -177,6 +196,11 @@ pub fn compile_v2_program(program: &[u32]) -> Result<Arc<V2JitProgram>, String> 
     // Sprint 189: JIT supports up to 128-word ROM.
     if program.len() > 128 {
         return Err("JIT does not support programs > 128 instructions".into());
+    }
+    // Sprint 390 (Phase D): the JIT has no LR-store codegen; decline MFLR/MTLR programs
+    // so they run on the authoritative ISS instead of the MOV-collapse fast path.
+    if program_uses_lr_ops(program) {
+        return Err("JIT does not model LR (MFLR/MTLR) — fall back to ISS".into());
     }
     let key = hash_program(program);
 
@@ -538,7 +562,10 @@ fn emit_instruction(
 
             match sub_fn {
                 0 | 5..=31 => {
-                    // Unconditional MOV
+                    // Unconditional MOV. Note: sub_fn 5 (MFLR) and 6 (MTLR) never reach
+                    // here — `compile_v2_program` declines LR-op programs to the ISS
+                    // (Sprint 390), since this JIT has no LR-register model. 7..=31 are
+                    // reserved MOV encodings.
                     store_reg(fb, rd, b);
                     advance(fb, next_pc);
                 }

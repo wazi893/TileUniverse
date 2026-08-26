@@ -79,7 +79,7 @@ fn main() {
 
     for run in 0..n_runs {
         let start = Instant::now();
-        let result = apply_zne_sequential(&cost_fn, &params, &base_noise, &config);
+        let result = apply_zne_sequential(cost_fn, &params, &base_noise, &config);
         let elapsed = start.elapsed();
         sequential_times.push(elapsed.as_secs_f64());
 
@@ -114,7 +114,7 @@ fn main() {
 
     for run in 0..n_runs {
         let start = Instant::now();
-        let result = apply_zne_parallel(&cost_fn, &params, &base_noise, &config);
+        let result = apply_zne_parallel(cost_fn, &params, &base_noise, &config);
         let elapsed = start.elapsed();
         parallel_times.push(elapsed.as_secs_f64());
 

@@ -45,7 +45,7 @@ const SHAPES: &[(&str, &str, &[u32])] = &[
     (
         "int mac(int a, int b, int c) { return a * b + c; }",
         "mac",
-        &[2, 3, 4],
+        &[2, 3, 4, 6, 8],
     ),
     (
         "int mix(int a, int b, int c) { int t = a ^ b; return (t & c) | (a & b); }",

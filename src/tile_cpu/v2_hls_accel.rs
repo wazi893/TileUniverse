@@ -33,19 +33,23 @@
 
 use std::cell::{Cell, RefCell};
 use std::fmt;
+use std::rc::Rc;
 
+use crate::simulation::Simulation;
 use crate::synth::aig::Aig;
+use crate::synth::alphafabric::{AnnealConfig, Circuit, sa_place_escalating};
 use crate::synth::bridge::{BridgeConfig, compile_aig_to_export};
 use crate::synth::cell_lib::CellLibrary;
 use crate::synth::export::{SynthExport, evaluate_exported};
 use crate::synth::hls::{HlsConfig, HlsError, synthesize_func};
 use crate::synth::hls_seq::{SeqDatapath, eval_func_ref as eval_seq_func_ref, synthesize_seq_func};
 use crate::tile_cpu::v2_compiler::{CompileError, Func, compile_to_words};
-use crate::tile_cpu::v2_mmio::V2MmioDevice;
+use crate::tile_cpu::v2_mmio::{V2MmioDevice, V2MmioHandle};
 use crate::tile_cpu::v2_mmio_devices::{
-    MMIO_ACCEL_ARG_DATA, MMIO_ACCEL_ARG_SELECT, MMIO_ACCEL_RESULT,
+    MMIO_ACCEL_ARG_DATA, MMIO_ACCEL_ARG_SELECT, MMIO_ACCEL_RESULT, V2MmioCombinedDevice,
 };
 use crate::tile_cpu::v2_parser::{inject_prelude, parse_program};
+use crate::tile_cpu::{TileCpuMetrics, V2Builder, V2SynthConfig};
 
 const DEFAULT_SEQ_MAX_CYCLES: u64 = 100_000;
 
@@ -90,6 +94,10 @@ pub struct V2MmioHlsAccelDevice {
     /// The placed + routed tile backend. `RefCell` because the MMIO trait reads
     /// with `&self` but evaluation drives the grid/FSM.
     backend: HlsAccelBackend,
+    /// Which placer produced the combinational export: `"row-major"` (bridge
+    /// ladder fast path) or `"sa-fallback(halo=N)"` (AlphaFabric SA placement,
+    /// taken only when row-major fails to route). `None` for sequential.
+    placement: Option<String>,
     /// Latched operand index (raw, as written to ARG_SELECT).
     select: Cell<u64>,
     /// Latched operand values, one per function parameter (full 64-bit latches;
@@ -113,10 +121,15 @@ impl V2MmioHlsAccelDevice {
     /// `report_aig` ladder).
     pub fn from_func(func: &Func, cfg: &HlsConfig) -> Result<Self, CompileError> {
         let num_args = func.params.len();
+        let mut placement = None;
         let backend = match synthesize_func(func, cfg) {
-            Ok(aig) => HlsAccelBackend::Combinational {
-                export: RefCell::new(Self::place_combinational_export(func, &aig)?),
-            },
+            Ok(aig) => {
+                let (export, how) = Self::place_combinational_export(func, aig)?;
+                placement = Some(how);
+                HlsAccelBackend::Combinational {
+                    export: RefCell::new(export),
+                }
+            }
             Err(comb_err) => match synthesize_seq_func(func, cfg) {
                 Ok(datapath) => HlsAccelBackend::Sequential {
                     datapath: RefCell::new(datapath),
@@ -136,6 +149,7 @@ impl V2MmioHlsAccelDevice {
             func: func.clone(),
             width: cfg.width,
             backend,
+            placement,
             select: Cell::new(0),
             operands: RefCell::new(vec![0u64; num_args]),
             evals: Cell::new(0),
@@ -144,7 +158,15 @@ impl V2MmioHlsAccelDevice {
         })
     }
 
-    fn place_combinational_export(func: &Func, aig: &Aig) -> Result<SynthExport, CompileError> {
+    fn place_combinational_export(
+        func: &Func,
+        aig: Aig,
+    ) -> Result<(SynthExport, String), CompileError> {
+        // Fast path first: the deterministic row-major bridge ladder. It is master's
+        // historical, trusted placer and routes small/most datapaths at ~0 extra cost,
+        // so the common case never pays the SA tax. Only if the ladder fails to route
+        // (measured: wide multiplier datapaths whose topological placement scatters
+        // connected gates) do we fall back to connectivity-aware SA placement below.
         let lib = CellLibrary::tile_native();
         // Escalating capacity ladder (the `report_aig` spirit) - but skip the default
         // config for large datapaths: measured on madd, `BridgeConfig::default()`
@@ -165,23 +187,37 @@ impl V2MmioHlsAccelDevice {
             max_z: 3,
             ..BridgeConfig::default()
         });
-        let mut export = None;
         let mut last_err = String::new();
         for bridge_cfg in &configs {
-            match compile_aig_to_export(aig, &lib, bridge_cfg) {
-                Ok(e) => {
-                    export = Some(e);
-                    break;
-                }
+            match compile_aig_to_export(&aig, &lib, bridge_cfg) {
+                Ok(e) => return Ok((e, "row-major".to_string())),
                 Err(e) => last_err = format!("{e:?}"),
             }
         }
-        export.ok_or_else(|| {
-            CompileError(format!(
-                "accel function '{}': place & route failed at every capacity config: {last_err}",
-                func.name
-            ))
-        })
+
+        // Row-major fallback exhausted. Try connectivity-aware SA placement, which
+        // minimizes HPWL (co-locates connected gates) and so routes datapaths the
+        // row-major ladder cannot — extending the routable width frontier. Each halo
+        // is gated on a physical truth-table check (`verify_physical` inside
+        // `sa_place_escalating`), so the router's non-monotonic routability across
+        // halo can never yield a wrong circuit: a layout that routes but miscomputes
+        // is rejected, not shipped. Mapping (`Circuit::from_aig`) is done lazily here
+        // so the common row-major path above never pays for it.
+        let circuit = Circuit::from_aig("accel_datapath", aig);
+        let anneal_cfg = AnnealConfig {
+            iterations: 30_000,
+            ..AnnealConfig::default()
+        };
+        if let Some(sa) = sa_place_escalating(&circuit, &[3, 4, 5, 6, 8], &anneal_cfg) {
+            let how = format!("sa-fallback(halo={})", sa.halo);
+            return Ok((sa.export, how));
+        }
+
+        Err(CompileError(format!(
+            "accel function '{}': place & route failed — row-major ladder: {last_err}; \
+             SA escalation also failed to route+verify",
+            func.name
+        )))
     }
 
     /// The source-level function this device implements.
@@ -198,6 +234,35 @@ impl V2MmioHlsAccelDevice {
     /// the answers were computed in tiles, not software.
     pub fn evals(&self) -> u64 {
         self.evals.get()
+    }
+
+    /// Which HLS backend implements this accelerator: `"combinational"` (straight-line
+    /// datapath, one answer per critical path) or `"sequential"` (FSM datapath, control
+    /// flow run to completion on each `RESULT` read).
+    pub fn backend_kind(&self) -> &'static str {
+        self.backend.kind()
+    }
+
+    /// Which placer produced this device's combinational export: `"row-major"`
+    /// (bridge ladder fast path) or `"sa-fallback(halo=N)"` (AlphaFabric SA
+    /// placement, taken only when row-major fails to route). `None` for the
+    /// sequential backend.
+    pub fn placement_kind(&self) -> Option<&str> {
+        self.placement.as_deref()
+    }
+
+    /// Placed footprint `(width, height, layers)` of the combinational datapath grid —
+    /// the real tile area this accelerator occupies after placement & routing, reported
+    /// straight from the device's actual export (row-major *or* SA-placed, whichever
+    /// routed). `None` for the sequential backend (a `SeqDatapath`, not a flat grid).
+    pub fn footprint(&self) -> Option<(usize, usize, usize)> {
+        match &self.backend {
+            HlsAccelBackend::Combinational { export } => {
+                let e = export.borrow();
+                Some((e.sim.width(), e.sim.height(), e.sim.num_layers()))
+            }
+            HlsAccelBackend::Sequential { .. } => None,
+        }
     }
 
     /// Last sequential-FSM run length, when this device uses the sequential HLS
@@ -344,6 +409,117 @@ pub fn compile_source_with_accel(src: &str, cfg: &HlsConfig) -> Result<V2SocProg
     };
     let words = compile_to_words(&program)?;
     Ok(V2SocProgram { words, accel })
+}
+
+// ===========================================================================
+// Phase 4: whole-program SoC benchmark (one source, measured as a running SoC)
+// ===========================================================================
+
+/// The measured outcome of running a co-design SoC program on the physical tile CPU.
+///
+/// The sibling of [`V2CompiledBenchOutcome`](crate::tile_cpu::v2_compiler_bench::V2CompiledBenchOutcome)
+/// for the *accelerated* build: same CPU-side metrics, plus the accelerator's eval
+/// count and backend kind. Run two builds of one source — with and without the `accel`
+/// marker — and the deltas are the HW/SW co-design trade-off inside a running SoC.
+#[derive(Debug, Clone)]
+pub struct V2SocBenchOutcome {
+    /// CPU program size in machine words.
+    pub program_words: usize,
+    /// CPU-side metrics (instructions retired, ticks, tiles evaluated, ...).
+    pub metrics: TileCpuMetrics,
+    /// Console output (empty if the program printed nothing).
+    pub console: String,
+    /// Value left in R0 at halt.
+    pub r0: u64,
+    /// Number of accelerator evaluations (tile-datapath `RESULT` reads). `0` when the
+    /// source had no `accel` function — proof of how many calls the tiles computed.
+    pub accel_evals: u64,
+    /// Accelerator backend kind (`"combinational"` / `"sequential"`), or `None` for a
+    /// pure-CPU build.
+    pub accel_kind: Option<&'static str>,
+    /// Placed footprint `(width, height, layers)` of the combinational accelerator
+    /// datapath — the *actual* tile grid the device runs (row-major or SA-placed,
+    /// whichever routed). `None` for a pure-CPU or sequential build.
+    pub accel_footprint: Option<(usize, usize, usize)>,
+    /// Which placer produced the accelerator's layout: `"row-major"` or
+    /// `"sa-fallback(halo=N)"`. `None` for a pure-CPU or sequential build.
+    pub accel_placement: Option<String>,
+}
+
+/// Compile a (possibly `accel`-marked) C-like source and run the resulting SoC on the
+/// physical tile CPU, collecting CPU + accelerator metrics.
+///
+/// Mirrors [`run_v2_compiled_benchmark`](crate::tile_cpu::v2_compiler_bench::run_v2_compiled_benchmark)
+/// (same builder configuration: `extended_pc` + `max_authority` + combined MMIO) but
+/// wires the synthesized accelerator in via [`V2MmioCombinedDevice::with_accel`] so call
+/// sites that lower to the MMIO protocol are computed by real tiles. Accel-free source
+/// runs exactly like the plain harness (no device registered).
+pub fn run_v2_soc_benchmark(
+    src: &str,
+    cfg: &HlsConfig,
+    max_cycles: u64,
+) -> Result<V2SocBenchOutcome, CompileError> {
+    let soc = compile_source_with_accel(src, cfg)?;
+    let accel_kind = soc.accel.as_ref().map(|a| a.backend_kind());
+
+    let combined = match soc.accel {
+        Some(accel) => Rc::new(V2MmioCombinedDevice::with_accel(0x000B_E5C0, accel)),
+        None => Rc::new(V2MmioCombinedDevice::new(0x000B_E5C0)),
+    };
+    let mut sim = Simulation::with_size_layered(128, 640, 16);
+    let cpu = V2Builder::new()
+        .with_origin(0, 0)
+        .with_program(&soc.words)
+        .with_rom_size(128)
+        .with_ram_size(128)
+        .with_extended_pc()
+        .with_mmio(V2MmioHandle::from_rc(combined.clone()))
+        .with_synth_blocks(V2SynthConfig::max_authority())
+        .build(&mut sim);
+
+    let mut metrics = TileCpuMetrics::default();
+    let mut total_critical = 0u64;
+    for _ in 0..max_cycles {
+        if cpu.is_halted() {
+            break;
+        }
+        let stats = cpu.step(&mut sim);
+        metrics.cycles += 1;
+        if cpu.last_stage_x_valid() {
+            metrics.instructions_executed += 1;
+        }
+        metrics.total_deltas += stats.total_deltas as u64;
+        metrics.total_tiles_evaluated += stats.tiles_evaluated as u64;
+        metrics.total_tiles_switched += stats.tiles_switched as u64;
+        metrics.max_critical_path = metrics.max_critical_path.max(stats.critical_path_deltas);
+        total_critical += stats.critical_path_deltas as u64;
+    }
+    if !cpu.is_halted() {
+        return Err(CompileError(format!(
+            "SoC program did not halt within {max_cycles} cycles"
+        )));
+    }
+    if metrics.cycles > 0 {
+        metrics.avg_critical_path = total_critical as f64 / metrics.cycles as f64;
+        metrics.ipc = metrics.instructions_executed as f64 / metrics.cycles as f64;
+    }
+
+    let accel_evals = combined.accel.as_ref().map(|a| a.evals()).unwrap_or(0);
+    let accel_footprint = combined.accel.as_ref().and_then(|a| a.footprint());
+    let accel_placement = combined
+        .accel
+        .as_ref()
+        .and_then(|a| a.placement_kind().map(str::to_string));
+    Ok(V2SocBenchOutcome {
+        program_words: soc.words.len(),
+        metrics,
+        console: combined.ref_pack.console_string(),
+        r0: cpu.read_reg(&sim, 0),
+        accel_evals,
+        accel_kind,
+        accel_footprint,
+        accel_placement,
+    })
 }
 
 // ===========================================================================

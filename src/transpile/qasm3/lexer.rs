@@ -171,46 +171,45 @@ impl<'a> Lexer<'a> {
         }
 
         // Decimal part
-        if self.peek() == Some('.') {
-            if let Some(next) = self.peek_next() {
-                if next.is_ascii_digit() {
-                    is_float = true;
-                    result.push('.');
-                    self.advance();
+        if self.peek() == Some('.')
+            && let Some(next) = self.peek_next()
+            && next.is_ascii_digit()
+        {
+            is_float = true;
+            result.push('.');
+            self.advance();
 
-                    while let Some(c) = self.peek() {
-                        if c.is_ascii_digit() {
-                            result.push(c);
-                            self.advance();
-                        } else {
-                            break;
-                        }
-                    }
+            while let Some(c) = self.peek() {
+                if c.is_ascii_digit() {
+                    result.push(c);
+                    self.advance();
+                } else {
+                    break;
                 }
             }
         }
 
         // Exponent part
-        if let Some(c) = self.peek() {
-            if c == 'e' || c == 'E' {
-                is_float = true;
-                result.push(c);
+        if let Some(c) = self.peek()
+            && (c == 'e' || c == 'E')
+        {
+            is_float = true;
+            result.push(c);
+            self.advance();
+
+            if let Some(sign) = self.peek()
+                && (sign == '+' || sign == '-')
+            {
+                result.push(sign);
                 self.advance();
+            }
 
-                if let Some(sign) = self.peek() {
-                    if sign == '+' || sign == '-' {
-                        result.push(sign);
-                        self.advance();
-                    }
-                }
-
-                while let Some(c) = self.peek() {
-                    if c.is_ascii_digit() {
-                        result.push(c);
-                        self.advance();
-                    } else {
-                        break;
-                    }
+            while let Some(c) = self.peek() {
+                if c.is_ascii_digit() {
+                    result.push(c);
+                    self.advance();
+                } else {
+                    break;
                 }
             }
         }

@@ -499,12 +499,12 @@ impl IBMTranspiler {
                     let mut removed = 0;
                     let mut k = i + 1;
                     while k < circuit.gates.len() && removed < merge_count {
-                        if let IBMGate::Rz(q, _) = &circuit.gates[k] {
-                            if *q == q1 {
-                                circuit.gates.remove(k);
-                                removed += 1;
-                                continue;
-                            }
+                        if let IBMGate::Rz(q, _) = &circuit.gates[k]
+                            && *q == q1
+                        {
+                            circuit.gates.remove(k);
+                            removed += 1;
+                            continue;
                         }
                         k += 1;
                     }

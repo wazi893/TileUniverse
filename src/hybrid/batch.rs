@@ -248,9 +248,7 @@ pub fn execute_batch<S: Substrate>(
     batch: &CircuitBatch,
 ) -> Result<BatchResult, SubstrateError> {
     // Validate batch
-    batch
-        .validate()
-        .map_err(|e| SubstrateError::InvalidSpec(e))?;
+    batch.validate().map_err(SubstrateError::InvalidSpec)?;
 
     if batch.is_empty() {
         return Ok(BatchResult::new(Vec::new(), Duration::ZERO));

@@ -206,7 +206,7 @@ fn main() {
 
     // Calculate memory estimate for largest size
     let max_n = *qubit_counts.last().unwrap();
-    let max_blocks = (max_n + 127) / 128;
+    let max_blocks = max_n.div_ceil(128);
     let max_memory_bytes = max_blocks * 2048; // 128 * 8 * 2 bytes per block
     let max_memory_gb = max_memory_bytes as f64 / (1024.0 * 1024.0 * 1024.0);
 

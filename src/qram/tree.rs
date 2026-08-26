@@ -481,7 +481,7 @@ mod tests {
 
         // Depth 1: 1 address + 1 bus + 2*1 router paths = 4
         let tree = QRAMTree::new(1);
-        assert_eq!(tree.total_qubits(), 1 + 1 + 2 * 1);
+        assert_eq!(tree.total_qubits(), 1 + 1 + 2);
         assert_eq!(tree.total_qubits(), 4);
     }
 

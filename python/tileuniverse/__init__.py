@@ -72,6 +72,7 @@ from tileuniverse._core import (
     # Sprint 212: V2 Tile CPU
     V2Cpu,
     V2Trace,
+    v2_ground_truth_jsonl,
     # Sprint 212: Synth entry point
     SynthResult,
     synthesize,
@@ -336,6 +337,7 @@ __all__ = [
     # Sprint 212: V2 Tile CPU
     "V2Cpu",
     "V2Trace",
+    "v2_ground_truth_jsonl",
     # Sprint 212: Synth
     "SynthResult",
     "synthesize",

@@ -285,9 +285,10 @@ impl PredictionErrorCuriosity {
 }
 
 /// Combined curiosity module that can use multiple strategies.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub enum CuriosityModule {
     /// No curiosity (disabled)
+    #[default]
     None,
     /// Novelty-based only
     Novelty(StateVisitationTracker),
@@ -300,12 +301,6 @@ pub enum CuriosityModule {
         novelty_weight: f32,
         prediction_weight: f32,
     },
-}
-
-impl Default for CuriosityModule {
-    fn default() -> Self {
-        CuriosityModule::None
-    }
 }
 
 impl CuriosityModule {

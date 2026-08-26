@@ -891,15 +891,15 @@ mod tests {
         let mut seen_canonicals = std::collections::HashSet::new();
         for tt in 0..=0xFFFFu16 {
             let npn = npn4_classify(tt);
-            if seen_canonicals.insert(npn.canonical_tt) {
-                if let Some(recipe) = get_optimal_recipe(npn.canonical_tt) {
-                    assert!(
-                        verify_recipe(&recipe, npn.canonical_tt),
-                        "Recipe for canonical 0x{:04X} does not produce correct truth table",
-                        npn.canonical_tt,
-                    );
-                    tested += 1;
-                }
+            if seen_canonicals.insert(npn.canonical_tt)
+                && let Some(recipe) = get_optimal_recipe(npn.canonical_tt)
+            {
+                assert!(
+                    verify_recipe(&recipe, npn.canonical_tt),
+                    "Recipe for canonical 0x{:04X} does not produce correct truth table",
+                    npn.canonical_tt,
+                );
+                tested += 1;
             }
         }
         assert!(tested > 0, "Should have verified at least one recipe");

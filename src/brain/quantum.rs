@@ -182,10 +182,10 @@ pub fn run_circuit(genome: &[QGate], sensor_gates: &[QGate], n_qubits: u8, seed:
     let mut result: u64 = 0;
     for q in 0..n_qubits {
         let outcome = apply_gate_scalar(&mut state, &QGate::Measure(q), &mut rng);
-        if let GateOutcome::Measured { qubit, bit } = outcome {
-            if bit != 0 {
-                result |= 1u64 << qubit;
-            }
+        if let GateOutcome::Measured { qubit, bit } = outcome
+            && bit != 0
+        {
+            result |= 1u64 << qubit;
         }
     }
 
@@ -289,10 +289,10 @@ pub fn run_circuit_fused(
     let mut result: u64 = 0;
     for q in 0..n_qubits {
         let outcome = apply_gate_scalar(&mut state, &QGate::Measure(q), &mut rng);
-        if let GateOutcome::Measured { qubit, bit } = outcome {
-            if bit != 0 {
-                result |= 1u64 << qubit;
-            }
+        if let GateOutcome::Measured { qubit, bit } = outcome
+            && bit != 0
+        {
+            result |= 1u64 << qubit;
         }
     }
 

@@ -281,7 +281,7 @@ impl IsingGrid {
             } else {
                 -1.0
             };
-            field += self.couplings[idx * 4 + 0] * s_j;
+            field += self.couplings[idx * 4] * s_j;
         }
 
         // Right neighbor

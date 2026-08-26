@@ -114,10 +114,8 @@ pub fn compute_peak_memory(network: &TensorNetwork, path: &ContractionPath) -> u
 
         // Add indices from B that aren't contracted and aren't already in result
         for idx in indices_b {
-            if !contracted_ids.contains(&idx.id) {
-                if !result_indices.iter().any(|i| i.id == idx.id) {
-                    result_indices.push(*idx);
-                }
+            if !contracted_ids.contains(&idx.id) && !result_indices.iter().any(|i| i.id == idx.id) {
+                result_indices.push(*idx);
             }
         }
 
@@ -200,10 +198,8 @@ pub fn compute_peak_memory_profile(
             .collect();
 
         for idx in indices_b {
-            if !contracted_ids.contains(&idx.id) {
-                if !result_indices.iter().any(|i| i.id == idx.id) {
-                    result_indices.push(*idx);
-                }
+            if !contracted_ids.contains(&idx.id) && !result_indices.iter().any(|i| i.id == idx.id) {
+                result_indices.push(*idx);
             }
         }
 

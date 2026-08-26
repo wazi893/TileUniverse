@@ -317,11 +317,11 @@ impl QRAMQuery {
         let mut measured_address = 0usize;
         for q in 0..depth {
             let outcome = apply_gate_scalar(&mut state, &QGate::Measure(q as u8), &mut rng);
-            if let GateOutcome::Measured { qubit: _, bit } = outcome {
-                if bit != 0 {
-                    // Address is stored MSB first in our convention
-                    measured_address |= 1 << (depth - 1 - q);
-                }
+            if let GateOutcome::Measured { qubit: _, bit } = outcome
+                && bit != 0
+            {
+                // Address is stored MSB first in our convention
+                measured_address |= 1 << (depth - 1 - q);
             }
         }
 

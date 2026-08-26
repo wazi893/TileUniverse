@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SchedEval · Throughput↔Safety Frontier</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  :root{
+    --bg:#070810; --panel:#0e1018; --line:#222637; --txt:#c6cad8; --dim:#646a82;
+    --accent:#8a8aff; --accent2:#aab0ff;
+    --trusted:#3fd0a0; --victim:#5a8fff; --adv:#e0973a; --leak:#ff4d5e; --safe:#46d08a;
+  }
+  html,body{ height:100%; }
+  body{ background:var(--bg); color:var(--txt); height:100vh; overflow:hidden; display:flex; flex-direction:column;
+    font-family:'Consolas','SF Mono','Fira Code',ui-monospace,monospace; -webkit-font-smoothing:antialiased; }
+  header{ display:flex; align-items:center; gap:14px; padding:9px 16px; flex-shrink:0; z-index:5;
+    background:linear-gradient(180deg,#0d1018,#090b12); border-bottom:1px solid var(--line); }
+  .brand{ display:flex; align-items:baseline; gap:9px; margin-right:4px; }
+  .brand .logo{ font-size:15px; font-weight:700; letter-spacing:.4px; color:#eef3ff; }
+  .brand .logo b{ color:var(--accent2); }
+  .brand .sub{ font-size:10px; color:var(--dim); letter-spacing:1.2px; text-transform:uppercase; }
+  .sep{ width:1px; height:26px; background:var(--line); }
+  select{ background:#141722; color:var(--accent2); border:1px solid #2c3146; border-radius:6px; padding:5px 9px; font:inherit; font-size:12px; cursor:pointer; outline:none; }
+  select:hover{ border-color:#3e4566; }
+  .tabs{ display:flex; gap:6px; }
+  .tab{ padding:6px 11px; background:#141722; border:1px solid #2c3146; border-radius:6px; color:var(--accent2); font-size:11.5px; cursor:pointer; transition:all .12s; user-select:none; white-space:nowrap; }
+  .tab:hover{ border-color:#5a5a82; background:#1a1a2c; color:#fff; }
+  .tab.on{ background:#23234a; border-color:#5a5a8a; color:#fff; }
+  .tab .dot{ display:inline-block; width:7px; height:7px; border-radius:50%; margin-left:6px; vertical-align:middle; }
+  .grow{ flex:1; }
+
+  #stage{ flex:1; display:flex; overflow:hidden; position:relative; }
+  #canvas-wrap{ flex:1; position:relative; overflow:hidden; background:radial-gradient(ellipse at center,#0a0c16,#070810); }
+  canvas#gantt{ display:block; }
+  .overlay{ position:absolute; pointer-events:none; }
+  #title{ left:18px; top:14px; font-size:11px; line-height:1.7; }
+  #title .l1{ color:#fff; font-weight:600; font-size:13px; } #title .l1 small{ color:var(--dim); font-weight:400; }
+  #title .l2{ color:var(--dim); }
+  #legend{ left:18px; bottom:14px; display:flex; gap:14px; font-size:10.5px; flex-wrap:wrap; }
+  #legend .li{ display:flex; align-items:center; gap:6px; color:var(--dim); }
+  #legend .sw{ width:12px; height:12px; border-radius:3px; }
+  #tip{ position:absolute; pointer-events:none; background:#0c0e18; border:1px solid #2c3146; border-radius:6px; padding:7px 9px; font-size:11px; color:#dfe3f0; line-height:1.6; display:none; z-index:9; box-shadow:0 6px 20px #000a; white-space:nowrap; }
+  #tip b{ color:#fff; }
+
+  #panel{ width:330px; flex-shrink:0; background:var(--panel); border-left:1px solid var(--line); display:flex; flex-direction:column; overflow-y:auto; }
+  .sec{ padding:13px 16px; border-bottom:1px solid #181a26; }
+  .sec h2{ font-size:10px; color:var(--dim); text-transform:uppercase; letter-spacing:1.4px; margin-bottom:9px; font-weight:600; }
+  .hero{ border-radius:9px; padding:14px; transition:all .2s; }
+  .hero.leaky{ background:linear-gradient(150deg,#240d12,#1a0d16); border:1px solid #5a1e28; }
+  .hero.clean{ background:linear-gradient(150deg,#0c1f1b,#0d1320); border:1px solid #1e4a40; }
+  .hero .num{ font-size:34px; font-weight:800; letter-spacing:-1px; color:#fff; line-height:1; }
+  .hero .num small{ font-size:14px; font-weight:700; }
+  .hero.leaky .num small{ color:var(--leak); } .hero.clean .num small{ color:var(--safe); }
+  .hero .label{ font-size:11px; margin-top:4px; }
+  .hero.leaky .label{ color:var(--leak); } .hero.clean .label{ color:var(--safe); }
+  .hero .meta{ margin-top:9px; font-size:10.5px; color:var(--dim); line-height:1.6; } .hero .meta b{ color:#b9c0d4; }
+  #frontier{ width:100%; height:150px; display:block; background:#080a12; border:1px solid #1a1d2a; border-radius:6px; }
+  .fr-cap{ display:flex; justify-content:space-between; font-size:10px; color:var(--dim); margin-top:5px; }
+  .stat-row{ display:flex; justify-content:space-between; font-size:12px; padding:3px 0; }
+  .stat-row .k{ color:var(--dim); } .stat-row .v{ color:#cfd4e4; } .stat-row .v b{ color:#fff; }
+  .jobs{ font-size:11px; }
+  .jrow{ display:flex; align-items:center; gap:7px; padding:2px 0; color:#9aa1ba; }
+  .jrow .jsw{ width:9px; height:9px; border-radius:2px; flex-shrink:0; }
+  .jrow .jn{ flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .jrow .jc{ color:var(--dim); }
+  .blurb{ font-size:11px; color:#8088a0; line-height:1.7; } .blurb b{ color:var(--accent2); } .blurb .r{ color:var(--leak); } .blurb .g{ color:var(--safe); }
+  ::-webkit-scrollbar{ width:8px; } ::-webkit-scrollbar-thumb{ background:#222637; border-radius:4px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand"><span class="logo">Sched<b>Eval</b></span><span class="sub">throughput ↔ safety</span></div>
+  <div class="sep"></div>
+  <select id="scn-select" title="Scenario"></select>
+  <div class="sep"></div>
+  <div class="tabs" id="policy-tabs"></div>
+  <div class="grow"></div>
+  <div style="font-size:10px;color:var(--dim);text-align:right;line-height:1.5">deterministic control eval<br>real tile-CPU program costs</div>
+</header>
+
+<div id="stage">
+  <div id="canvas-wrap">
+    <canvas id="gantt"></canvas>
+    <div class="overlay" id="title">
+      <div class="l1" id="t-pol">—</div>
+      <div class="l2" id="t-scn">—</div>
+    </div>
+    <div class="overlay" id="legend">
+      <div class="li"><span class="sw" style="background:var(--trusted)"></span>trusted compute</div>
+      <div class="li"><span class="sw" style="background:var(--victim)"></span>victim (secret data)</div>
+      <div class="li"><span class="sw" style="background:var(--adv)"></span>adversary (untrusted)</div>
+      <div class="li"><span class="sw" style="background:var(--leak)"></span>covert channel open</div>
+    </div>
+    <div id="tip"></div>
+  </div>
+
+  <aside id="panel">
+    <div class="sec">
+      <h2>Secret bits leaked</h2>
+      <div class="hero" id="hero">
+        <div class="num"><span id="h-bits">0</span> <small id="h-unit">bits</small></div>
+        <div class="label" id="h-label">—</div>
+        <div class="meta" id="h-meta"></div>
+      </div>
+    </div>
+    <div class="sec">
+      <h2>Throughput ↔ safety frontier</h2>
+      <canvas id="frontier"></canvas>
+      <div class="fr-cap"><span>← faster (makespan)</span><span>more leak ↑</span></div>
+    </div>
+    <div class="sec">
+      <h2>This schedule</h2>
+      <div class="stat-row"><span class="k">policy</span><span class="v"><b id="s-pol">—</b></span></div>
+      <div class="stat-row"><span class="k">makespan</span><span class="v"><b id="s-mk">—</b> cyc</span></div>
+      <div class="stat-row"><span class="k">utilization</span><span class="v" id="s-util">—</span></div>
+      <div class="stat-row"><span class="k">exploitable windows</span><span class="v" id="s-win">—</span></div>
+      <div class="stat-row"><span class="k">caught by monitor</span><span class="v" id="s-det">—</span></div>
+    </div>
+    <div class="sec">
+      <h2>Workload</h2>
+      <div class="jobs" id="joblist"></div>
+    </div>
+    <div class="sec">
+      <div class="blurb" id="blurb"></div>
+    </div>
+  </aside>
+</div>
+
+<script>
+const BUNDLE = /*__SCHED_BUNDLE__*/null;
+
+const TEN = { trusted:'--trusted', victim:'--victim', adversary:'--adv' };
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const POL_LABEL = {
+  greedy:'Throughput-greedy', isolation_aware:'Naive isolation',
+  secure_packing:'Secure packing', optimized:'Search-optimized'
+};
+
+let S = 0;   // scenario index
+let P = 0;   // policy index
+
+const gantt = document.getElementById('gantt');
+const gx = gantt.getContext('2d');
+const fr = document.getElementById('frontier');
+const fctx = fr.getContext('2d');
+const tip = document.getElementById('tip');
+let bars = []; // hit-test rects in CSS px
+
+function scn(){ return BUNDLE.scenarios[S]; }
+function pol(){ return scn().policies[P]; }
+function jobOf(i){ return scn().jobs[i]; }
+function tenColor(t){ return css(TEN[t] || '--dim'); }
+
+// ---- scenario / policy chrome --------------------------------------------------------------
+function buildChrome(){
+  const ss = document.getElementById('scn-select');
+  ss.innerHTML = BUNDLE.scenarios.map((s,i)=>`<option value="${i}">${s.name}</option>`).join('');
+  ss.onchange = e => { S = +e.target.value; P = 0; buildPolicyTabs(); render(); };
+  buildPolicyTabs();
+}
+function buildPolicyTabs(){
+  const wrap = document.getElementById('policy-tabs');
+  wrap.innerHTML = scn().policies.map((p,i)=>{
+    const c = p.bits>0 ? css('--leak') : css('--safe');
+    return `<div class="tab${i===P?' on':''}" data-i="${i}">${POL_LABEL[p.name]||p.name}<span class="dot" style="background:${c}"></span></div>`;
+  }).join('');
+  [...wrap.children].forEach(el=> el.onclick = ()=>{ P = +el.dataset.i; buildPolicyTabs(); render(); });
+}
+
+// ---- canvas sizing -------------------------------------------------------------------------
+function fit(c){
+  const r = c.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  c.width = Math.max(1, Math.round(r.width*dpr));
+  c.height = Math.max(1, Math.round(r.height*dpr));
+  return { w:r.width, h:r.height, dpr };
+}
+
+// ---- Gantt ---------------------------------------------------------------------------------
+function drawGantt(){
+  const dim = fit(gantt); const {w,h,dpr} = dim;
+  gx.setTransform(dpr,0,0,dpr,0,0);
+  gx.clearRect(0,0,w,h);
+  bars = [];
+
+  const sc = scn(), p = pol();
+  const cores = sc.cluster.cores, cpr = sc.cluster.coresPerRack;
+  // Stable x-scale across policies in this scenario.
+  const maxMk = Math.max(1, ...sc.policies.map(q=>q.makespan));
+
+  const padL = 92, padR = 34, padT = 84, padB = 40;
+  const plotW = Math.max(10, w - padL - padR);
+  const plotH = Math.max(10, h - padT - padB);
+  const rowH = plotH / cores;
+  const barH = Math.min(rowH*0.62, 46);
+  const x = t => padL + (t/maxMk)*plotW;
+  const yCore = c => padT + c*rowH + rowH/2;
+
+  // Rack backgrounds + core labels.
+  for(let c=0;c<cores;c++){
+    const rack = Math.floor(c/cpr);
+    gx.fillStyle = rack%2===0 ? 'rgba(90,143,255,0.030)' : 'rgba(224,151,58,0.028)';
+    gx.fillRect(padL, padT + c*rowH, plotW, rowH);
+    gx.fillStyle = css('--dim'); gx.font = '11px Consolas, monospace';
+    gx.textAlign = 'right'; gx.textBaseline = 'middle';
+    gx.fillText(`core ${c}`, padL-12, yCore(c));
+    gx.textAlign='left';
+    gx.fillStyle = 'rgba(120,128,160,0.55)';
+    gx.font='9px Consolas, monospace';
+    gx.fillText(`rack ${rack}`, padL+5, padT + c*rowH + 11);
+  }
+  // Rack separators.
+  gx.strokeStyle = css('--line'); gx.lineWidth=1;
+  for(let c=cpr;c<cores;c+=cpr){
+    const yy = padT + c*rowH;
+    gx.beginPath(); gx.moveTo(padL,yy); gx.lineTo(padL+plotW,yy); gx.stroke();
+  }
+
+  // Time axis ticks.
+  gx.fillStyle = css('--dim'); gx.font='9px Consolas, monospace'; gx.textAlign='center';
+  const ticks=5;
+  for(let i=0;i<=ticks;i++){
+    const t = Math.round(maxMk*i/ticks);
+    const xx = x(t);
+    gx.strokeStyle='rgba(255,255,255,0.04)';
+    gx.beginPath(); gx.moveTo(xx,padT); gx.lineTo(xx,padT+plotH); gx.stroke();
+    gx.fillText(t.toLocaleString(), xx, padT+plotH+16);
+  }
+  gx.textAlign='left';
+  gx.fillText('cycles →', padL, padT+plotH+30);
+
+  // Makespan marker for this policy.
+  const mkX = x(p.makespan);
+  gx.strokeStyle='rgba(170,176,255,0.5)'; gx.setLineDash([4,4]);
+  gx.beginPath(); gx.moveTo(mkX,padT-6); gx.lineTo(mkX,padT+plotH); gx.stroke(); gx.setLineDash([]);
+  gx.fillStyle=css('--accent2'); gx.textAlign='center'; gx.font='10px Consolas, monospace';
+  gx.fillText('makespan '+p.makespan.toLocaleString(), mkX, padT-12);
+  gx.textAlign='left';
+
+  // Job bars.
+  for(const pl of p.placements){
+    const j = jobOf(pl.j);
+    const bx = x(pl.start), bw = Math.max(2, x(pl.end)-x(pl.start));
+    const by = yCore(pl.core) - barH/2;
+    const col = tenColor(j.tenant);
+    const g = gx.createLinearGradient(0,by,0,by+barH);
+    g.addColorStop(0, col); g.addColorStop(1, shade(col,-22));
+    gx.fillStyle=g;
+    roundRect(gx,bx,by,bw,barH,4); gx.fill();
+    gx.strokeStyle='rgba(0,0,0,0.35)'; gx.lineWidth=1; roundRect(gx,bx,by,bw,barH,4); gx.stroke();
+    if(bw>42){
+      gx.fillStyle='rgba(8,10,18,0.92)'; gx.font='10px Consolas, monospace';
+      gx.textAlign='left'; gx.textBaseline='middle';
+      const lbl = j.name.length*6+8 < bw ? j.name : j.name.slice(0, Math.max(2,(bw/6|0)-1));
+      gx.fillText(lbl, bx+6, by+barH/2);
+    }
+    bars.push({x:bx,y:by,w:bw,h:barH, job:j, pl});
+  }
+
+  // Exploit bands: red overlap between adversary & victim on the same rack.
+  for(const e of p.exploits){
+    const pa = p.placements.find(q=>q.j===e.adv), pv = p.placements.find(q=>q.j===e.vic);
+    if(!pa||!pv) continue;
+    const ov0 = Math.max(pa.start, pv.start), ov1 = Math.min(pa.end, pv.end);
+    if(ov1<=ov0) continue;
+    const x0=x(ov0), x1=x(ov1);
+    const yTop = Math.min(yCore(pa.core),yCore(pv.core)) - barH/2 - 4;
+    const yBot = Math.max(yCore(pa.core),yCore(pv.core)) + barH/2 + 4;
+    gx.fillStyle='rgba(255,77,94,0.14)';
+    gx.fillRect(x0,yTop,x1-x0,yBot-yTop);
+    gx.strokeStyle=css('--leak'); gx.lineWidth=1.4; gx.setLineDash([5,3]);
+    gx.strokeRect(x0,yTop,x1-x0,yBot-yTop); gx.setLineDash([]);
+    // hatch
+    gx.strokeStyle='rgba(255,77,94,0.20)'; gx.lineWidth=1;
+    for(let xx=x0-(yBot-yTop); xx<x1; xx+=8){
+      gx.beginPath(); gx.moveTo(Math.max(x0,xx),yTop+Math.max(0,x0-xx));
+      gx.lineTo(Math.min(x1,xx+(yBot-yTop)), yTop+Math.min(yBot-yTop, x1-xx)); gx.stroke();
+    }
+    const cx=(x0+x1)/2, cy=yTop-4;
+    gx.fillStyle=css('--leak'); gx.font='bold 10px Consolas, monospace'; gx.textAlign='center';
+    gx.fillText(`${e.detected?'⚠ caught · ':''}🔓 ${e.bits} bits`, cx, cy);
+    gx.textAlign='left';
+  }
+
+  // Empty-state note.
+  if(p.exploits.length===0){
+    gx.fillStyle='rgba(70,208,138,0.85)'; gx.font='11px Consolas, monospace'; gx.textAlign='right';
+    gx.fillText('✓ no adversary∩victim co-location — channel closed', w-padR, padT-12);
+    gx.textAlign='left';
+  }
+}
+
+// ---- frontier plot -------------------------------------------------------------------------
+function drawFrontier(){
+  const dim = fit(fr); const {w,h,dpr}=dim;
+  fctx.setTransform(dpr,0,0,dpr,0,0);
+  fctx.clearRect(0,0,w,h);
+  const sc = scn(), pts = sc.frontier;
+  const padL=34,padR=12,padT=12,padB=22;
+  const pw=w-padL-padR, ph=h-padT-padB;
+  const mks=pts.map(p=>p.makespan), bits=pts.map(p=>p.bits);
+  const mkMin=Math.min(...mks), mkMax=Math.max(...mks,mkMin+1);
+  const bMax=Math.max(...bits,1);
+  const X=m=>padL+((m-mkMin)/(mkMax-mkMin||1))*pw;
+  const Y=b=>padT+ph-(b/bMax)*ph;
+
+  // axes
+  fctx.strokeStyle=css('--line'); fctx.lineWidth=1;
+  fctx.beginPath(); fctx.moveTo(padL,padT); fctx.lineTo(padL,padT+ph); fctx.lineTo(padL+pw,padT+ph); fctx.stroke();
+  fctx.fillStyle=css('--dim'); fctx.font='8px Consolas, monospace';
+  fctx.textAlign='right'; fctx.fillText(bMax, padL-4, padT+6); fctx.fillText('0', padL-4, padT+ph);
+  fctx.textAlign='left';
+
+  // connecting line (sorted by makespan)
+  const order=[...pts].sort((a,b)=>a.makespan-b.makespan);
+  fctx.strokeStyle='rgba(138,138,255,0.5)'; fctx.lineWidth=1.4;
+  fctx.beginPath(); order.forEach((p,i)=>{ const xx=X(p.makespan),yy=Y(p.bits); i?fctx.lineTo(xx,yy):fctx.moveTo(xx,yy); }); fctx.stroke();
+
+  // points
+  for(const p of pts){
+    const xx=X(p.makespan), yy=Y(p.bits);
+    fctx.fillStyle = p.bits>0 ? css('--leak') : css('--safe');
+    fctx.beginPath(); fctx.arc(xx,yy,3,0,7); fctx.fill();
+  }
+  // knee
+  if(sc.knee){
+    const xx=X(sc.knee.makespan), yy=Y(sc.knee.bits);
+    fctx.strokeStyle=css('--safe'); fctx.lineWidth=1.5;
+    fctx.beginPath(); fctx.arc(xx,yy,6,0,7); fctx.stroke();
+    fctx.fillStyle=css('--safe'); fctx.font='8px Consolas, monospace'; fctx.textAlign='center';
+    fctx.fillText('safe knee', xx, yy-9); fctx.textAlign='left';
+  }
+  // current policy marker
+  const p=pol();
+  const cx=X(p.makespan), cy=Y(p.bits);
+  fctx.strokeStyle='#fff'; fctx.lineWidth=1.5;
+  fctx.beginPath(); fctx.moveTo(cx-5,cy); fctx.lineTo(cx+5,cy); fctx.moveTo(cx,cy-5); fctx.lineTo(cx,cy+5); fctx.stroke();
+}
+
+// ---- side panel ----------------------------------------------------------------------------
+function drawPanel(){
+  const sc=scn(), p=pol();
+  document.getElementById('t-pol').innerHTML = (POL_LABEL[p.name]||p.name) + `  <small>· ${sc.name}</small>`;
+  document.getElementById('t-scn').textContent = `${sc.cluster.cores} cores · ${sc.cluster.cores/sc.cluster.coresPerRack} racks · ${sc.jobs.length} jobs`;
+
+  const leaky = p.bits>0;
+  const hero=document.getElementById('hero');
+  hero.className='hero '+(leaky?'leaky':'clean');
+  document.getElementById('h-bits').textContent = p.bits;
+  document.getElementById('h-unit').textContent = leaky?'bits leaked':'bits — sealed';
+  document.getElementById('h-label').textContent = leaky
+    ? `covert channel open across ${p.windows} window${p.windows!==1?'s':''}`
+    : 'no adversary∩victim co-location';
+  document.getElementById('h-meta').innerHTML = leaky
+    ? `monitor caught <b>${p.detected}/${p.windows}</b> · the rest are silent exfiltration`
+    : `makespan <b>${p.makespan.toLocaleString()}</b> cyc · safety bought at this throughput`;
+
+  document.getElementById('s-pol').textContent = POL_LABEL[p.name]||p.name;
+  document.getElementById('s-mk').textContent = p.makespan.toLocaleString();
+  document.getElementById('s-util').textContent = p.util+'%';
+  document.getElementById('s-win').textContent = p.windows;
+  document.getElementById('s-det').textContent = p.windows? `${p.detected}/${p.windows}` : '—';
+
+  document.getElementById('joblist').innerHTML = sc.jobs.map(j=>
+    `<div class="jrow"><span class="jsw" style="background:${tenColor(j.tenant)}"></span>`+
+    `<span class="jn">${j.name}</span><span class="jc">${j.cost.toLocaleString()} cyc</span></div>`).join('');
+
+  const g = sc.policies.find(q=>q.name==='greedy');
+  const kneeTxt = sc.knee ? `at λ=${sc.knee.lambda}, makespan ${sc.knee.makespan.toLocaleString()}` : 'not reachable';
+  document.getElementById('blurb').innerHTML =
+    `${sc.blurb}<br><br>`+
+    `<b>Throughput-greedy</b> ignores trust and <span class="r">leaks ${g.bits} bits</span>; `+
+    `the <span class="g">search optimizer</span> finds a zero-leak schedule ${kneeTxt}. `+
+    `Costs are golden-measured cycle counts of real compiled tile-CPU programs; the leak verdict is the control-eval thermal oracle.`;
+}
+
+function render(){ drawGantt(); drawFrontier(); drawPanel(); }
+
+// ---- helpers -------------------------------------------------------------------------------
+function roundRect(c,x,y,w,h,r){ r=Math.min(r,h/2,w/2); c.beginPath();
+  c.moveTo(x+r,y); c.arcTo(x+w,y,x+w,y+h,r); c.arcTo(x+w,y+h,x,y+h,r);
+  c.arcTo(x,y+h,x,y,r); c.arcTo(x,y,x+w,y,r); c.closePath(); }
+function shade(hex,amt){ const c=hex.replace('#',''); const n=parseInt(c.length===3?c.split('').map(x=>x+x).join(''):c,16);
+  let r=(n>>16)+amt,g=((n>>8)&255)+amt,b=(n&255)+amt;
+  r=Math.max(0,Math.min(255,r)); g=Math.max(0,Math.min(255,g)); b=Math.max(0,Math.min(255,b));
+  return `rgb(${r},${g},${b})`; }
+
+// ---- tooltip -------------------------------------------------------------------------------
+gantt.addEventListener('mousemove', ev=>{
+  const r=gantt.getBoundingClientRect(); const mx=ev.clientX-r.left, my=ev.clientY-r.top;
+  const hit = bars.find(b=> mx>=b.x&&mx<=b.x+b.w&&my>=b.y&&my<=b.y+b.h);
+  if(hit){
+    tip.style.display='block';
+    tip.style.left=Math.min(mx+14, r.width-180)+'px'; tip.style.top=(my+14)+'px';
+    tip.innerHTML=`<b>${hit.job.name}</b> · ${hit.job.tenant}<br>core ${hit.pl.core} · [${hit.pl.start.toLocaleString()}, ${hit.pl.end.toLocaleString()})<br>${hit.job.cost.toLocaleString()} cycles`;
+  } else tip.style.display='none';
+});
+gantt.addEventListener('mouseleave', ()=> tip.style.display='none');
+
+window.addEventListener('resize', render);
+buildChrome();
+document.getElementById('scn-select').value = BUNDLE.default||0;
+S = BUNDLE.default||0;
+render();
+</script>
+</body>
+</html>

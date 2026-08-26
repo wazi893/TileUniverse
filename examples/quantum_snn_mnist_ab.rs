@@ -232,7 +232,7 @@ fn main() {
     let mut best: Option<(&str, f32)> = None;
     for (name, accs) in results.iter().skip(1) {
         let m: f32 = accs.iter().sum::<f32>() / accs.len() as f32;
-        if best.map_or(true, |(_, bm)| m > bm) {
+        if best.is_none_or(|(_, bm)| m > bm) {
             best = Some((name, m));
         }
     }

@@ -1382,6 +1382,12 @@ pub struct SynthOutputs {
     len: u8,
 }
 
+impl Default for SynthOutputs {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SynthOutputs {
     pub fn new() -> Self {
         Self {
@@ -1780,7 +1786,7 @@ pub fn drive_injected_block_masked(
     let layer_size = width * sim.tilemap.height;
     for &idx in &block.input_indices {
         let local = idx % layer_size;
-        if local % width > 0 {
+        if !local.is_multiple_of(width) {
             sim.dirty.mark_dirty(idx - 1);
         }
         if local % width + 1 < width {
@@ -2497,7 +2503,7 @@ mod tests {
 
                 // Encode as synth inputs: ctrl_b[0], ctrl_b[1], ctrl_b[2], flag_z, flag_c.
                 let inputs = vec![
-                    (ctrl_b_val >> 0) & 1 != 0,
+                    ctrl_b_val & 1 != 0,
                     (ctrl_b_val >> 1) & 1 != 0,
                     (ctrl_b_val >> 2) & 1 != 0,
                     flag_z,
@@ -5669,8 +5675,8 @@ mod tests {
         };
         let aigs_and_routes: Vec<(crate::synth::aig::Aig, RouteConfig, &str)> = vec![
             (build_branch_taken_aig(), RouteConfig::default(), "branch"),
-            (build_decoder3to8_aig(), decode_route.clone(), "rd_decode"),
-            (build_decoder3to8_aig(), decode_route.clone(), "ram_decode"),
+            (build_decoder3to8_aig(), decode_route, "rd_decode"),
+            (build_decoder3to8_aig(), decode_route, "ram_decode"),
             (build_ctrl_b_aig(), decode_route, "ctrl_b"),
         ];
 

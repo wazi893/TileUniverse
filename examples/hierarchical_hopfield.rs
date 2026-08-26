@@ -824,7 +824,7 @@ fn generate_rich_templates(block_size: usize) -> Vec<Vec<i8>> {
         // 6: 2x2 checkerboard within block
         (0..n)
             .map(|i| {
-                if ((i % bs) / 2 + (i / bs) / 2) % 2 == 0 {
+                if ((i % bs) / 2 + (i / bs) / 2).is_multiple_of(2) {
                     1
                 } else {
                     -1
@@ -1060,15 +1060,17 @@ fn count_surviving_boundary_weights(
     let mut count = 0;
     for y in 0..height {
         for x in 0..width {
-            if x % block_size == block_size - 1 && x + 1 < width {
-                if (bh[y * width + x] / p).abs() > noise_floor {
-                    count += 1;
-                }
+            if x % block_size == block_size - 1
+                && x + 1 < width
+                && (bh[y * width + x] / p).abs() > noise_floor
+            {
+                count += 1;
             }
-            if y % block_size == block_size - 1 && y + 1 < height {
-                if (bv[y * width + x] / p).abs() > noise_floor {
-                    count += 1;
-                }
+            if y % block_size == block_size - 1
+                && y + 1 < height
+                && (bv[y * width + x] / p).abs() > noise_floor
+            {
+                count += 1;
             }
         }
     }

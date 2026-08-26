@@ -299,7 +299,7 @@ impl Aig {
     /// `num_inputs` must be 1..=6 (truth table up to 64 bits).
     /// Produces a single-output AIG named "f".
     pub fn from_truth_table(tt: u64, num_inputs: u32) -> Aig {
-        assert!(num_inputs >= 1 && num_inputs <= 6);
+        assert!((1..=6).contains(&num_inputs));
         let mut aig = Aig::new();
         let inputs: Vec<AigLit> = (0..num_inputs)
             .map(|i| aig.add_input(&format!("x{}", i)))
@@ -316,7 +316,7 @@ impl Aig {
     pub fn from_truth_tables(truth_tables: &[(u64, u32)]) -> Aig {
         assert!(!truth_tables.is_empty());
         let num_inputs = truth_tables[0].1;
-        assert!(num_inputs >= 1 && num_inputs <= 6);
+        assert!((1..=6).contains(&num_inputs));
         for &(_, n) in truth_tables {
             assert_eq!(n, num_inputs, "all truth tables must have same num_inputs");
         }

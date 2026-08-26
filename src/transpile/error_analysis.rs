@@ -209,7 +209,7 @@ impl ErrorAnalyzer {
     fn count_qubits(circuit: &[QGate]) -> usize {
         circuit
             .iter()
-            .filter_map(|gate| Self::gate_max_qubit(gate))
+            .filter_map(Self::gate_max_qubit)
             .max()
             .map(|q| q + 1)
             .unwrap_or(0)

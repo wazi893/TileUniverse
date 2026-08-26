@@ -251,6 +251,112 @@ fn directional_mask_for_tile(tt: TileType) -> u8 {
     }
 }
 
+/// Sprint 398: conservative over-approximation of the directions a tile READS
+/// from (same bit encoding as `directional_mask_for_tile`).
+///
+/// Used to hard-block route cells that existing machinery would read: if this
+/// returns a bit for a direction the tile does not actually read, the only
+/// cost is a blocked routing cell; if it missed a direction the tile does
+/// read, a routed signal could be silently injected into that tile. Unknown
+/// tile types therefore default to all four in-plane directions.
+pub(crate) fn conservative_reader_mask(tt: TileType) -> u8 {
+    match tt {
+        // True sources: read nothing.
+        TileType::Const => 0,
+        // Directional wires: exactly one input side.
+        TileType::WireRight => DIR_FROM_LEFT,
+        TileType::WireLeft => DIR_FROM_RIGHT,
+        TileType::WireDown => DIR_FROM_UP,
+        TileType::WireUp => DIR_FROM_DOWN,
+        TileType::WireH => DIR_FROM_LEFT | DIR_FROM_RIGHT,
+        TileType::WireV => DIR_FROM_UP | DIR_FROM_DOWN,
+        // Plain/weighted vias: cross-layer source only, no in-plane reads.
+        TileType::ViaUp | TileType::WeightedViaUp => DIR_LAYER_UP,
+        TileType::ViaDown | TileType::WeightedViaDown => DIR_LAYER_DOWN,
+        // Threshold vias gate on the popcount of all 4 in-plane neighbors.
+        TileType::ThresholdViaUp => {
+            DIR_LAYER_UP | DIR_FROM_LEFT | DIR_FROM_RIGHT | DIR_FROM_UP | DIR_FROM_DOWN
+        }
+        TileType::ThresholdViaDown => {
+            DIR_LAYER_DOWN | DIR_FROM_LEFT | DIR_FROM_RIGHT | DIR_FROM_UP | DIR_FROM_DOWN
+        }
+        // Everything else (gates, muxes, registers, RAM, unknown): assume it
+        // reads all four in-plane neighbors.
+        _ => DIR_FROM_LEFT | DIR_FROM_RIGHT | DIR_FROM_UP | DIR_FROM_DOWN,
+    }
+}
+
+/// Sprint 398: under-approximation of the directions a tile is KNOWN to read
+/// from (same bit encoding as `directional_mask_for_tile`).
+///
+/// Used for goal-ingress checks when a route terminates on an existing tile:
+/// the delivery only physically connects if the goal tile actually reads from
+/// the entry direction. Returning a bit the tile does not read would produce a
+/// silent no-connect, so unknown tile types default to 0 (reject as ingress).
+/// Read sets match the compact-op input table in `simulation.rs`.
+pub(crate) fn known_reader_mask(tt: TileType) -> u8 {
+    const ALL4: u8 = DIR_FROM_LEFT | DIR_FROM_RIGHT | DIR_FROM_UP | DIR_FROM_DOWN;
+    match tt {
+        TileType::Wire | TileType::Cross => ALL4,
+        TileType::WireRight => DIR_FROM_LEFT,
+        TileType::WireLeft => DIR_FROM_RIGHT,
+        TileType::WireDown => DIR_FROM_UP,
+        TileType::WireUp => DIR_FROM_DOWN,
+        TileType::WireH => DIR_FROM_LEFT | DIR_FROM_RIGHT,
+        TileType::WireV => DIR_FROM_UP | DIR_FROM_DOWN,
+        // Two-input left/right tiles.
+        TileType::And
+        | TileType::Or
+        | TileType::Xor
+        | TileType::Add
+        | TileType::Sub
+        | TileType::Mul
+        | TileType::Div
+        | TileType::Mod
+        | TileType::Shl
+        | TileType::Shr
+        | TileType::Lt
+        | TileType::Gt
+        | TileType::Eq
+        | TileType::Neq
+        | TileType::Lte
+        | TileType::Gte
+        | TileType::AddCarry
+        | TileType::SubBorrow
+        | TileType::CarryDetect
+        | TileType::BitSelect
+        | TileType::Mux8to1
+        | TileType::ProgramCounter => DIR_FROM_LEFT | DIR_FROM_RIGHT,
+        // Single-input left tiles (registers capture LEFT on clock edge).
+        TileType::Not
+        | TileType::Neg
+        | TileType::Abs
+        | TileType::Zero
+        | TileType::Decoder3to8
+        | TileType::Decoder6to64
+        | TileType::Latch
+        | TileType::Register8
+        | TileType::Register64
+        | TileType::Synchronizer => DIR_FROM_LEFT,
+        TileType::Mux | TileType::Mux16to1 | TileType::RegEnable => {
+            DIR_FROM_LEFT | DIR_FROM_RIGHT | DIR_FROM_UP
+        }
+        TileType::Mux4to1 => DIR_FROM_UP | DIR_FROM_DOWN,
+        TileType::Demux1to8 => DIR_FROM_LEFT | DIR_FROM_UP,
+        TileType::Ram => DIR_FROM_LEFT | DIR_FROM_UP,
+        TileType::Counter => DIR_FROM_UP,
+        TileType::MemoryPort => DIR_FROM_LEFT | DIR_FROM_RIGHT | DIR_FROM_UP,
+        TileType::WireCross => DIR_FROM_LEFT | DIR_FROM_UP,
+        TileType::WireCrossVert => DIR_FROM_RIGHT | DIR_FROM_UP,
+        TileType::ViaUp | TileType::WeightedViaUp => DIR_LAYER_UP,
+        TileType::ViaDown | TileType::WeightedViaDown => DIR_LAYER_DOWN,
+        TileType::ThresholdViaUp => DIR_LAYER_UP | ALL4,
+        TileType::ThresholdViaDown => DIR_LAYER_DOWN | ALL4,
+        // Const, demo tiles, anything else: not a known ingress.
+        _ => 0,
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct V2RoutingDb {
     width: usize,
@@ -306,6 +412,93 @@ impl V2RoutingDb {
                     let idx = db.coord_to_idx(coord);
                     db.cells[idx].directional_mask = directional_mask_for_tile(tt);
                 }
+            }
+        }
+        db
+    }
+
+    /// Sprint 398: interference-hardened variant of
+    /// [`Self::from_simulation_const_blocked`].
+    ///
+    /// In this fabric adjacency IS connectivity: any tile that reads a
+    /// neighboring cell picks up whatever value sits there, so a route through
+    /// a cell that existing machinery reads silently injects its signal into
+    /// that machinery even though no cell collision occurs ("routable does not
+    /// imply correct" — the failure class fixed in b21eaa6 for the synth
+    /// router). This constructor additionally hard-blocks:
+    ///
+    /// - every free cell that a non-Const tile reads, in-plane (via
+    ///   `conservative_reader_mask`) or cross-layer (via tiles on z±1), and
+    /// - every coord in `protected` (software injection-port Consts, guard
+    ///   rows — cells that are Const but not actually free).
+    ///
+    /// Route endpoints are exempt from hard blocks inside `route_multinet`
+    /// (terminals skip legality), so deliberate taps/ingress points on blocked
+    /// cells still work.
+    pub fn from_simulation_interference_checked(
+        sim: &Simulation,
+        bounds: V2RouteBounds,
+        protected: &[V2RouteCoord],
+    ) -> Self {
+        let mut db = Self::from_simulation_const_blocked(sim, bounds);
+        let width = sim.width();
+        let height = sim.height();
+        let layers = sim.num_layers();
+        let is_down_reading_via = |tt: TileType| {
+            matches!(
+                tt,
+                TileType::ViaDown | TileType::WeightedViaDown | TileType::ThresholdViaDown
+            )
+        };
+        let is_up_reading_via = |tt: TileType| {
+            matches!(
+                tt,
+                TileType::ViaUp | TileType::WeightedViaUp | TileType::ThresholdViaUp
+            )
+        };
+        for z in bounds.min_layer..=bounds.max_layer_inclusive {
+            for y in bounds.min_y..bounds.max_y_exclusive {
+                for x in bounds.min_x..bounds.max_x_exclusive {
+                    let coord = V2RouteCoord::new(x, y, z);
+                    let idx = db.coord_to_idx(coord);
+                    if db.cells[idx].hard_block {
+                        continue;
+                    }
+                    // Neighbors are checked against the full sim grid, not the
+                    // routing bounds: readers just outside the bounds are
+                    // still corrupted by a signal placed inside them.
+                    let mut read_by_foreign = false;
+                    if x + 1 < width {
+                        let tt = sim.tile_type_3d(x + 1, y, z);
+                        read_by_foreign |= conservative_reader_mask(tt) & DIR_FROM_LEFT != 0;
+                    }
+                    if x >= 1 {
+                        let tt = sim.tile_type_3d(x - 1, y, z);
+                        read_by_foreign |= conservative_reader_mask(tt) & DIR_FROM_RIGHT != 0;
+                    }
+                    if y + 1 < height {
+                        let tt = sim.tile_type_3d(x, y + 1, z);
+                        read_by_foreign |= conservative_reader_mask(tt) & DIR_FROM_UP != 0;
+                    }
+                    if y >= 1 {
+                        let tt = sim.tile_type_3d(x, y - 1, z);
+                        read_by_foreign |= conservative_reader_mask(tt) & DIR_FROM_DOWN != 0;
+                    }
+                    if z + 1 < layers {
+                        read_by_foreign |= is_down_reading_via(sim.tile_type_3d(x, y, z + 1));
+                    }
+                    if z >= 1 {
+                        read_by_foreign |= is_up_reading_via(sim.tile_type_3d(x, y, z - 1));
+                    }
+                    if read_by_foreign {
+                        db.cells[idx].hard_block = true;
+                    }
+                }
+            }
+        }
+        for p in protected {
+            if db.in_bounds(*p) {
+                db.set_hard_block(*p, true);
             }
         }
         db
@@ -597,16 +790,16 @@ impl V2RoutingDb {
                 }
 
                 // Layer-affinity penalty: discourage routing on non-preferred layers
-                if config.layer_affinity_penalty > 0 {
-                    if let Some(tc) = net.traffic_class {
-                        let preferred = match tc {
-                            V2TrafficClass::Data => next.z <= 2,      // L0-L2
-                            V2TrafficClass::Control => next.z == 2,   // L2
-                            V2TrafficClass::LongRange => next.z == 3, // L3
-                        };
-                        if !preferred {
-                            step = step.saturating_add(config.layer_affinity_penalty);
-                        }
+                if config.layer_affinity_penalty > 0
+                    && let Some(tc) = net.traffic_class
+                {
+                    let preferred = match tc {
+                        V2TrafficClass::Data => next.z <= 2,      // L0-L2
+                        V2TrafficClass::Control => next.z == 2,   // L2
+                        V2TrafficClass::LongRange => next.z == 3, // L3
+                    };
+                    if !preferred {
+                        step = step.saturating_add(config.layer_affinity_penalty);
                     }
                 }
 
@@ -1595,7 +1788,7 @@ mod tests {
                 let goal_x = (i * 3) % 15;
                 let goal_y = if i < 3 { 0 } else { 15 };
                 V2RouteNet::new(
-                    &format!("fan_{i}"),
+                    format!("fan_{i}"),
                     V2RouteNetClass::Data,
                     shared_start,
                     V2RouteCoord::new(goal_x, goal_y, 2),
@@ -1637,7 +1830,7 @@ mod tests {
                 let goal_x = (i * 2) % 15;
                 let goal_y = if i < 4 { 0 } else { 15 };
                 V2RouteNet::new(
-                    &format!("fan_{i}"),
+                    format!("fan_{i}"),
                     V2RouteNetClass::Data,
                     shared_start,
                     V2RouteCoord::new(goal_x, goal_y, 2),

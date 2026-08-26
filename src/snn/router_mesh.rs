@@ -98,8 +98,7 @@ impl RouterMesh {
         for chunk in valid.chunks(batch_size) {
             let nets: Vec<V2RouteNet> = chunk
                 .iter()
-                .enumerate()
-                .map(|(_, &(src, dst))| {
+                .map(|&(src, dst)| {
                     let (sx, sy) = self.positions[&src];
                     let (dx, dy) = self.positions[&dst];
                     V2RouteNet::new(
@@ -209,7 +208,7 @@ impl RouterMesh {
     /// Tiles used by 3+ routes (contention hotspots).
     pub fn find_hotspots(&self, min_users: usize) -> Vec<((usize, usize), usize)> {
         let mut usage: HashMap<(usize, usize), usize> = HashMap::new();
-        for (_, (_, path)) in &self.routes {
+        for (_, path) in self.routes.values() {
             for &pos in path {
                 *usage.entry(pos).or_insert(0) += 1;
             }

@@ -420,6 +420,50 @@ impl<'c> PlacementEnv<'c> {
         total
     }
 
+    /// Per-net STA-derived timing criticalities, aligned with
+    /// [`hyperedges`](Self::hyperedges) (worst-slack net = 1.0, decaying with
+    /// slack, unconstrained = 0.0). Placement-invariant; precomputed once.
+    /// AF6c uses this to give the learned placer a criticality-aware feature.
+    pub fn net_criticalities(&self) -> &[f64] {
+        &self.net_crit
+    }
+
+    /// Congestion proxy: Σ over gates of (occupied 8-neighbor count)². Quadratic
+    /// so tight clumps dominate — an over-packed region scores much worse than
+    /// the same gates spread out. O(gates + slots), no routing; the AF7 term
+    /// that lets the SA objective resist the over-packing an aggressive timing
+    /// weight causes (the mul4 unroutability failure mode).
+    pub fn congestion_cost(&self) -> f64 {
+        let cols = self.canvas.cols;
+        let rows = self.canvas.rows;
+        let mut occupied = vec![false; self.canvas.num_slots()];
+        for &s in &self.slot_of_gate {
+            occupied[s] = true;
+        }
+        let mut total = 0.0f64;
+        for &s in &self.slot_of_gate {
+            let (col, row) = (s % cols, s / cols);
+            let mut count = 0u32;
+            for dr in -1i64..=1 {
+                for dc in -1i64..=1 {
+                    if dr == 0 && dc == 0 {
+                        continue;
+                    }
+                    let nr = row as i64 + dr;
+                    let nc = col as i64 + dc;
+                    if nr < 0 || nc < 0 || nr >= rows as i64 || nc >= cols as i64 {
+                        continue;
+                    }
+                    if occupied[nr as usize * cols + nc as usize] {
+                        count += 1;
+                    }
+                }
+            }
+            total += (count * count) as f64;
+        }
+        total
+    }
+
     /// Route the current placement and score it. Lower cost is better;
     /// unroutable layouts pay the flat penalty.
     pub fn score(&self) -> PlacementScore {

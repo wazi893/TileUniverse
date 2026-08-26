@@ -433,7 +433,7 @@ impl ResourceEstimator {
                 }
                 Some(crate::mitigation::MitigationStrategy::Readout(cal)) => {
                     // REM corrects measurement errors - estimate based on measure_fidelity
-                    let measurement_error = 1.0 - profile.measure_fidelity as f64;
+                    let measurement_error = 1.0 - profile.measure_fidelity;
                     let correction_factor = 0.3; // 30% measurement error reduction
                     let improved =
                         (success_probability + measurement_error * correction_factor).min(1.0);
@@ -445,7 +445,7 @@ impl ResourceEstimator {
                 Some(crate::mitigation::MitigationStrategy::ZNEPlusReadout { zne, readout }) => {
                     // Combined: apply both improvements
                     let error_rate = 1.0 - success_probability;
-                    let measurement_error = 1.0 - profile.measure_fidelity as f64;
+                    let measurement_error = 1.0 - profile.measure_fidelity;
                     let zne_improvement = error_rate * 0.4;
                     let rem_improvement = measurement_error * 0.3;
                     let improved =

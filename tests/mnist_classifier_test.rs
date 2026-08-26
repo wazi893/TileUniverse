@@ -48,7 +48,7 @@ fn test_dvs_mnist_config() {
     assert_eq!(config.hidden_layers, vec![128]);
     assert_eq!(config.n_outputs, 10);
     assert_eq!(config.connection_prob, 0.7);
-    assert_eq!(config.recurrent, false);
+    assert!(!config.recurrent);
     assert_eq!(config.neuron_config.threshold, 200);
     assert_eq!(config.neuron_config.leak, 245);
 }

@@ -149,7 +149,7 @@ fn build_network(seed: u64) -> SNNNetwork {
     let npcu = net.config.neurons_per_cpu;
     for i in out_start..out_end {
         let cpu = net.topology.neuron_to_cpu[i];
-        let local = net.topology.local_index(i, npcu) as usize;
+        let local = net.topology.local_index(i, npcu);
         net.populations[cpu].neurons[local].threshold = 1000;
     }
 
@@ -210,14 +210,14 @@ fn run_trial_wta_tracked(net: &mut SNNNetwork, rates: &[u8], ticks: u32) -> (usi
             for i in 0..n_out {
                 let nidx = out_start + i;
                 let cpu = net.topology.neuron_to_cpu[nidx];
-                let local = net.topology.local_index(nidx, npcu) as usize;
+                let local = net.topology.local_index(nidx, npcu);
                 if net.populations[cpu].neurons[local].spiked == 1 {
                     winner = Some(i);
                     for j in 0..n_out {
                         if j != i {
                             let jidx = out_start + j;
                             let jcpu = net.topology.neuron_to_cpu[jidx];
-                            let jlocal = net.topology.local_index(jidx, npcu) as usize;
+                            let jlocal = net.topology.local_index(jidx, npcu);
                             net.populations[jcpu].neurons[jlocal].v_mem = -128;
                             net.populations[jcpu].neurons[jlocal].refractory = 200;
                         }
@@ -299,8 +299,8 @@ fn apply_homeostasis(net: &mut SNNNetwork, wta_wins: &[u32; 10], n_samples: usiz
     for i in 0..n_out {
         let nidx = out_start + i;
         let cpu = net.topology.neuron_to_cpu[nidx];
-        let local = net.topology.local_index(nidx, npcu) as usize;
-        let t = net.populations[cpu].neurons[local].threshold as i16;
+        let local = net.topology.local_index(nidx, npcu);
+        let t = net.populations[cpu].neurons[local].threshold;
         let new_t = if wta_wins[i] > target * 2 {
             (t + homeo_lr).min(5000) // over-firing: raise threshold
         } else if wta_wins[i] == 0 {
@@ -308,7 +308,7 @@ fn apply_homeostasis(net: &mut SNNNetwork, wta_wins: &[u32; 10], n_samples: usiz
         } else {
             t
         };
-        net.populations[cpu].neurons[local].threshold = new_t as i16;
+        net.populations[cpu].neurons[local].threshold = new_t;
     }
 }
 

@@ -1,7 +1,8 @@
 # RTX 5090 Benchmark Results
 
-**Date:** January 2026
+**Date:** January 2026; live confirmation refresh 2026-07-03
 **GPU:** NVIDIA GeForce RTX 5090 (32GB VRAM, Blackwell SM120)
+**Current sweep:** `benchmarks/results/FELLOWSHIP_BENCH_CONFIRMATION_2026-07-03.md`
 
 ## Verified Benchmarks
 
@@ -11,17 +12,18 @@ Benchmark: `cargo run --example rtx5090_benchmark --features cuda,perf-bench --r
 
 | Qubits | VRAM Used | TCOPS (PureMMA) | Notes |
 |--------|-----------|-----------------|-------|
-| 12 | 32 MB | 14.61 | |
-| 16 | 128 MB | 15.54 | |
-| 20 | 512 MB | 15.76 | |
-| 24 | 2.0 GB | **15.80** | Peak |
-| 26 | 4.0 GB | 15.74 | |
-| 28 | 4.0 GB | 15.78 | |
-| 30 | 8.0 GB | 15.74 | |
-| 31 | 16.0 GB | 15.64 | |
-| 32 | 32.0 GB | 15.38 | Maximum qubits |
+| 12 | 32 MB | 12.27 | |
+| 16 | 128 MB | 13.00 | |
+| 20 | 512 MB | 13.00 | |
+| 24 | 2.0 GB | 13.12 | Prior January peak was 15.80 |
+| 26 | 4.0 GB | **13.13** | Current peak |
+| 28 | 4.0 GB | 13.07 | |
+| 30 | 8.0 GB | 13.07 | |
+| 31 | 16.0 GB | 12.98 | |
+| 32 | 32.0 GB | 12.84 | Maximum qubits |
 
-**Peak Performance:** 15.8 TCOPS at 24 qubits
+**Peak Performance:** 13.13 TCOPS at 26 qubits in the 2026-07-03 sweep. The old 15.8 TCOPS
+headline drifted down and should be treated as a January snapshot, not a current quote.
 
 ### Cellular Substrate (Depth-Batched CUDA)
 
@@ -41,7 +43,7 @@ Benchmark: `cargo run --bin bench_engine --features cuda,perf-bench --release --
 
 | Substrate | RTX 4070 | RTX 5090 | Improvement |
 |-----------|----------|----------|-------------|
-| Quantum | 2.5 TCOPS | 15.8 TCOPS | **6.3×** |
+| Quantum | 2.5 TCOPS | 13.13 TCOPS | **5.3×** |
 | Cellular | 40B evals/sec | 200B evals/sec | **5×** |
 
 ## Hardware Specifications
@@ -66,6 +68,14 @@ The visualizer configuration:
 
 ### Tensor Core Utilization
 
+Current 2026-07-03 sweep:
+- PureMMA peak: 13.13 TCOPS at 26 qubits
+- Each amplitude op is approximately 8 FP16 ops (complex multiply-accumulate)
+- Effective FLOPS: approximately 105 TFLOPS
+- Estimated Tensor Core utilization: approximately 12.1% of the rough 870 TFLOPS peak below
+
+January snapshot retained for comparison:
+
 RTX 5090 theoretical peak (FP16 Tensor):
 - 680 Tensor Cores × 512 FP16 ops/cycle × ~2.5 GHz = ~870 TFLOPS
 
@@ -77,6 +87,9 @@ PureMMA kernel measured:
 **Estimated Tensor Core Utilization: ~14.5%**
 
 ### Memory Bandwidth Utilization
+
+The 2026-07-03 sweep did not include an Nsight/NCU memory profile. Use the measured TCOPS table
+above as the evidence; the arithmetic below is a January snapshot, not a fresh profiler result.
 
 RTX 5090 memory bandwidth: ~1.8 TB/s
 

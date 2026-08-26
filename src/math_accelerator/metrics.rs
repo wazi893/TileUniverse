@@ -357,7 +357,7 @@ pub fn is_non_clifford_gate(gate: &QGate) -> bool {
 /// assert!(!is_clifford_circuit(&non_clifford));
 /// ```
 pub fn is_clifford_circuit(circuit: &[QGate]) -> bool {
-    !circuit.iter().any(|g| is_non_clifford_gate(g))
+    !circuit.iter().any(is_non_clifford_gate)
 }
 
 #[cfg(test)]
@@ -440,7 +440,7 @@ mod tests {
     #[test]
     fn test_sparsity_prediction_dense() {
         // Many H gates: should be dense
-        let many_h: Vec<QGate> = (0..12).map(|i| QGate::H(i)).collect();
+        let many_h: Vec<QGate> = (0..12).map(QGate::H).collect();
         assert_eq!(predict_sparsity(&many_h, 12), SparsityPrediction::Dense);
     }
 

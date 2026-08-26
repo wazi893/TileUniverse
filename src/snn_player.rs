@@ -68,7 +68,7 @@ pub fn default_configs() -> Vec<SnnConfig> {
     ]
 }
 
-fn neuron_ref<'a>(net: &'a SNNNetwork, g: usize) -> &'a crate::snn::LIFNeuron {
+fn neuron_ref(net: &SNNNetwork, g: usize) -> &crate::snn::LIFNeuron {
     let cpu = net.topology.neuron_to_cpu[g];
     let (start, _) = net.topology.cpu_to_neurons[cpu];
     &net.populations[cpu].neurons[g - start]
@@ -86,7 +86,7 @@ fn capture(cfg: &SnnConfig) -> SnnDataset {
     let layers = net.topology.layers.clone();
 
     // Layered positions.
-    let max_size = layers.iter().map(|&(_, s, e)| e - s).max().unwrap_or(1) as f64;
+    let _max_size = layers.iter().map(|&(_, s, e)| e - s).max().unwrap_or(1) as f64;
     let mut neurons = vec![(0.0, 0.0, 0usize); n];
     for &(id, s, e) in &layers {
         let size = (e - s) as f64;
@@ -188,10 +188,10 @@ pub fn build_snn_html(configs: &[SnnConfig]) -> Result<String, String> {
 pub fn export_default_snn_player(path: impl AsRef<Path>) -> Result<(), String> {
     let html = build_snn_html(&default_configs())?;
     let path = path.as_ref();
-    if let Some(parent) = path.parent() {
-        if !parent.as_os_str().is_empty() {
-            create_dir_all(parent).map_err(|e: io::Error| e.to_string())?;
-        }
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        create_dir_all(parent).map_err(|e: io::Error| e.to_string())?;
     }
     write(path, html).map_err(|e: io::Error| e.to_string())
 }

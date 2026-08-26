@@ -219,8 +219,8 @@ fn estimate_sliced_peak(
 }
 
 /// Find the step with the current peak after slicing.
-fn find_current_peak_step<'a>(
-    step_info: &'a [(usize, Tensor, Tensor, Vec<TensorIndex>)],
+fn find_current_peak_step(
+    step_info: &[(usize, Tensor, Tensor, Vec<TensorIndex>)],
     sliced_ids: &HashSet<u32>,
     open_ids: &HashSet<u32>,
 ) -> Option<(usize, Tensor, Tensor, Vec<TensorIndex>)> {
@@ -325,10 +325,8 @@ fn find_best_slice_index_excluding(
             }
         }
         for idx in &tensor_b.indices {
-            if !contracted_ids.contains(&idx.id) {
-                if !result_indices.iter().any(|i| i.id == idx.id) {
-                    result_indices.push(*idx);
-                }
+            if !contracted_ids.contains(&idx.id) && !result_indices.iter().any(|i| i.id == idx.id) {
+                result_indices.push(*idx);
             }
         }
 
@@ -1096,29 +1094,30 @@ mod tests {
 
         // Set a reasonable budget (half of original peak)
         let budget = original_peak / 2;
-        if budget > 0 && original_peak > 1 {
-            if let Some(sliced_path) = plan_slicing(&capped, &path, budget) {
-                // Estimated peak should not exceed original
-                assert!(
-                    sliced_path.estimated_peak <= original_peak,
-                    "Estimated peak {} should not exceed original {}",
-                    sliced_path.estimated_peak,
-                    original_peak
-                );
+        if budget > 0
+            && original_peak > 1
+            && let Some(sliced_path) = plan_slicing(&capped, &path, budget)
+        {
+            // Estimated peak should not exceed original
+            assert!(
+                sliced_path.estimated_peak <= original_peak,
+                "Estimated peak {} should not exceed original {}",
+                sliced_path.estimated_peak,
+                original_peak
+            );
 
-                // Should have at least one slice
-                assert!(
-                    !sliced_path.slices.is_empty(),
-                    "Sliced path should have slices"
-                );
+            // Should have at least one slice
+            assert!(
+                !sliced_path.slices.is_empty(),
+                "Sliced path should have slices"
+            );
 
-                // All slices should be Sum mode for fully contracted network
-                for slice in &sliced_path.slices {
-                    assert!(
-                        matches!(slice.mode, SliceMode::Sum),
-                        "Fully contracted network should only have Sum mode slices"
-                    );
-                }
+            // All slices should be Sum mode for fully contracted network
+            for slice in &sliced_path.slices {
+                assert!(
+                    matches!(slice.mode, SliceMode::Sum),
+                    "Fully contracted network should only have Sum mode slices"
+                );
             }
         }
     }

@@ -239,7 +239,7 @@ impl TileCpuBuilder {
             let reg_x = ox + 4 + reg * 4;
             let reg_y = oy + 4;
             sim.set_tile(reg_x, reg_y, TileType::RegEnable);
-            sim.set_logic_value(reg_x, reg_y, self.initial_regs[reg] as u64);
+            sim.set_logic_value(reg_x, reg_y, self.initial_regs[reg]);
             reg_indices[reg] = reg_y * grid_width + reg_x;
             tile_count += 1;
         }
@@ -359,8 +359,8 @@ pub struct CpuLayoutDimensions {
 impl TileCpuBuilder {
     /// Calculate layout dimensions before building
     pub fn layout_dimensions(&self) -> CpuLayoutDimensions {
-        let rom_rows = (self.rom_size + 7) / 8;
-        let ram_rows = (self.ram_size + 7) / 8;
+        let rom_rows = self.rom_size.div_ceil(8);
+        let ram_rows = self.ram_size.div_ceil(8);
 
         CpuLayoutDimensions {
             width: 64, // Wide for pure-tile datapath with registers at col 32+

@@ -425,7 +425,7 @@ mod tests {
         let problem = OneMax::new(64);
         let candidate = Candidate::new(0x5555_5555_5555_5555); // 32 ones
         let fitness = problem.evaluate(&candidate);
-        assert!(fitness >= 125 && fitness <= 130, "Got {}", fitness);
+        assert!((125..=130).contains(&fitness), "Got {}", fitness);
     }
 
     #[test]
@@ -436,7 +436,7 @@ mod tests {
 
         let candidate = Candidate::new(0b0000_1111);
         let fitness = problem.evaluate(&candidate);
-        assert!(fitness >= 125 && fitness <= 130, "Got {}", fitness);
+        assert!((125..=130).contains(&fitness), "Got {}", fitness);
     }
 
     #[test]

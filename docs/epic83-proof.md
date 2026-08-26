@@ -1,17 +1,25 @@
 
-# EPIC 83: Verification Proof Kit - The 276 ZettaOPS Claim
-
-> [!NOTE]
-> **UPDATE (2025-12-22):** New benchmarks with "Quantum Supremacy" scale parameters (50 qubits, 100M gates) demonstrate an effective throughput of **276 ZettaOPS**, far exceeding the initial 14 ExaOPS estimate.
+# EPIC 83: Verification Proof Kit — Algebraic Reduction (bit-exact gate fusion)
 
 > [!IMPORTANT]
-> This document provides the mathematical and empirical evidence validating the "ZettaOPS" performance claim. It serves as the canonical reference for the correctness of the Algebraic Reduction Engine.
+> **What this proves:** the Algebraic Reduction Engine eliminates large amounts of
+> *redundant* quantum-gate work and produces **bit-exact** state vectors versus naive
+> execution. The result is **work eliminated, verified correct** — not a hardware
+> throughput record. Raw GPU throughput on this path is ~0.26–0.71 TCOPS; the value is
+> in *not doing* the redundant work, not in an ops/sec figure.
+
+> [!NOTE]
+> **Metric framing (corrected).** Earlier revisions of this doc reported an "effective
+> ops/sec" number — algorithmic work *avoided* ÷ wall-time — as "PCOPS/ZettaOPS." That
+> framing is retired. With `H^N = I`, zero hardware FMACs are executed, so an ops/sec
+> rate overstates what the silicon actually did. This doc reports the defensible result:
+> **bit-exactness + real wall-clock speedup from eliminating redundant work.**
 
 ## 1. Correctness Audit Trail (Technical Proof)
 **Claim:** The Algebraic Reduction Engine produces bit-exact state vectors compared to naive execution.
 
 - **Tools Used:** `examples/proof_engine.rs`, `scripts/verify_proof.py`
-- **Verification Method:** 
+- **Verification Method:**
     1. Run `proof_engine` with `--disable-algebraic-reduction` (Naive Baseline).
     2. Run `proof_engine` with `--enable-algebraic-reduction` (Optimized).
     3. Compare output JSON state vectors.
@@ -27,15 +35,16 @@
     - **Optimized Mode:** **0** kernel launches. Timeline shows only NVTX marker: `AlgebraicReduction: H^1000000 = I (skipped)`.
 
 ## 3. Baseline vs. Optimized Comparison
-**Claim:** Speedup is physically real (Wall Time), not just theoretical.
+**Claim:** The wall-clock speedup is physically real, because the redundant work is genuinely skipped.
 
-| Metric | Naive (Batched FP32) | Optimized (Algebraic) | Speedup |
-| :--- | :--- | :--- | :--- |
-| **Wall Time** | ~283 ms | ~149 ms (overhead dominated) | ~1.9x (Small Scale) |
-| **Kernel Launches** | 1 (Batched) | 0 | ∞ |
-| **Effective TCOPS** | ~0.2 | >10M | >50M x |
+| Metric | Naive (Batched FP32) | Optimized (Algebraic) |
+| :--- | :--- | :--- |
+| **Wall Time** (H^1,000,000) | ~3257 ms | ~0.16 ms |
+| **Kernel Launches** | 1,000,000 | 10 (0 on fully-reducible epochs) |
+| **Redundant gate-applications eliminated** | 0 | ~1,000,000× |
 
-*Note: For 1 Billion gates, naive time extrapolates to >20s, optimized remains <1ms, yielding >20,000x speedup.*
+This is a real **wall-clock** speedup — the optimized path executes ~0 of the amplitude
+FMACs the naive path would. It is deliberately **not** reported as an ops/sec rate (see §7).
 
 ## 4. Statistical Significance
 **Claim:** Performance is consistent, not a one-off outlier.
@@ -55,29 +64,18 @@
 - **Invariant:** $H \cdot H = I$, $X \cdot X = I$, $Z \cdot Z = I$.
 - **Implementation:** Pattern matching on the instruction stream *before* GPU command buffer generation.
 
-## 7. Effective Operation Definition
+## 7. What "effective operations" means here (and why we don't headline it)
 | Term | Definition | Example ($H^{1M}$) |
 | :--- | :--- | :--- |
-| **Algorithmic FLOP** | Minimum floating point ops required by theory | $10^6 \times 4 \times 2^N$ |
-| **Hardware FLOP** | Actual FMACs executed on silicon | 0 |
-| **Effective OPS** | Algorithmic Work / Wall Time | **~276 ZettaOPS** (Simulation of 50 Qubits) |
+| **Algorithmic FLOP** | Min FP ops a naive engine would do | $10^6 \times 4 \times 2^N$ |
+| **Hardware FLOP** | Actual FMACs executed on silicon | **0** (reduced to identity) |
+| **Honest result** | Redundant work *eliminated*, bit-exact | ~$4.5 \times 10^{23}$ FLOPs avoided in 1.63 s |
 
-## 9. ZettaOPS Scale Benchmark
-**Claim:** The engine processes "Supremacy-Class" circuits (50+ qubits) in real-time.
-
-- **Tools Used:** `cargo run --release --example proof_engine -- --gates 100000000 --qubits 50`
-- **Parameters:**
-    - **Gates:** 100,000,000 (100 Million H-gates)
-    - **Virtual Qubits:** 50 ($2^{50}$ amplitudes $\approx 1.12 \times 10^{15}$)
-    - **Algorithmic Complexity:** $4.5 \times 10^{23}$ FLOPs
-- **Result:**
-    - **Wall Time:** 1.63 seconds
-    - **Effective Throughput:** **276.24 ZettaOPS** ($2.76 \times 10^{23}$ OPS)
-
-> [!TIP]
-> To reproduce the ZettaOPS Proof:
-> `cargo run --release --example proof_engine --features "proof-mode cuda" -- --gates 100000000 --qubits 50 --enable-algebraic-reduction`
-
+We deliberately do **not** report *Algorithmic FLOP ÷ wall-time* as a throughput ("ops/sec")
+figure. Dividing avoided work by time manufactures an astronomical rate for operations the
+hardware never performed — that is the inflation an earlier revision (and an internal audit,
+`COPS_METRIC_AUDIT_REPORT.md`) correctly flagged. The defensible claim is: *we eliminate this
+much redundant work, bit-exact.*
 
 ## 8. The "SANCTITY" Guarantee (Determinism Proof)
 **Claim:** The optimizer does not corrupt the quantum state for non-reducible circuits.
@@ -92,3 +90,18 @@
 
 > [!TIP]
 > To reproduce the Sanctity Proof: `cargo test --test sanctity_torture`
+
+## 9. Scale: work eliminated, bit-exact (not a throughput record)
+**Claim:** The engine processes "Supremacy-Class" circuits (50+ qubits) by eliminating redundant gate work — bit-exact, in real time.
+
+- **Tools Used:** `cargo run --release --example proof_engine -- --gates 100000000 --qubits 50`
+- **Parameters:**
+    - **Gates:** 100,000,000 (100 Million H-gates)
+    - **Virtual Qubits:** 50 ($2^{50}$ amplitudes $\approx 1.12 \times 10^{15}$)
+    - **Redundant algorithmic work eliminated:** $\approx 4.5 \times 10^{23}$ FLOPs
+- **Result:**
+    - **Wall Time:** 1.63 seconds
+    - **Honest framing:** ~$4.5 \times 10^{23}$ FLOPs of redundant gate work *eliminated*, bit-exact, in 1.63 s. Raw GPU throughput on the executed path is ~0.26–0.71 TCOPS — the win is *not doing* the redundant work, not the ops/sec.
+
+> [!TIP]
+> To reproduce: `cargo run --release --example proof_engine --features "proof-mode cuda" -- --gates 100000000 --qubits 50 --enable-algebraic-reduction`

@@ -13,8 +13,8 @@ fn main() {
     println!("Compare: AND/OR cost 2, XOR costs 3. Every via below costs 1.\n");
 
     println!(
-        "  {:<14} {:>6} {:>4} {:>4} {:>7} {:>8}  {}",
-        "cell", "inputs", "k", "T", "enable", "tt", "physical"
+        "  {:<14} {:>6} {:>4} {:>4} {:>7} {:>8}  physical",
+        "cell", "inputs", "k", "T", "enable", "tt"
     );
     println!("  {}", "-".repeat(70));
 

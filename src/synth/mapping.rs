@@ -183,13 +183,13 @@ pub fn map_to_library(aig: &Aig, lib: &CellLibrary, config: &MapConfig) -> Mappe
 
             if cut.num_leaves == 0 {
                 // Constant cut — delay = 0
-                if let Some(cell) = lib.best_cell_for(cut.truth_table, 0) {
-                    if 0.0 < best_arrival {
-                        best_arrival = 0.0;
-                        best_cut_idx = Some(cut_idx);
-                        best_cell = Some(cell);
-                        best_inverted = false;
-                    }
+                if let Some(cell) = lib.best_cell_for(cut.truth_table, 0)
+                    && 0.0 < best_arrival
+                {
+                    best_arrival = 0.0;
+                    best_cut_idx = Some(cut_idx);
+                    best_cell = Some(cell);
+                    best_inverted = false;
                 }
                 continue;
             }

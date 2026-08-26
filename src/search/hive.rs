@@ -56,21 +56,21 @@ impl HiveConfig {
 
     /// Set influence strength
     pub fn with_influence(mut self, influence: f32) -> Self {
-        assert!(influence >= 0.0 && influence <= 1.0);
+        assert!((0.0..=1.0).contains(&influence));
         self.influence = influence;
         self
     }
 
     /// Set momentum
     pub fn with_momentum(mut self, momentum: f32) -> Self {
-        assert!(momentum >= 0.0 && momentum <= 1.0);
+        assert!((0.0..=1.0).contains(&momentum));
         self.momentum = momentum;
         self
     }
 
     /// Set local search rate
     pub fn with_local_search(mut self, rate: f32, bits: usize) -> Self {
-        assert!(rate >= 0.0 && rate <= 1.0);
+        assert!((0.0..=1.0).contains(&rate));
         self.local_search_rate = rate;
         self.local_search_bits = bits;
         self
@@ -634,7 +634,7 @@ mod tests {
         let mesh = HiveMesh::new(HiveConfig::with_dimensions(10, 10).with_influence(0.5));
 
         let mut rng = Xorshift64::new(123);
-        let original = substrate.get(50).clone();
+        let original = *substrate.get(50);
         // Influenced candidate may or may not be different depending on gradients;
         // just verify the call completes without panicking
         let _influenced = mesh.apply_influence(50, &original, &substrate, &mut rng);

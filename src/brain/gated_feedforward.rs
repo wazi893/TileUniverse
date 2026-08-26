@@ -339,7 +339,7 @@ mod tests {
 
         // Output should be in [-1, 1] due to tanh
         for &v in &output {
-            assert!(v >= -1.0 && v <= 1.0);
+            assert!((-1.0..=1.0).contains(&v));
         }
     }
 

@@ -25,7 +25,7 @@
 use crate::experiments::noise_model::NoiseConfig;
 
 /// Extrapolation method for ZNE
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum ExtrapolationMethod {
     /// Linear least-squares fit: E(λ) = a + b·λ
     ///
@@ -37,6 +37,7 @@ pub enum ExtrapolationMethod {
     ///
     /// Two-point formula, exact for affine functions.
     /// Uses first two noise levels only.
+    #[default]
     Richardson,
 
     /// Polynomial fit of degree N
@@ -48,12 +49,6 @@ pub enum ExtrapolationMethod {
 
     /// Exponential fit: E(λ) = a + b·exp(-c·λ) (not yet implemented)
     Exponential,
-}
-
-impl Default for ExtrapolationMethod {
-    fn default() -> Self {
-        ExtrapolationMethod::Richardson
-    }
 }
 
 /// ZNE configuration
@@ -596,9 +591,8 @@ fn extrapolate_linear(noise_factors: &[f64], values: &[f64]) -> f64 {
     }
 
     let b = (n * sum_xy - sum_x * sum_y) / denominator;
-    let a = (sum_y - b * sum_x) / n;
 
-    a // Return intercept (value at λ=0)
+    (sum_y - b * sum_x) / n // Return intercept (value at λ=0)
 }
 
 /// Richardson extrapolation: E(0) = (λ₂·E₁ - λ₁·E₂)/(λ₂-λ₁)
@@ -635,7 +629,7 @@ fn extrapolate_polynomial(noise_factors: &[f64], values: &[f64], degree: u8) -> 
     let n = noise_factors.len();
 
     assert!(
-        n >= degree + 1,
+        n > degree,
         "Polynomial of degree {} requires at least {} points",
         degree,
         degree + 1
@@ -1590,8 +1584,8 @@ mod tests {
             extrapolation: ExtrapolationMethod::Linear,
         };
 
-        let result_parallel = apply_zne_parallel(&cost_fn, &params, &base_noise, &config);
-        let result_sequential = apply_zne_sequential(&cost_fn, &params, &base_noise, &config);
+        let result_parallel = apply_zne_parallel(cost_fn, &params, &base_noise, &config);
+        let result_sequential = apply_zne_sequential(cost_fn, &params, &base_noise, &config);
 
         // Noisy values should be identical
         for (i, (&p, &s)) in result_parallel

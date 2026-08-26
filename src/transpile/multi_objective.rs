@@ -355,28 +355,28 @@ impl Constraints {
 
     /// Check if point satisfies all constraints
     pub fn satisfied_by(&self, point: &ParetoPoint) -> bool {
-        if let Some(max_error) = self.max_error {
-            if point.error > max_error {
-                return false;
-            }
+        if let Some(max_error) = self.max_error
+            && point.error > max_error
+        {
+            return false;
         }
 
-        if let Some(max_latency) = self.max_latency {
-            if point.latency > max_latency {
-                return false;
-            }
+        if let Some(max_latency) = self.max_latency
+            && point.latency > max_latency
+        {
+            return false;
         }
 
-        if let Some(max_qubits) = self.max_qubits {
-            if point.qubits > max_qubits {
-                return false;
-            }
+        if let Some(max_qubits) = self.max_qubits
+            && point.qubits > max_qubits
+        {
+            return false;
         }
 
-        if let Some(max_cost) = self.max_cost {
-            if point.cost > max_cost {
-                return false;
-            }
+        if let Some(max_cost) = self.max_cost
+            && point.cost > max_cost
+        {
+            return false;
         }
 
         true

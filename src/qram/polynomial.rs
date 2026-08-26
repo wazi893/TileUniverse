@@ -166,14 +166,14 @@ impl CliffordTSynthesizer {
         // Step 1: Extract whole Z gates (π rotations)
         let z_count = (angle / PI).floor() as i32;
         angle -= z_count as f32 * PI;
-        for _ in 0..(z_count.abs() as usize) {
+        for _ in 0..(z_count.unsigned_abs() as usize) {
             gates.push(QGate::Z(qubit));
         }
 
         // Step 2: Extract S gates (π/2 rotations)
         let s_count = (angle / (PI / 2.0)).floor() as i32;
         angle -= s_count as f32 * (PI / 2.0);
-        for _ in 0..(s_count.abs() as usize) {
+        for _ in 0..(s_count.unsigned_abs() as usize) {
             // S = Phase(π/2) = T²
             gates.push(QGate::Phase(qubit, PI / 2.0));
         }
@@ -181,7 +181,7 @@ impl CliffordTSynthesizer {
         // Step 3: Extract T gates (π/4 rotations)
         let t_full = (angle / (PI / 4.0)).floor() as i32;
         angle -= t_full as f32 * (PI / 4.0);
-        for _ in 0..(t_full.abs() as usize) {
+        for _ in 0..(t_full.unsigned_abs() as usize) {
             if t_full > 0 {
                 gates.push(QGate::T(qubit));
             } else {

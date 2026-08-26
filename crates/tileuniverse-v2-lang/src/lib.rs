@@ -185,3 +185,142 @@ pub fn eq(a: Expr, b: Expr) -> Cond {
 pub fn ne(a: Expr, b: Expr) -> Cond {
     Cond::Cmp(CmpOp::Ne, a, b)
 }
+
+// ===================================================================
+// Tests — pin the public AST contract that `synth` (HLS) consumes.
+// This leaf crate has no codegen, so these are pure structural checks:
+// the builders lower to the expected variants and `Program`'s
+// constructors set the documented defaults.
+// ===================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_value_builders_lower_to_expected_variants() {
+        assert_eq!(int(42), Expr::Int(42));
+        assert_eq!(var("x"), Expr::Var("x".to_string()));
+        assert_eq!(
+            add(int(1), int(2)),
+            Expr::Bin(ArithOp::Add, Box::new(Expr::Int(1)), Box::new(Expr::Int(2)))
+        );
+        assert_eq!(
+            sub(int(3), int(1)),
+            Expr::Bin(ArithOp::Sub, Box::new(Expr::Int(3)), Box::new(Expr::Int(1)))
+        );
+        assert_eq!(
+            mul(var("a"), int(4)),
+            Expr::Bin(
+                ArithOp::Mul,
+                Box::new(Expr::Var("a".to_string())),
+                Box::new(Expr::Int(4))
+            )
+        );
+        assert_eq!(
+            band(int(6), int(3)),
+            Expr::Bin(ArithOp::And, Box::new(Expr::Int(6)), Box::new(Expr::Int(3)))
+        );
+        assert_eq!(
+            bor(int(6), int(3)),
+            Expr::Bin(ArithOp::Or, Box::new(Expr::Int(6)), Box::new(Expr::Int(3)))
+        );
+        assert_eq!(
+            bxor(int(6), int(3)),
+            Expr::Bin(ArithOp::Xor, Box::new(Expr::Int(6)), Box::new(Expr::Int(3)))
+        );
+    }
+
+    #[test]
+    fn test_call_builder_preserves_name_and_args() {
+        assert_eq!(
+            call("f", vec![int(1), var("n")]),
+            Expr::Call(
+                "f".to_string(),
+                vec![Expr::Int(1), Expr::Var("n".to_string())]
+            )
+        );
+        // A zero-arg call still lowers to an empty argument vector.
+        assert_eq!(call("g", vec![]), Expr::Call("g".to_string(), Vec::new()));
+    }
+
+    #[test]
+    fn test_cond_builders_lower_to_expected_cmp_ops() {
+        let a = || int(1);
+        let b = || int(2);
+        assert_eq!(lt(a(), b()), Cond::Cmp(CmpOp::Lt, int(1), int(2)));
+        assert_eq!(le(a(), b()), Cond::Cmp(CmpOp::Le, int(1), int(2)));
+        assert_eq!(gt(a(), b()), Cond::Cmp(CmpOp::Gt, int(1), int(2)));
+        assert_eq!(ge(a(), b()), Cond::Cmp(CmpOp::Ge, int(1), int(2)));
+        assert_eq!(eq(a(), b()), Cond::Cmp(CmpOp::Eq, int(1), int(2)));
+        assert_eq!(ne(a(), b()), Cond::Cmp(CmpOp::Ne, int(1), int(2)));
+    }
+
+    #[test]
+    fn test_program_new_defaults() {
+        let f = Func {
+            name: "main".to_string(),
+            params: Vec::new(),
+            body: vec![Stmt::Return(int(0))],
+        };
+        let p = Program::new("main", vec![f.clone()]);
+        assert_eq!(p.entry, "main");
+        assert_eq!(p.stack_top, 120);
+        assert!(p.globals.is_empty());
+        assert!(p.accel_funcs.is_empty());
+        assert_eq!(p.funcs, vec![f]);
+    }
+
+    #[test]
+    fn test_program_with_globals_sets_globals_and_keeps_defaults() {
+        let g = GlobalArray {
+            name: "buf".to_string(),
+            len: 4,
+            init: vec![1, 2],
+        };
+        let f = Func {
+            name: "main".to_string(),
+            params: vec!["n".to_string()],
+            body: vec![Stmt::Return(var("n"))],
+        };
+        let p = Program::with_globals("main", vec![g.clone()], vec![f]);
+        assert_eq!(p.globals, vec![g]);
+        assert_eq!(p.entry, "main");
+        assert_eq!(p.stack_top, 120);
+        assert!(p.accel_funcs.is_empty());
+    }
+
+    #[test]
+    fn test_statement_variants_and_clone_equality() {
+        // Exercise each Stmt variant and confirm Clone yields an equal value,
+        // which is the contract downstream passes rely on when copying ASTs.
+        let stmts = vec![
+            Stmt::Let("x".to_string(), int(1)),
+            Stmt::Assign("x".to_string(), add(var("x"), int(1))),
+            Stmt::If(
+                lt(var("x"), int(10)),
+                vec![Stmt::Return(var("x"))],
+                Vec::new(),
+            ),
+            Stmt::While(
+                gt(var("x"), int(0)),
+                vec![Stmt::Assign("x".to_string(), sub(var("x"), int(1)))],
+            ),
+            Stmt::Expr(call("side_effect", vec![])),
+            Stmt::StoreIndex("buf".to_string(), int(0), int(7)),
+            Stmt::Return(int(0)),
+        ];
+        assert_eq!(stmts.clone(), stmts);
+        // Index reads round-trip through the Expr::Index variant.
+        assert_eq!(
+            Expr::Index("buf".to_string(), Box::new(int(2))),
+            Expr::Index("buf".to_string(), Box::new(Expr::Int(2)))
+        );
+    }
+
+    #[test]
+    fn test_compile_error_display() {
+        let err = CompileError("unknown symbol `foo`".to_string());
+        assert_eq!(err.to_string(), "compile error: unknown symbol `foo`");
+    }
+}
